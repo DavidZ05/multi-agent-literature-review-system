@@ -1,0 +1,13 @@
+{
+  "agent": "Review Synthesizer Agent",
+  "backend": "deterministic-fallback",
+  "status": "accepted",
+  "blocking_agents": [],
+  "must_fix": [],
+  "should_fix": [
+    "Citation Auditor Agent: No blocking citation or structure issues found.",
+    "Domain Expert Agent: Coverage is adequate for the selected course-project scope.",
+    "Structure Mentor Agent: Structure is suitable for submission."
+  ],
+  "iteration_stop_rule": "Stop when synthesized status is accepted or max_revision_loops is reached."
+}

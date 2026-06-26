@@ -1,0 +1,113 @@
+{
+  "backend": "deterministic",
+  "api_mode": "single",
+  "api_base_url": "",
+  "api_key": "",
+  "model": "",
+  "temperature": 0.2,
+  "timeout_seconds": 60,
+  "agent_overrides": {},
+  "api_enabled": false,
+  "active_backend": "deterministic",
+  "agent_settings": {
+    "search": {
+      "agent_id": "search",
+      "backend": "deterministic",
+      "api_base_url": "",
+      "api_key": "",
+      "model": "",
+      "temperature": 0.2,
+      "timeout_seconds": 60,
+      "api_enabled": false,
+      "active_backend": "deterministic"
+    },
+    "writer": {
+      "agent_id": "writer",
+      "backend": "deterministic",
+      "api_base_url": "",
+      "api_key": "",
+      "model": "",
+      "temperature": 0.2,
+      "timeout_seconds": 60,
+      "api_enabled": false,
+      "active_backend": "deterministic"
+    },
+    "reviewer": {
+      "agent_id": "reviewer",
+      "backend": "deterministic",
+      "api_base_url": "",
+      "api_key": "",
+      "model": "",
+      "temperature": 0.2,
+      "timeout_seconds": 60,
+      "api_enabled": false,
+      "active_backend": "deterministic"
+    },
+    "domain_expert": {
+      "agent_id": "domain_expert",
+      "backend": "deterministic",
+      "api_base_url": "",
+      "api_key": "",
+      "model": "",
+      "temperature": 0.2,
+      "timeout_seconds": 60,
+      "api_enabled": false,
+      "active_backend": "deterministic"
+    },
+    "structure_mentor": {
+      "agent_id": "structure_mentor",
+      "backend": "deterministic",
+      "api_base_url": "",
+      "api_key": "",
+      "model": "",
+      "temperature": 0.2,
+      "timeout_seconds": 60,
+      "api_enabled": false,
+      "active_backend": "deterministic"
+    },
+    "review_synthesizer": {
+      "agent_id": "review_synthesizer",
+      "backend": "deterministic",
+      "api_base_url": "",
+      "api_key": "",
+      "model": "",
+      "temperature": 0.2,
+      "timeout_seconds": 60,
+      "api_enabled": false,
+      "active_backend": "deterministic"
+    },
+    "polish": {
+      "agent_id": "polish",
+      "backend": "deterministic",
+      "api_base_url": "",
+      "api_key": "",
+      "model": "",
+      "temperature": 0.2,
+      "timeout_seconds": 60,
+      "api_enabled": false,
+      "active_backend": "deterministic"
+    },
+    "final_verification": {
+      "agent_id": "final_verification",
+      "backend": "deterministic",
+      "api_base_url": "",
+      "api_key": "",
+      "model": "",
+      "temperature": 0.2,
+      "timeout_seconds": 60,
+      "api_enabled": false,
+      "active_backend": "deterministic"
+    },
+    "evaluation_reflection": {
+      "agent_id": "evaluation_reflection",
+      "backend": "deterministic",
+      "api_base_url": "",
+      "api_key": "",
+      "model": "",
+      "temperature": 0.2,
+      "timeout_seconds": 60,
+      "api_enabled": false,
+      "active_backend": "deterministic"
+    }
+  }
+}

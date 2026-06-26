@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.env
+.DS_Store
+先修班-Final Project - 飞书云文档.pdf

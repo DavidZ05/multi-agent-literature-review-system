@@ -1,0 +1,12 @@
+{
+  "iterations": [
+    {
+      "iteration": 1,
+      "status": "accepted",
+      "unknown_citations": [],
+      "unsupported_claim_count": 0,
+      "missing_sections": [],
+      "blocking_agents": []
+    }
+  ]
+}
