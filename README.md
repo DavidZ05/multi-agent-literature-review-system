@@ -1,7 +1,5 @@
 # Multi-Agent Literature Review System
 
-Topic: **Memory-Augmented LLM Agents: Mechanisms, Evaluation, and Reliability in Multi-Agent Systems**
-
 This project implements a multi-agent literature review pipeline for the final assignment. It uses deterministic Python agents and a verified paper corpus to generate a survey while preventing hallucinated citations. The agent runtime also has a configurable API profile interface, but no API is required: without API settings, every agent runs through the local deterministic implementation.
 
 ## Final Assignment Deliverables

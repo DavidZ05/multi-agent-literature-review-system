@@ -214,3 +214,7 @@ Future versions could improve the system in five directions:
 5. Split `src/memory_review_pipeline.py` into smaller modules if the system grows, while keeping the current single-file implementation for course-project reproducibility.
 
 A more advanced version could also learn memory write/delete policies, but deterministic verification is safer for this course project. The current seed expansion is documented in `docs/seed_corpus_review.md`.
+
+## Repository
+
+GitHub repository: https://github.com/DavidZ05/multi-agent-literature-review-system
