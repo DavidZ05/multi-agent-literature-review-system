@@ -22,20 +22,39 @@ This project implements a multi-agent literature review pipeline for the final a
 
 ## Project Structure
 
-- `data/papers.json`: verified literature corpus with citation keys and source URLs.
-- `.env.example`: optional runtime configuration for future API-backed agents.
-- `prompts/`: role prompts for Search, Writer, Reviewer, Expert Panel, Polish, Final Verification, Reflection, and Orchestrator agents.
-- `src/memory_review_pipeline.py`: runnable multi-agent orchestration logic.
-- `tests/test_pipeline.py`: citation and artifact tests using Python standard library.
-- `outputs/survey.md`: generated survey report.
-- `outputs/review_report.json`: Expert Review Panel result and revision plan.
-- `outputs/final_verification.json`: post-polish citation and integrity gate.
-- `outputs/evaluation_report.json`: score-style evaluation of the run.
-- `outputs/reflection_log.md`: process reflection and improvement notes.
-- `outputs/runtime_config.json`: sanitized runtime backend settings used by the run.
-- `docs/design_document.md`: architecture, workflow, design choices, and reflection.
-- `docs/seed_corpus_review.md`: review notes for added seed papers.
-- `FINAL_SUBMISSION.md`: one-page guide for graders and submission packaging.
+```text
+multi-agent-literature-review-system/
+├── README.md
+├── FINAL_SUBMISSION.md
+├── .env.example
+├── data/
+│   └── papers.json
+├── docs/
+│   ├── design_document.md
+│   ├── implementation_plan.md
+│   └── seed_corpus_review.md
+├── outputs/
+│   ├── survey.md
+│   ├── review_report.json
+│   ├── final_verification.json
+│   ├── evaluation_report.json
+│   ├── reflection_log.md
+│   ├── revision_log.json
+│   ├── runtime_config.json
+│   └── intermediate/
+├── prompts/
+├── src/
+│   └── memory_review_pipeline.py
+└── tests/
+    └── test_pipeline.py
+```
+
+- `src/`: runnable multi-agent orchestration code.
+- `data/`: verified source memory used by Search Agent.
+- `prompts/`: role prompts for each agent.
+- `outputs/`: generated survey, audits, verification reports, and run logs.
+- `docs/`: design report, seed-corpus review, and implementation notes.
+- `tests/`: workflow, citation-safety, feedback-loop, and configuration tests.
 
 ## Agent Workflow
 
