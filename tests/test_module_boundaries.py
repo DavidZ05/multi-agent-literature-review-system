@@ -11,6 +11,29 @@ class ModuleBoundaryTests(unittest.TestCase):
         self.assertEqual(literature_review.__version__, "0.1.0")
 
 
+class ConfigModuleTests(unittest.TestCase):
+    def test_config_module_resolves_agent_override(self) -> None:
+        from src.literature_review.config import AgentRuntimeConfig
+
+        config = AgentRuntimeConfig.from_env(
+            {
+                "AGENT_BACKEND": "api",
+                "AGENT_API_MODE": "multi",
+                "AGENT_API_BASE_URL": "https://api.example.com/v1",
+                "AGENT_API_KEY": "shared-key",
+                "AGENT_MODEL": "default-model",
+                "WRITER_AGENT_MODEL": "writer-model",
+            }
+        )
+
+        writer = config.for_agent("writer")
+        reviewer = config.for_agent("reviewer")
+
+        self.assertEqual(writer.model, "writer-model")
+        self.assertEqual(reviewer.model, "default-model")
+        self.assertEqual(config.public_dict()["api_key"], "<configured>")
+
+
 class CorpusModuleTests(unittest.TestCase):
     def test_load_papers_rejects_duplicate_citation_key(self) -> None:
         from src.literature_review.corpus import load_papers
