@@ -79,6 +79,17 @@ class ConfigModuleTests(unittest.TestCase):
                 self.assertEqual(agent_cls().agent_id, expected_agent_id)
 
 
+class WritingModuleTests(unittest.TestCase):
+    def test_search_and_writer_are_available_from_new_modules(self) -> None:
+        from src.literature_review.search import SearchAgent
+        from src.literature_review.writing import PolishAgent, WriterAgent
+
+        self.assertEqual(SearchAgent.__name__, "SearchAgent")
+        self.assertEqual(WriterAgent.__name__, "WriterAgent")
+        self.assertEqual(PolishAgent.__name__, "PolishAgent")
+        self.assertEqual(PolishAgent().run("Draft  text\n\n\n"), "Draft text\n")
+
+
 class CorpusModuleTests(unittest.TestCase):
     def test_load_papers_rejects_duplicate_citation_key(self) -> None:
         from src.literature_review.corpus import load_papers
