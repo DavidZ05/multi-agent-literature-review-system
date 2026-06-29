@@ -37,6 +37,14 @@ class ReviewModuleTests(unittest.TestCase):
             ReviewSynthesizerAgent,
             StructureMentorAgent,
         )
+        from src.memory_review_pipeline import (
+            DomainExpertAgent as LegacyDomainExpertAgent,
+            EvaluationReflectionAgent as LegacyEvaluationReflectionAgent,
+            FinalVerificationReviewer as LegacyFinalVerificationReviewer,
+            ReviewerAgent as LegacyReviewerAgent,
+            ReviewSynthesizerAgent as LegacyReviewSynthesizerAgent,
+            StructureMentorAgent as LegacyStructureMentorAgent,
+        )
 
         class_names = {
             ReviewerAgent.__name__,
@@ -48,6 +56,12 @@ class ReviewModuleTests(unittest.TestCase):
         }
 
         self.assertEqual(len(class_names), 6)
+        self.assertIs(LegacyReviewerAgent, ReviewerAgent)
+        self.assertIs(LegacyDomainExpertAgent, DomainExpertAgent)
+        self.assertIs(LegacyStructureMentorAgent, StructureMentorAgent)
+        self.assertIs(LegacyReviewSynthesizerAgent, ReviewSynthesizerAgent)
+        self.assertIs(LegacyFinalVerificationReviewer, FinalVerificationReviewer)
+        self.assertIs(LegacyEvaluationReflectionAgent, EvaluationReflectionAgent)
 
 
 class ConfigModuleTests(unittest.TestCase):
