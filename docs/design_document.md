@@ -47,6 +47,10 @@ flowchart LR
 
 The architecture uses an orchestrator rather than direct free-form conversation among agents. This keeps the workflow reproducible: each agent reads a known artifact, writes a known artifact, and passes structured state to the next stage. The current implementation is deterministic by default, but the runtime configuration (`AgentRuntimeConfig`) reserves an API-backed path for future agents.
 
+## Modular Implementation
+
+The implementation now separates responsibilities into focused modules under `src/literature_review/`. `corpus.py` validates and loads the verified paper memory, `config.py` resolves deterministic or API-backed runtime settings, `search.py` and `writing.py` define the Search, Writer, and Polish roles, `review.py` groups the expert-panel and final-verification reviewers, `evaluation.py` records scoring and reflection artifacts, and `orchestrator.py` with `cli.py` controls execution. Dependencies flow one way: shared data/config utilities support agent modules, agent modules feed the orchestrator, and the CLI depends on the orchestrator rather than the reverse. The legacy `src/memory_review_pipeline.py` file remains as a compatibility entrypoint that re-exports the modular package API for existing imports and `python -m src.memory_review_pipeline` runs.
+
 ## Agent Roles and Handoffs
 
 | Agent | Input | Output | Responsibility | Constraint |
@@ -211,7 +215,7 @@ Future versions could improve the system in five directions:
 2. Connect Search Agent to arXiv, Semantic Scholar, or Crossref for candidate discovery, DOI checks, deduplication, and metadata verification.
 3. Add full-text PDF extraction so Reviewer can verify claim-reference alignment beyond metadata-level checks.
 4. Add a small command-line or web interface for human approval of seed-corpus additions and citation-risk decisions.
-5. Split `src/memory_review_pipeline.py` into smaller modules if the system grows, while keeping the current single-file implementation for course-project reproducibility.
+5. Extend the modular package with additional interfaces or deeper verification components while preserving the compatibility entrypoint and current artifact contracts.
 
 A more advanced version could also learn memory write/delete policies, but deterministic verification is safer for this course project. The current seed expansion is documented in `docs/seed_corpus_review.md`.
 

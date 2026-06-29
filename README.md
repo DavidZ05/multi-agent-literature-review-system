@@ -6,7 +6,7 @@ This project implements a multi-agent literature review pipeline for the final a
 
 | Requirement | File or Folder |
 |---|---|
-| System code / configuration | `src/memory_review_pipeline.py`, `.env.example`, `prompts/`, `data/papers.json` |
+| System code / configuration | `src/memory_review_pipeline.py`, `src/literature_review/`, `.env.example`, `prompts/`, `data/papers.json` |
 | Agent role prompts | `prompts/search_agent.md`, `prompts/writer_agent.md`, `prompts/reviewer_agent.md`, `prompts/polish_agent.md`, `prompts/orchestrator.md`, plus expert-review prompts |
 | Generated survey report | `outputs/survey.md` |
 | Design document | `docs/design_document.md` |
@@ -15,7 +15,7 @@ This project implements a multi-agent literature review pipeline for the final a
 | Citation and expert verification result | `outputs/review_report.json`, `outputs/final_verification.json` |
 | Revision-loop record | `outputs/revision_log.json` |
 | Evaluation and reflection | `outputs/evaluation_report.json`, `outputs/reflection_log.md` |
-| Tests | `tests/test_pipeline.py` |
+| Tests | `tests/test_pipeline.py`, `tests/test_module_boundaries.py` |
 | Submission summary | `FINAL_SUBMISSION.md` |
 
 ## Project Structure
@@ -42,12 +42,25 @@ multi-agent-literature-review-system/
 │   └── intermediate/
 ├── prompts/
 ├── src/
-│   └── memory_review_pipeline.py
+│   ├── memory_review_pipeline.py
+│   └── literature_review/
+│       ├── __init__.py
+│       ├── base.py
+│       ├── config.py
+│       ├── corpus.py
+│       ├── search.py
+│       ├── writing.py
+│       ├── review.py
+│       ├── evaluation.py
+│       ├── orchestrator.py
+│       └── cli.py
 └── tests/
+    ├── test_module_boundaries.py
     └── test_pipeline.py
 ```
 
-- `src/`: runnable multi-agent orchestration code.
+- `src/literature_review/`: canonical implementation modules organized by responsibility: corpus loading, runtime configuration, agent logic, orchestration, evaluation, and CLI entrypoints.
+- `src/memory_review_pipeline.py`: backward-compatible command and import entrypoint that re-exports the package API for existing `python -m` and `from src.memory_review_pipeline import ...` usage.
 - `data/`: verified source memory used by Search Agent.
 - `prompts/`: role prompts for each agent.
 - `outputs/`: generated survey, audits, verification reports, and run logs.
@@ -77,6 +90,8 @@ The hard safety gate is citation integrity: unknown citation keys, unsupported c
 ```bash
 python3 -m src.memory_review_pipeline
 ```
+
+This legacy entrypoint remains supported for backward compatibility. The implementation itself now lives in `src/literature_review/`, which keeps corpus validation, configuration, agent roles, orchestration, and evaluation in separate modules.
 
 By default this uses deterministic local agents. This is the recommended mode for grading and local testing because it does not need network access or API keys.
 
