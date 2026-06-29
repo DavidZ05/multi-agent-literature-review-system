@@ -10,6 +10,27 @@ class ModuleBoundaryTests(unittest.TestCase):
 
         self.assertEqual(literature_review.__version__, "0.1.0")
 
+    def test_review_module_exposes_complete_panel(self) -> None:
+        from src.literature_review.evaluation import EvaluationReflectionAgent
+        from src.literature_review.review import (
+            DomainExpertAgent,
+            FinalVerificationReviewer,
+            ReviewerAgent,
+            ReviewSynthesizerAgent,
+            StructureMentorAgent,
+        )
+
+        class_names = {
+            ReviewerAgent.__name__,
+            DomainExpertAgent.__name__,
+            StructureMentorAgent.__name__,
+            ReviewSynthesizerAgent.__name__,
+            FinalVerificationReviewer.__name__,
+            EvaluationReflectionAgent.__name__,
+        }
+
+        self.assertEqual(len(class_names), 6)
+
     def test_legacy_imports_preserve_object_identity(self) -> None:
         from src.literature_review.base import RuntimeAwareAgent
         from src.literature_review.config import (
