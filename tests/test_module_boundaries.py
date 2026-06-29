@@ -10,6 +10,22 @@ class ModuleBoundaryTests(unittest.TestCase):
 
         self.assertEqual(literature_review.__version__, "0.1.0")
 
+    def test_legacy_imports_preserve_object_identity(self) -> None:
+        from src.literature_review.base import RuntimeAwareAgent
+        from src.literature_review.config import (
+            AgentAPISettings,
+            AgentRuntimeConfig,
+        )
+        from src.memory_review_pipeline import (
+            AgentAPISettings as LegacyAgentAPISettings,
+            AgentRuntimeConfig as LegacyAgentRuntimeConfig,
+            RuntimeAwareAgent as LegacyRuntimeAwareAgent,
+        )
+
+        self.assertIs(LegacyAgentAPISettings, AgentAPISettings)
+        self.assertIs(LegacyAgentRuntimeConfig, AgentRuntimeConfig)
+        self.assertIs(LegacyRuntimeAwareAgent, RuntimeAwareAgent)
+
 
 class ConfigModuleTests(unittest.TestCase):
     def test_config_module_resolves_agent_override(self) -> None:
@@ -32,6 +48,35 @@ class ConfigModuleTests(unittest.TestCase):
         self.assertEqual(writer.model, "writer-model")
         self.assertEqual(reviewer.model, "default-model")
         self.assertEqual(config.public_dict()["api_key"], "<configured>")
+
+    def test_concrete_agents_expose_expected_agent_ids(self) -> None:
+        from src.memory_review_pipeline import (
+            DomainExpertAgent,
+            EvaluationReflectionAgent,
+            FinalVerificationReviewer,
+            PolishAgent,
+            ReviewSynthesizerAgent,
+            ReviewerAgent,
+            SearchAgent,
+            StructureMentorAgent,
+            WriterAgent,
+        )
+
+        cases = [
+            (SearchAgent, "search"),
+            (WriterAgent, "writer"),
+            (ReviewerAgent, "reviewer"),
+            (DomainExpertAgent, "domain_expert"),
+            (StructureMentorAgent, "structure_mentor"),
+            (ReviewSynthesizerAgent, "review_synthesizer"),
+            (PolishAgent, "polish"),
+            (FinalVerificationReviewer, "final_verification"),
+            (EvaluationReflectionAgent, "evaluation_reflection"),
+        ]
+
+        for agent_cls, expected_agent_id in cases:
+            with self.subTest(agent_cls=agent_cls.__name__):
+                self.assertEqual(agent_cls().agent_id, expected_agent_id)
 
 
 class CorpusModuleTests(unittest.TestCase):
