@@ -27,6 +27,13 @@ class ModuleBoundaryTests(unittest.TestCase):
         self.assertIs(LegacyRuntimeAwareAgent, RuntimeAwareAgent)
 
 
+class OrchestratorModuleTests(unittest.TestCase):
+    def test_orchestrator_is_defined_in_new_module(self) -> None:
+        from src.literature_review.orchestrator import Orchestrator
+
+        self.assertEqual(Orchestrator.__module__, "src.literature_review.orchestrator")
+
+
 class ReviewModuleTests(unittest.TestCase):
     def test_review_module_exposes_complete_panel(self) -> None:
         from src.literature_review.evaluation import EvaluationReflectionAgent
