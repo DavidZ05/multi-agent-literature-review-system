@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from src.literature_review import (
-    __version__,
     AgentAPISettings,
     AgentRuntimeConfig,
     DomainExpertAgent,
@@ -26,7 +25,6 @@ from src.literature_review.base import RuntimeAwareAgent
 
 __all__ = [
     "RuntimeAwareAgent",
-    "__version__",
     "AgentAPISettings",
     "AgentRuntimeConfig",
     "main",

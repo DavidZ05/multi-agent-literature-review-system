@@ -23,7 +23,6 @@ from src.literature_review.writing import PolishAgent, WriterAgent
 __version__ = "0.1.0"
 
 __all__ = [
-    "__version__",
     "main",
     "AgentAPISettings",
     "AgentRuntimeConfig",

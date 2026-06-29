@@ -12,7 +12,6 @@ class ModuleBoundaryTests(unittest.TestCase):
         self.assertEqual(
             literature_review.__all__,
             [
-                "__version__",
                 "main",
                 "AgentAPISettings",
                 "AgentRuntimeConfig",
@@ -94,7 +93,6 @@ class OrchestratorModuleTests(unittest.TestCase):
             legacy.__all__,
             [
                 "RuntimeAwareAgent",
-                "__version__",
                 "AgentAPISettings",
                 "AgentRuntimeConfig",
                 "main",
