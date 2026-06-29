@@ -29,9 +29,37 @@ class ModuleBoundaryTests(unittest.TestCase):
 
 class OrchestratorModuleTests(unittest.TestCase):
     def test_orchestrator_is_defined_in_new_module(self) -> None:
+        import src.memory_review_pipeline as legacy
+        from src.literature_review.cli import main as cli_main
         from src.literature_review.orchestrator import Orchestrator
 
         self.assertEqual(Orchestrator.__module__, "src.literature_review.orchestrator")
+        self.assertIs(legacy.Orchestrator, Orchestrator)
+        self.assertIs(legacy.main, cli_main)
+
+    def test_legacy_pipeline_declares_explicit_exports(self) -> None:
+        import src.memory_review_pipeline as legacy
+
+        self.assertEqual(
+            legacy.__all__,
+            [
+                "RuntimeAwareAgent",
+                "AgentAPISettings",
+                "AgentRuntimeConfig",
+                "main",
+                "load_papers",
+                "EvaluationReflectionAgent",
+                "Orchestrator",
+                "DomainExpertAgent",
+                "FinalVerificationReviewer",
+                "ReviewerAgent",
+                "ReviewSynthesizerAgent",
+                "StructureMentorAgent",
+                "SearchAgent",
+                "PolishAgent",
+                "WriterAgent",
+            ],
+        )
 
 
 class ReviewModuleTests(unittest.TestCase):
