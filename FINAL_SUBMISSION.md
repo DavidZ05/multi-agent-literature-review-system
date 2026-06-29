@@ -13,19 +13,21 @@ Submit the whole `multi-agent-literature-review-system` folder if possible. If t
 1. `README.md`
 2. `FINAL_SUBMISSION.md`
 3. `src/memory_review_pipeline.py`
-4. `.env.example`
-5. `prompts/`
-6. `data/papers.json`
-7. `outputs/survey.md`
-8. `outputs/review_report.json`
-9. `outputs/final_verification.json`
-10. `outputs/evaluation_report.json`
-11. `outputs/reflection_log.md`
-12. `outputs/runtime_config.json`
-13. `outputs/revision_log.json`
-14. `docs/design_document.md`
-15. `docs/seed_corpus_review.md`
-16. `tests/test_pipeline.py`
+4. `src/literature_review/`
+5. `.env.example`
+6. `prompts/`
+7. `data/papers.json`
+8. `outputs/survey.md`
+9. `outputs/review_report.json`
+10. `outputs/final_verification.json`
+11. `outputs/evaluation_report.json`
+12. `outputs/reflection_log.md`
+13. `outputs/runtime_config.json`
+14. `outputs/revision_log.json`
+15. `docs/design_document.md`
+16. `docs/seed_corpus_review.md`
+17. `tests/test_pipeline.py`
+18. `tests/test_module_boundaries.py`
 
 The original assignment PDF is also kept in the folder for context.
 
@@ -62,9 +64,11 @@ python3 -m unittest discover -s tests -v
 Expected result:
 
 ```text
-Ran 10 tests
+Ran ... tests
 OK
 ```
+
+The exact number of discovered tests may grow as documentation and compatibility coverage expand, but the suite should complete with `OK`.
 
 ## Output Files
 

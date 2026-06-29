@@ -49,7 +49,11 @@ The architecture uses an orchestrator rather than direct free-form conversation 
 
 ## Modular Implementation
 
-The implementation now separates responsibilities into focused modules under `src/literature_review/`. `corpus.py` validates and loads the verified paper memory, `config.py` resolves deterministic or API-backed runtime settings, `search.py` and `writing.py` define the Search, Writer, and Polish roles, `review.py` groups the expert-panel and final-verification reviewers, `evaluation.py` records scoring and reflection artifacts, and `orchestrator.py` with `cli.py` controls execution. Dependencies flow one way: shared data/config utilities support agent modules, agent modules feed the orchestrator, and the CLI depends on the orchestrator rather than the reverse. The legacy `src/memory_review_pipeline.py` file remains as a compatibility entrypoint that re-exports the modular package API for existing imports and `python -m src.memory_review_pipeline` runs.
+The implementation now separates responsibilities into focused modules under `src/literature_review/`. `corpus.py` validates and loads the verified paper memory, while `config.py` resolves deterministic or API-backed runtime settings. `search.py` and `writing.py` define the Search, Writer, and Polish roles, and `review.py` groups the expert-panel and final-verification reviewers.
+
+`evaluation.py` computes the evaluation report and reflection content for the completed run. `orchestrator.py` controls stage transitions and writes the workflow artifacts to `outputs/`. `cli.py` invokes the workflow for command-line execution.
+
+Dependencies flow one way: shared data/config utilities support agent modules, agent modules feed the orchestrator, and the CLI depends on the orchestrator rather than the reverse. The legacy `src/memory_review_pipeline.py` file remains as a compatibility entrypoint that re-exports the modular package API for existing imports and `python -m src.memory_review_pipeline` runs.
 
 ## Agent Roles and Handoffs
 

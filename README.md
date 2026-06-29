@@ -42,6 +42,7 @@ multi-agent-literature-review-system/
 │   └── intermediate/
 ├── prompts/
 ├── src/
+│   ├── __init__.py
 │   ├── memory_review_pipeline.py
 │   └── literature_review/
 │       ├── __init__.py
@@ -87,11 +88,11 @@ The hard safety gate is citation integrity: unknown citation keys, unsupported c
 
 ## Run
 
+Use the legacy-compatible module entrypoint below to invoke the modular workflow:
+
 ```bash
 python3 -m src.memory_review_pipeline
 ```
-
-This legacy entrypoint remains supported for backward compatibility. The implementation itself now lives in `src/literature_review/`, which keeps corpus validation, configuration, agent roles, orchestration, and evaluation in separate modules.
 
 By default this uses deterministic local agents. This is the recommended mode for grading and local testing because it does not need network access or API keys.
 
