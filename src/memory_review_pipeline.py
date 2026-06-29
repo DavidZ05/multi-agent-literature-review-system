@@ -1,26 +1,38 @@
+"""Legacy compatibility wrapper for the canonical literature_review package."""
+
 from __future__ import annotations
 
-from src.literature_review.base import RuntimeAwareAgent
-from src.literature_review.config import AgentAPISettings, AgentRuntimeConfig
-from src.literature_review.cli import main
-from src.literature_review.corpus import load_papers
-from src.literature_review.evaluation import EvaluationReflectionAgent
-from src.literature_review.orchestrator import Orchestrator
-from src.literature_review.review import (
+from src.literature_review import (
+    __version__,
+    AgentAPISettings,
+    AgentRuntimeConfig,
     DomainExpertAgent,
+    EvaluationReflectionAgent,
     FinalVerificationReviewer,
+    Orchestrator,
+    PROJECT_TITLE,
+    PolishAgent,
     ReviewerAgent,
     ReviewSynthesizerAgent,
+    SearchAgent,
     StructureMentorAgent,
+    WriterAgent,
+    citation_label,
+    first_author_last_name,
+    load_papers,
+    main,
 )
-from src.literature_review.search import SearchAgent
-from src.literature_review.writing import PolishAgent, WriterAgent
+from src.literature_review.base import RuntimeAwareAgent
 
 __all__ = [
     "RuntimeAwareAgent",
+    "__version__",
     "AgentAPISettings",
     "AgentRuntimeConfig",
     "main",
+    "PROJECT_TITLE",
+    "citation_label",
+    "first_author_last_name",
     "load_papers",
     "EvaluationReflectionAgent",
     "Orchestrator",

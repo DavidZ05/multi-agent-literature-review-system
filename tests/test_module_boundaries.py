@@ -9,6 +9,29 @@ class ModuleBoundaryTests(unittest.TestCase):
         from src import literature_review
 
         self.assertEqual(literature_review.__version__, "0.1.0")
+        self.assertEqual(
+            literature_review.__all__,
+            [
+                "__version__",
+                "main",
+                "AgentAPISettings",
+                "AgentRuntimeConfig",
+                "PROJECT_TITLE",
+                "citation_label",
+                "first_author_last_name",
+                "load_papers",
+                "EvaluationReflectionAgent",
+                "Orchestrator",
+                "DomainExpertAgent",
+                "FinalVerificationReviewer",
+                "ReviewerAgent",
+                "ReviewSynthesizerAgent",
+                "StructureMentorAgent",
+                "SearchAgent",
+                "PolishAgent",
+                "WriterAgent",
+            ],
+        )
 
     def test_legacy_imports_preserve_object_identity(self) -> None:
         from src.literature_review.base import RuntimeAwareAgent
@@ -25,6 +48,33 @@ class ModuleBoundaryTests(unittest.TestCase):
         self.assertIs(LegacyAgentAPISettings, AgentAPISettings)
         self.assertIs(LegacyAgentRuntimeConfig, AgentRuntimeConfig)
         self.assertIs(LegacyRuntimeAwareAgent, RuntimeAwareAgent)
+
+
+class CompatibilityTests(unittest.TestCase):
+    def test_legacy_module_reexports_new_public_api(self) -> None:
+        from src import literature_review
+        import src.memory_review_pipeline as legacy
+
+        cases = [
+            ("AgentAPISettings", literature_review.AgentAPISettings),
+            ("AgentRuntimeConfig", literature_review.AgentRuntimeConfig),
+            (
+                "EvaluationReflectionAgent",
+                literature_review.EvaluationReflectionAgent,
+            ),
+            (
+                "FinalVerificationReviewer",
+                literature_review.FinalVerificationReviewer,
+            ),
+            ("Orchestrator", literature_review.Orchestrator),
+            ("ReviewerAgent", literature_review.ReviewerAgent),
+            ("SearchAgent", literature_review.SearchAgent),
+            ("load_papers", literature_review.load_papers),
+        ]
+
+        for name, canonical in cases:
+            with self.subTest(name=name):
+                self.assertIs(getattr(legacy, name), canonical)
 
 
 class OrchestratorModuleTests(unittest.TestCase):
@@ -44,9 +94,13 @@ class OrchestratorModuleTests(unittest.TestCase):
             legacy.__all__,
             [
                 "RuntimeAwareAgent",
+                "__version__",
                 "AgentAPISettings",
                 "AgentRuntimeConfig",
                 "main",
+                "PROJECT_TITLE",
+                "citation_label",
+                "first_author_last_name",
                 "load_papers",
                 "EvaluationReflectionAgent",
                 "Orchestrator",
