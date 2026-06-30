@@ -9,6 +9,14 @@ from src.literature_review.corpus import (
     load_papers,
 )
 from src.literature_review.evaluation import EvaluationReflectionAgent
+from src.literature_review.models import (
+    ResearchRun,
+    RunStatus,
+    StageCheckpoint,
+    WorkflowEvent,
+    WorkflowStage,
+    utc_now_iso,
+)
 from src.literature_review.orchestrator import Orchestrator
 from src.literature_review.review import (
     DomainExpertAgent,
@@ -40,4 +48,10 @@ __all__ = [
     "SearchAgent",
     "PolishAgent",
     "WriterAgent",
+    "ResearchRun",
+    "RunStatus",
+    "WorkflowStage",
+    "WorkflowEvent",
+    "StageCheckpoint",
+    "utc_now_iso",
 ]

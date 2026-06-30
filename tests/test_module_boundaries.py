@@ -29,6 +29,12 @@ class ModuleBoundaryTests(unittest.TestCase):
                 "SearchAgent",
                 "PolishAgent",
                 "WriterAgent",
+                "ResearchRun",
+                "RunStatus",
+                "WorkflowStage",
+                "WorkflowEvent",
+                "StageCheckpoint",
+                "utc_now_iso",
             ],
         )
 
