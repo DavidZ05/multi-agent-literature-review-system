@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>https://arxiv.org/abs/2304.03442v2</id>
+    <updated>2023-08-01T00:00:00Z</updated>
+    <published>2023-04-07T00:00:00Z</published>
+    <title>
+      Generative Agents: Interactive Simulacra of Human Behavior
+    </title>
+    <summary>Agents store, reflect on, and retrieve memories.</summary>
+    <author><name>Joon Sung Park</name></author>
+    <author><name>Joseph C. O'Brien</name></author>
+    <arxiv:doi>10.1145/3586183.3606763</arxiv:doi>
+    <arxiv:journal_ref>UIST 2023</arxiv:journal_ref>
+    <link href="https://arxiv.org/abs/2304.03442v2" rel="alternate"/>
+    <link title="pdf" href="https://arxiv.org/pdf/2304.03442v2" rel="related" type="application/pdf"/>
+  </entry>
+  <entry>
+    <id>https://arxiv.org/abs/2310.08560v1</id>
+    <updated>2023-10-12T00:00:00Z</updated>
+    <published>2023-10-12T00:00:00Z</published>
+    <title>MemGPT: Towards LLMs as Operating Systems</title>
+    <summary>Virtual context management enables long-running agents.</summary>
+    <author><name>Charles Packer</name></author>
+    <link title="pdf" href="https://arxiv.org/pdf/2310.08560" rel="related" type="application/pdf"/>
+  </entry>
+</feed>
