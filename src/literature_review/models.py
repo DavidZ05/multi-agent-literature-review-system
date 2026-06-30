@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Mapping
 from uuid import uuid4
 
 
@@ -96,8 +96,11 @@ class WorkflowEvent:
     run_id: str
     event_type: str
     stage: WorkflowStage | None
-    payload: dict[str, Any]
+    payload: Mapping[str, Any]
     created_at: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -105,7 +108,7 @@ class WorkflowEvent:
             "run_id": self.run_id,
             "event_type": self.event_type,
             "stage": None if self.stage is None else self.stage.value,
-            "payload": deepcopy(self.payload),
+            "payload": dict(self.payload),
             "created_at": self.created_at,
         }
 
@@ -117,7 +120,7 @@ class WorkflowEvent:
             run_id=data["run_id"],
             event_type=data["event_type"],
             stage=None if stage_value is None else WorkflowStage(stage_value),
-            payload=deepcopy(dict(data["payload"])),
+            payload=dict(data["payload"]),
             created_at=data["created_at"],
         )
 
@@ -127,9 +130,16 @@ class StageCheckpoint:
     run_id: str
     stage: WorkflowStage
     input_fingerprint: str
-    output_artifact_hashes: dict[str, str]
+    output_artifact_hashes: Mapping[str, str]
     status: str
     created_at: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "output_artifact_hashes",
+            MappingProxyType(dict(self.output_artifact_hashes)),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {

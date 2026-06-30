@@ -1,6 +1,7 @@
 import json
 import unittest
 from datetime import UTC, datetime
+from types import MappingProxyType
 
 
 class ResearchRunTests(unittest.TestCase):
@@ -48,6 +49,27 @@ class ResearchRunTests(unittest.TestCase):
 
 
 class WorkflowEventTests(unittest.TestCase):
+    def test_direct_construction_copies_and_freezes_payload_mapping(self) -> None:
+        from src.literature_review.models import WorkflowEvent
+
+        source_payload = {"count": 1}
+        event = WorkflowEvent(
+            event_id=1,
+            run_id="run_example",
+            event_type="stage_entered",
+            stage=None,
+            payload=source_payload,
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+
+        source_payload["count"] = 2
+
+        self.assertEqual(event.payload["count"], 1)
+        self.assertIsInstance(event.payload, MappingProxyType)
+
+        with self.assertRaises(TypeError):
+            event.payload["count"] = 3
+
     def test_round_trip_dict_serialization_is_json_safe(self) -> None:
         from src.literature_review.models import WorkflowEvent, WorkflowStage
 
@@ -92,6 +114,30 @@ class WorkflowEventTests(unittest.TestCase):
 
 
 class StageCheckpointTests(unittest.TestCase):
+    def test_direct_construction_copies_and_freezes_hash_mapping(self) -> None:
+        from src.literature_review.models import StageCheckpoint, WorkflowStage
+
+        source_hashes = {"review_report": "sha256:def"}
+        checkpoint = StageCheckpoint(
+            run_id="run_example",
+            stage=WorkflowStage.REVIEWING,
+            input_fingerprint="abc123",
+            output_artifact_hashes=source_hashes,
+            status="ready",
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+
+        source_hashes["review_report"] = "changed"
+
+        self.assertEqual(
+            checkpoint.output_artifact_hashes["review_report"],
+            "sha256:def",
+        )
+        self.assertIsInstance(checkpoint.output_artifact_hashes, MappingProxyType)
+
+        with self.assertRaises(TypeError):
+            checkpoint.output_artifact_hashes["review_report"] = "mutated"
+
     def test_round_trip_dict_serialization_is_json_safe(self) -> None:
         from src.literature_review.models import StageCheckpoint, WorkflowStage
 
