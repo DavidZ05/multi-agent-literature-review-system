@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -9,7 +9,12 @@ from uuid import uuid4
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _require_enum(value: Any, enum_type: type[Enum], field_name: str) -> None:
+    if not isinstance(value, enum_type):
+        raise TypeError(f"{field_name} must be a {enum_type.__name__}")
 
 
 class RunStatus(str, Enum):
@@ -46,16 +51,26 @@ class ResearchRun:
     corpus_version: int
     revision_count: int
 
-    @classmethod
-    def create(cls, topic: str) -> ResearchRun:
-        normalized_topic = topic.strip()
+    def __post_init__(self) -> None:
+        normalized_topic = self.topic.strip()
         if not normalized_topic:
             raise ValueError("topic must be nonblank")
+        if self.corpus_version < 0:
+            raise ValueError("corpus_version must be nonnegative")
+        if self.revision_count < 0:
+            raise ValueError("revision_count must be nonnegative")
 
+        _require_enum(self.status, RunStatus, "status")
+        _require_enum(self.current_stage, WorkflowStage, "current_stage")
+
+        object.__setattr__(self, "topic", normalized_topic)
+
+    @classmethod
+    def create(cls, topic: str) -> ResearchRun:
         timestamp = utc_now_iso()
         return cls(
             run_id=f"run_{uuid4().hex}",
-            topic=normalized_topic,
+            topic=topic,
             status=RunStatus.ACTIVE,
             current_stage=WorkflowStage.CREATED,
             created_at=timestamp,
@@ -100,6 +115,8 @@ class WorkflowEvent:
     created_at: str
 
     def __post_init__(self) -> None:
+        if self.stage is not None:
+            _require_enum(self.stage, WorkflowStage, "stage")
         object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
 
     def to_dict(self) -> dict[str, Any]:
@@ -135,6 +152,7 @@ class StageCheckpoint:
     created_at: str
 
     def __post_init__(self) -> None:
+        _require_enum(self.stage, WorkflowStage, "stage")
         object.__setattr__(
             self,
             "output_artifact_hashes",

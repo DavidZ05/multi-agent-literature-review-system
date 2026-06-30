@@ -1,6 +1,6 @@
 import json
 import unittest
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from types import MappingProxyType
 
 
@@ -20,8 +20,83 @@ class ResearchRunTests(unittest.TestCase):
         created_at = datetime.fromisoformat(run.created_at)
         updated_at = datetime.fromisoformat(run.updated_at)
 
-        self.assertEqual(created_at.tzinfo, UTC)
-        self.assertEqual(updated_at.tzinfo, UTC)
+        self.assertEqual(created_at.tzinfo, timezone.utc)
+        self.assertEqual(updated_at.tzinfo, timezone.utc)
+
+    def test_direct_construction_rejects_blank_topic(self) -> None:
+        from src.literature_review.models import ResearchRun, RunStatus, WorkflowStage
+
+        with self.assertRaisesRegex(ValueError, "topic"):
+            ResearchRun(
+                run_id="run_example",
+                topic="   ",
+                status=RunStatus.ACTIVE,
+                current_stage=WorkflowStage.CREATED,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+                corpus_version=1,
+                revision_count=0,
+            )
+
+    def test_direct_construction_rejects_negative_corpus_version(self) -> None:
+        from src.literature_review.models import ResearchRun, RunStatus, WorkflowStage
+
+        with self.assertRaisesRegex(ValueError, "corpus_version"):
+            ResearchRun(
+                run_id="run_example",
+                topic="Agent memory evaluation",
+                status=RunStatus.ACTIVE,
+                current_stage=WorkflowStage.CREATED,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+                corpus_version=-1,
+                revision_count=0,
+            )
+
+    def test_direct_construction_rejects_negative_revision_count(self) -> None:
+        from src.literature_review.models import ResearchRun, RunStatus, WorkflowStage
+
+        with self.assertRaisesRegex(ValueError, "revision_count"):
+            ResearchRun(
+                run_id="run_example",
+                topic="Agent memory evaluation",
+                status=RunStatus.ACTIVE,
+                current_stage=WorkflowStage.CREATED,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+                corpus_version=1,
+                revision_count=-1,
+            )
+
+    def test_direct_construction_rejects_non_enum_status(self) -> None:
+        from src.literature_review.models import ResearchRun, WorkflowStage
+
+        with self.assertRaisesRegex(TypeError, "status"):
+            ResearchRun(
+                run_id="run_example",
+                topic="Agent memory evaluation",
+                status="active",
+                current_stage=WorkflowStage.CREATED,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+                corpus_version=1,
+                revision_count=0,
+            )
+
+    def test_direct_construction_rejects_non_enum_current_stage(self) -> None:
+        from src.literature_review.models import ResearchRun, RunStatus
+
+        with self.assertRaisesRegex(TypeError, "current_stage"):
+            ResearchRun(
+                run_id="run_example",
+                topic="Agent memory evaluation",
+                status=RunStatus.ACTIVE,
+                current_stage="created",
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+                corpus_version=1,
+                revision_count=0,
+            )
 
     def test_round_trip_dict_serialization_preserves_value_equality(self) -> None:
         from src.literature_review.models import ResearchRun
@@ -112,6 +187,19 @@ class WorkflowEventTests(unittest.TestCase):
 
         self.assertEqual(event.payload["count"], 1)
 
+    def test_direct_construction_rejects_non_enum_stage(self) -> None:
+        from src.literature_review.models import WorkflowEvent
+
+        with self.assertRaisesRegex(TypeError, "stage"):
+            WorkflowEvent(
+                event_id=1,
+                run_id="run_example",
+                event_type="stage_entered",
+                stage="planning",
+                payload={"count": 1},
+                created_at="2026-01-01T00:00:00+00:00",
+            )
+
 
 class StageCheckpointTests(unittest.TestCase):
     def test_direct_construction_copies_and_freezes_hash_mapping(self) -> None:
@@ -178,6 +266,19 @@ class StageCheckpointTests(unittest.TestCase):
             checkpoint.output_artifact_hashes["review_report"],
             "sha256:def",
         )
+
+    def test_direct_construction_rejects_non_enum_stage(self) -> None:
+        from src.literature_review.models import StageCheckpoint
+
+        with self.assertRaisesRegex(TypeError, "stage"):
+            StageCheckpoint(
+                run_id="run_example",
+                stage="reviewing",
+                input_fingerprint="abc123",
+                output_artifact_hashes={"review_report": "sha256:def"},
+                status="ready",
+                created_at="2026-01-01T00:00:00+00:00",
+            )
 
 
 if __name__ == "__main__":
