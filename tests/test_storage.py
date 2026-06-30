@@ -17,6 +17,10 @@ from src.literature_review.storage.sqlite import (
     SQLiteWorkflowStore,
     UnsupportedSchemaVersionError,
 )
+from src.literature_review.storage.artifacts import (
+    ArtifactPathError,
+    LocalArtifactStore,
+)
 
 
 class SQLiteWorkflowStoreTests(unittest.TestCase):
@@ -125,6 +129,47 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             SQLiteWorkflowStore(future).initialize()
         with sqlite3.connect(future) as connection:
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
+
+
+class LocalArtifactStoreTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.store = LocalArtifactStore(Path(self.tmp.name) / "artifacts")
+        self.run_id = ResearchRun.create("Artifacts").run_id
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_text_write_is_readable_and_hashed(self) -> None:
+        record = self.store.write_text(
+            self.run_id, "inputs/request.json", '{"topic":"memory"}'
+        )
+        self.assertEqual(record.relative_path, "inputs/request.json")
+        self.assertEqual(
+            self.store.read_text(self.run_id, record.relative_path),
+            '{"topic":"memory"}',
+        )
+        self.assertEqual(record.size_bytes, len('{"topic":"memory"}'))
+        self.assertEqual(len(record.sha256), 64)
+        self.assertTrue(record.absolute_path.is_file())
+
+    def test_json_round_trip_and_overwrite(self) -> None:
+        self.store.write_json(self.run_id, "state/run.json", {"value": 1})
+        self.store.write_json(self.run_id, "state/run.json", {"value": 2})
+        self.assertEqual(
+            self.store.read_json(self.run_id, "state/run.json"), {"value": 2}
+        )
+
+    def test_paths_cannot_escape_run_directory(self) -> None:
+        for path in ("../secret", "/tmp/secret", "nested/../../secret"):
+            with self.subTest(path=path):
+                with self.assertRaises(ArtifactPathError):
+                    self.store.write_text(self.run_id, path, "bad")
+
+    def test_serialization_failure_leaves_no_target(self) -> None:
+        with self.assertRaises(TypeError):
+            self.store.write_json(self.run_id, "state/bad.json", {"bad": object()})
+        self.assertFalse(self.store.exists(self.run_id, "state/bad.json"))
 
 
 if __name__ == "__main__":
