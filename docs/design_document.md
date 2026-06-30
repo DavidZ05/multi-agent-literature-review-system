@@ -47,11 +47,31 @@ flowchart LR
 
 The architecture uses an orchestrator rather than direct free-form conversation among agents. This keeps the workflow reproducible: each agent reads a known artifact, writes a known artifact, and passes structured state to the next stage. The current implementation is deterministic by default, but the runtime configuration (`AgentRuntimeConfig`) reserves an API-backed path for future agents.
 
+For long-running use, a durable workflow engine wraps the orchestrator:
+
+```mermaid
+flowchart LR
+    CLI["Persistent CLI"] --> Engine["Workflow Engine"]
+    Engine --> State["SQLite run state<br/>append-only events"]
+    Engine --> Checkpoints["Stage checkpoints<br/>input fingerprints"]
+    Engine --> Artifacts["Run-scoped artifacts<br/>atomic writes + SHA-256"]
+    Engine --> Planning["Planning Handler"]
+    Planning --> Drafting["Drafting Handler"]
+    Drafting --> Orchestrator["Existing Multi-Agent Orchestrator"]
+    Orchestrator --> Artifacts
+```
+
+`Ctrl+C` changes an active run to `paused`; explicit cancellation changes it to
+the terminal `cancelled` state. Resume reuses a completed stage only when its
+input fingerprint and every output artifact hash still match. Each checkpoint
+also stores the next stage, so interruption between checkpoint creation and
+state transition does not cause an agent to run twice.
+
 ## Modular Implementation
 
 The implementation now separates responsibilities into focused modules under `src/literature_review/`. `corpus.py` validates and loads the verified paper memory, while `config.py` resolves deterministic or API-backed runtime settings. `search.py` and `writing.py` define the Search, Writer, and Polish roles, and `review.py` groups the expert-panel and final-verification reviewers.
 
-`evaluation.py` computes the evaluation report and reflection content for the completed run. `orchestrator.py` controls stage transitions and writes the workflow artifacts to `outputs/`. `cli.py` invokes the workflow for command-line execution.
+`evaluation.py` computes the evaluation report and reflection content for the completed run. `orchestrator.py` controls the internal agent sequence and writes the review artifacts. `workflow/engine.py` controls durable stage execution, while `storage/sqlite.py` and `storage/artifacts.py` persist state and files. `cli.py` exposes both the legacy one-shot command and persistent run-management commands.
 
 Dependencies flow one way: shared data/config utilities support agent modules, agent modules feed the orchestrator, and the CLI depends on the orchestrator rather than the reverse. The legacy `src/memory_review_pipeline.py` file remains as a compatibility entrypoint that re-exports the modular package API for existing imports and `python -m src.memory_review_pipeline` runs.
 
@@ -87,6 +107,8 @@ The agents communicate through shared files:
 - `outputs/evaluation_report.json`: structured run evaluation.
 - `outputs/reflection_log.md`: readable process reflection.
 - `outputs/survey.md`: final generated survey.
+- `.review-workflow/workflow.db`: persistent run, event, and checkpoint state.
+- `.review-workflow/artifacts/runs/<run_id>/`: atomic run-scoped inputs and final outputs.
 
 JSON is used when downstream agents need reliable fields. Markdown is used when humans need to read or submit the result.
 
@@ -101,6 +123,12 @@ The Expert Review Panel then checks the draft from three angles. The Citation Au
 The Review Synthesizer converts these reviews into one revision plan. Citation integrity is treated as a hard gate because fabricated or mismatched references are the easiest way for this project to fail. Domain and structure comments are recorded as expert feedback; they improve the process record without making the deterministic course project brittle. If blocking issues exist, the Orchestrator passes the synthesized feedback back to Writer. If the draft is accepted, the Polish Agent performs final cleanup.
 
 Polish is not the end of the pipeline. The Final Verification Reviewer compares the accepted draft with the polished draft and rejects the polish output if it introduced new citations, unknown citations, unsupported claim-citation pairs, or missing sections. This protects against a common failure mode: a style agent making a flawed sentence sound more authoritative. Finally, the Evaluation / Reflection Agent writes a score-style report and a readable reflection log.
+
+The persistent execution path adds a Planning stage before this agent sequence.
+It stores the research request, corpus path, and sanitized runtime
+configuration. Drafting then executes the existing orchestrator in a temporary
+directory and imports the six final artifacts only after that execution
+succeeds. Stage transitions and failures are recorded as immutable events.
 
 ## Reviewer-Writer Feedback Loop
 
@@ -167,6 +195,9 @@ In short, the system is automated by default, but humans intervene at scope, evi
 - running final verification after polish;
 - generating evaluation and reflection artifacts;
 - polishing accepted Markdown.
+- persisting run state and event history across process exits;
+- pausing on keyboard interruption and resuming from verified checkpoints;
+- cancelling runs without replaying later stages.
 
 ## What Is Not Fully Automated
 
@@ -192,6 +223,14 @@ The fifth pitfall appeared during the system refactor: a workflow can look itera
 The sixth pitfall was deciding how much autonomy a long task should have. A real literature-review run may discover that the seed corpus is too narrow and that more papers are needed. However, allowing Writer or Reviewer to add references on its own would create a high risk of citation hallucination. The project therefore treats source expansion as a Search-stage and human-checkpoint issue. If coverage is weak, the system records the need for more literature, but the current run still cites only the verified corpus.
 
 The seventh pitfall was API dependency risk. Adding API support could make the project appear more realistic, but it could also make the final assignment hard to reproduce on another machine and create a risk of exposing private keys. The final design therefore exposes an API configuration interface while keeping deterministic fallback as the default. This preserves a clear upgrade path without making external services necessary for grading. The README also clarifies that `.env` is a local file and should not be submitted, while `runtime_config.json` sanitizes configured API keys.
+
+The eighth pitfall was assuming that a long task could be resumed safely from a
+stage name alone. A process may stop after writing outputs but before updating
+the next stage, which can replay an expensive agent call. The durable engine
+therefore records the input fingerprint, output hashes, completion status, and
+next stage in one checkpoint. Resume verifies the files before skipping work;
+changed configuration, changed corpus content, or a modified output invalidates
+the checkpoint.
 
 ## Agent Evaluation and Reflection
 

@@ -1,6 +1,6 @@
 # Multi-Agent Literature Review System
 
-This project implements a multi-agent literature review pipeline for the final assignment. It uses deterministic Python agents and a verified paper corpus to generate a survey while preventing hallucinated citations. The agent runtime also has a configurable API profile interface, but no API is required: without API settings, every agent runs through the local deterministic implementation.
+This project implements a durable multi-agent literature review workflow. It uses deterministic Python agents and a verified paper corpus to generate a survey while preventing hallucinated citations. Runs can be persisted, inspected, resumed, and cancelled locally. The agent runtime also has a configurable API profile interface, but no API is required: without API settings, every agent runs through the local deterministic implementation.
 
 ## Final Assignment Deliverables
 
@@ -53,11 +53,24 @@ multi-agent-literature-review-system/
 │       ├── writing.py
 │       ├── review.py
 │       ├── evaluation.py
+│       ├── models.py
 │       ├── orchestrator.py
-│       └── cli.py
+│       ├── cli.py
+│       ├── storage/
+│       │   ├── artifacts.py
+│       │   └── sqlite.py
+│       └── workflow/
+│           ├── checkpoints.py
+│           ├── engine.py
+│           ├── handlers.py
+│           └── state.py
 └── tests/
+    ├── test_models.py
     ├── test_module_boundaries.py
-    └── test_pipeline.py
+    ├── test_persistent_cli.py
+    ├── test_pipeline.py
+    ├── test_storage.py
+    └── test_workflow_engine.py
 ```
 
 - `src/literature_review/`: canonical implementation modules organized by responsibility: corpus loading, runtime configuration, agent logic, orchestration, evaluation, and CLI entrypoints.
@@ -107,6 +120,46 @@ Expected result:
   "evaluation_report": ".../outputs/evaluation_report.json"
 }
 ```
+
+## Persistent Workflow
+
+Use the persistent command when a run must survive process exit or may need to
+be inspected and resumed:
+
+```bash
+python3 -m src.memory_review_pipeline start \
+  --topic "Memory-Augmented LLM Agents" \
+  --corpus data/papers.json
+```
+
+The command returns a `run_id`. State is stored in
+`.review-workflow/workflow.db`, and run-scoped artifacts are stored under
+`.review-workflow/artifacts/runs/<run_id>/`.
+
+```bash
+python3 -m src.memory_review_pipeline status RUN_ID
+python3 -m src.memory_review_pipeline events RUN_ID
+python3 -m src.memory_review_pipeline list
+python3 -m src.memory_review_pipeline resume RUN_ID
+python3 -m src.memory_review_pipeline cancel RUN_ID
+```
+
+Pressing `Ctrl+C` during an executable stage marks the run `paused` and exits
+with status 130. `resume` continues from the last valid checkpoint. A checkpoint
+is reused only when its input fingerprint matches and every recorded output
+artifact still has the expected SHA-256 hash.
+
+Custom runtime locations must appear before the subcommand:
+
+```bash
+python3 -m src.memory_review_pipeline \
+  --db /path/to/workflow.db \
+  --artifacts /path/to/artifacts \
+  status RUN_ID
+```
+
+The current persistent path uses the supplied approved local corpus. It does not
+yet contact external literature services.
 
 ## API Configuration
 
