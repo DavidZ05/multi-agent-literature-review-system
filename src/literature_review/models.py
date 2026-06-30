@@ -61,6 +61,273 @@ class WorkflowStage(str, Enum):
     COMPLETED = "completed"
 
 
+class CandidateStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    DEFERRED = "deferred"
+
+
+class ScreeningRecommendation(str, Enum):
+    INCLUDE = "include"
+    REVIEW = "review"
+    EXCLUDE = "exclude"
+
+
+_PROVIDERS = frozenset({"arxiv", "semantic_scholar"})
+
+
+def _validate_provider(provider: str) -> None:
+    if provider not in _PROVIDERS:
+        raise ValueError(f"unknown provider: {provider}")
+
+
+def _validate_paper_fields(
+    title: str,
+    authors: tuple[str, ...],
+    year: int | None,
+) -> None:
+    if not title.strip():
+        raise ValueError("title must be nonblank")
+    if not authors or any(not author.strip() for author in authors):
+        raise ValueError("authors must contain nonblank names")
+    if year is not None and (year < 1000 or year > 9999):
+        raise ValueError("year must be a four-digit year or None")
+
+
+@dataclass(frozen=True)
+class SearchQuery:
+    query_id: str
+    text: str
+    provider: str
+    max_results: int
+    year_from: int | None
+    year_to: int | None
+
+    def __post_init__(self) -> None:
+        _validate_provider(self.provider)
+        if not self.query_id.strip() or not self.text.strip():
+            raise ValueError("query_id and text must be nonblank")
+        if self.max_results < 1:
+            raise ValueError("max_results must be positive")
+        if (
+            self.year_from is not None
+            and self.year_to is not None
+            and self.year_from > self.year_to
+        ):
+            raise ValueError("year_from must not exceed year_to")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "query_id": self.query_id,
+            "text": self.text,
+            "provider": self.provider,
+            "max_results": self.max_results,
+            "year_from": self.year_from,
+            "year_to": self.year_to,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> SearchQuery:
+        return cls(**dict(data))
+
+
+@dataclass(frozen=True)
+class ProviderPaper:
+    provider: str
+    provider_id: str
+    title: str
+    authors: tuple[str, ...]
+    year: int | None
+    venue: str | None
+    abstract: str | None
+    doi: str | None
+    arxiv_id: str | None
+    semantic_scholar_id: str | None
+    source_url: str
+    open_access_pdf_url: str | None
+
+    def __post_init__(self) -> None:
+        _validate_provider(self.provider)
+        _validate_paper_fields(self.title, self.authors, self.year)
+        if not self.provider_id.strip() or not self.source_url.strip():
+            raise ValueError("provider_id and source_url must be nonblank")
+
+    def to_dict(self) -> dict[str, Any]:
+        data = dict(self.__dict__)
+        data["authors"] = list(self.authors)
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ProviderPaper:
+        values = dict(data)
+        values["authors"] = tuple(values["authors"])
+        return cls(**values)
+
+
+@dataclass(frozen=True)
+class ProviderSearchResult:
+    provider: str
+    query_id: str
+    request_url: str
+    papers: tuple[ProviderPaper, ...]
+    raw_body: bytes
+    response_headers: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        _validate_provider(self.provider)
+        object.__setattr__(self, "papers", tuple(self.papers))
+        object.__setattr__(
+            self,
+            "response_headers",
+            MappingProxyType(dict(self.response_headers)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "query_id": self.query_id,
+            "request_url": self.request_url,
+            "papers": [paper.to_dict() for paper in self.papers],
+            "response_headers": dict(self.response_headers),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ProviderSearchResult:
+        return cls(
+            provider=data["provider"],
+            query_id=data["query_id"],
+            request_url=data["request_url"],
+            papers=tuple(ProviderPaper.from_dict(paper) for paper in data["papers"]),
+            raw_body=b"",
+            response_headers=dict(data["response_headers"]),
+        )
+
+
+@dataclass(frozen=True)
+class CandidatePaper:
+    candidate_id: str
+    title: str
+    authors: tuple[str, ...]
+    year: int | None
+    venue: str | None
+    abstract: str | None
+    doi: str | None
+    arxiv_id: str | None
+    semantic_scholar_id: str | None
+    source_urls: tuple[str, ...]
+    open_access_pdf_url: str | None
+    provenance: tuple[str, ...]
+    recommendation: ScreeningRecommendation
+    relevance_score: float
+    status: CandidateStatus
+
+    def __post_init__(self) -> None:
+        _validate_paper_fields(self.title, self.authors, self.year)
+        if not self.candidate_id.strip():
+            raise ValueError("candidate_id must be nonblank")
+        if not any((self.doi, self.arxiv_id, self.semantic_scholar_id)):
+            raise ValueError("candidate requires a stable identifier")
+        if not 0.0 <= self.relevance_score <= 1.0:
+            raise ValueError("relevance_score must be between 0 and 1")
+        _require_enum(
+            self.recommendation,
+            ScreeningRecommendation,
+            "recommendation",
+        )
+        _require_enum(self.status, CandidateStatus, "status")
+        object.__setattr__(self, "authors", tuple(self.authors))
+        object.__setattr__(self, "source_urls", tuple(self.source_urls))
+        object.__setattr__(self, "provenance", tuple(self.provenance))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidate_id": self.candidate_id,
+            "title": self.title,
+            "authors": list(self.authors),
+            "year": self.year,
+            "venue": self.venue,
+            "abstract": self.abstract,
+            "doi": self.doi,
+            "arxiv_id": self.arxiv_id,
+            "semantic_scholar_id": self.semantic_scholar_id,
+            "source_urls": list(self.source_urls),
+            "open_access_pdf_url": self.open_access_pdf_url,
+            "provenance": list(self.provenance),
+            "recommendation": self.recommendation.value,
+            "relevance_score": self.relevance_score,
+            "status": self.status.value,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> CandidatePaper:
+        values = dict(data)
+        values["authors"] = tuple(values["authors"])
+        values["source_urls"] = tuple(values["source_urls"])
+        values["provenance"] = tuple(values["provenance"])
+        values["recommendation"] = ScreeningRecommendation(values["recommendation"])
+        values["status"] = CandidateStatus(values["status"])
+        return cls(**values)
+
+
+@dataclass(frozen=True)
+class CorpusDecision:
+    decision_id: str
+    run_id: str
+    candidate_id: str
+    status: CandidateStatus
+    reason: str
+    actor: str
+    created_at: str
+
+    def __post_init__(self) -> None:
+        _validate_run_id(self.run_id)
+        _require_enum(self.status, CandidateStatus, "status")
+        if self.status == CandidateStatus.PENDING:
+            raise ValueError("a decision cannot set pending status")
+        if not all(
+            value.strip()
+            for value in (
+                self.decision_id,
+                self.candidate_id,
+                self.reason,
+                self.actor,
+            )
+        ):
+            raise ValueError("decision fields must be nonblank")
+        _parse_utc_timestamp(self.created_at, "created_at")
+
+    @classmethod
+    def create(
+        cls,
+        run_id: str,
+        candidate_id: str,
+        status: CandidateStatus,
+        reason: str,
+        actor: str,
+    ) -> CorpusDecision:
+        return cls(
+            decision_id=f"decision_{uuid4().hex}",
+            run_id=run_id,
+            candidate_id=candidate_id,
+            status=status,
+            reason=reason,
+            actor=actor,
+            created_at=utc_now_iso(),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        data = dict(self.__dict__)
+        data["status"] = self.status.value
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> CorpusDecision:
+        values = dict(data)
+        values["status"] = CandidateStatus(values["status"])
+        return cls(**values)
+
+
 @dataclass(frozen=True)
 class ResearchRun:
     run_id: str
@@ -230,8 +497,15 @@ class StageCheckpoint:
 
 
 __all__ = [
+    "CandidatePaper",
+    "CandidateStatus",
+    "CorpusDecision",
+    "ProviderPaper",
+    "ProviderSearchResult",
     "ResearchRun",
     "RunStatus",
+    "ScreeningRecommendation",
+    "SearchQuery",
     "StageCheckpoint",
     "WorkflowEvent",
     "WorkflowStage",
