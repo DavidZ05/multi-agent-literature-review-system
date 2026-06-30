@@ -7,7 +7,13 @@ from src.literature_review.workflow.engine import (
     StageResult,
     WorkflowStore,
 )
-from src.literature_review.workflow.handlers import DraftingHandler, PlanningHandler
+from src.literature_review.workflow.handlers import (
+    ApprovalGateHandler,
+    DiscoveryHandler,
+    DraftingHandler,
+    PlanningHandler,
+    ScreeningHandler,
+)
 from src.literature_review.workflow.state import (
     ALLOWED_TRANSITIONS,
     InvalidTransitionError,
@@ -17,10 +23,13 @@ from src.literature_review.workflow.state import (
 
 __all__ = [
     "ALLOWED_TRANSITIONS",
+    "ApprovalGateHandler",
     "InvalidTransitionError",
     "DraftingHandler",
+    "DiscoveryHandler",
     "PersistentWorkflowEngine",
     "PlanningHandler",
+    "ScreeningHandler",
     "StageContext",
     "StageExecutionError",
     "StageHandler",

@@ -5,7 +5,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from src.literature_review.config import AgentRuntimeConfig
-from src.literature_review.models import RunStatus, WorkflowStage, utc_now_iso
+from src.literature_review.models import (
+    CandidateStatus,
+    RunStatus,
+    WorkflowStage,
+    utc_now_iso,
+)
 from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
 from src.literature_review.workflow.checkpoints import fingerprint_inputs
 from src.literature_review.workflow.engine import (
@@ -15,6 +20,15 @@ from src.literature_review.workflow.engine import (
     StageResult,
 )
 from src.literature_review.workflow.handlers import DraftingHandler, PlanningHandler
+from src.literature_review.workflow.handlers import (
+    ApprovalGateHandler,
+    DiscoveryHandler,
+    ScreeningHandler,
+)
+from src.literature_review.discovery.approval import ApprovalService
+from src.literature_review.discovery.planner import QueryPlanner
+from src.literature_review.discovery.service import DiscoveryService
+from tests.test_discovery import FixtureProvider, provider_paper
 from src.literature_review.workflow.state import (
     InvalidTransitionError,
     can_transition,
@@ -33,6 +47,7 @@ class WorkflowStateTests(unittest.TestCase):
                 WorkflowStage.SCREENING,
                 WorkflowStage.AWAITING_CORPUS_APPROVAL,
             ),
+            (WorkflowStage.SCREENING, WorkflowStage.DRAFTING),
             (
                 WorkflowStage.AWAITING_CORPUS_APPROVAL,
                 WorkflowStage.DRAFTING,
@@ -444,6 +459,83 @@ class DurableHandlerTests(unittest.TestCase):
                 self.artifacts.exists(completed.run_id, relative_path),
                 relative_path,
             )
+
+    def test_discovery_path_waits_before_drafting(self) -> None:
+        paper = provider_paper("arxiv", "2304.03442", arxiv_id="2304.03442")
+        service = DiscoveryService(
+            QueryPlanner(max_results=1),
+            {"arxiv": FixtureProvider("arxiv", (paper,))},
+        )
+        drafting = RecordingHandler(WorkflowStage.COMPLETED, "final/survey.json")
+        engine = PersistentWorkflowEngine(
+            self.store,
+            self.artifacts,
+            {
+                WorkflowStage.PLANNING: PlanningHandler(discovery_enabled=True),
+                WorkflowStage.DISCOVERING: DiscoveryHandler(service),
+                WorkflowStage.SCREENING: ScreeningHandler(),
+                WorkflowStage.DRAFTING: drafting,
+            },
+            runtime_config={"discovery_enabled": True},
+        )
+
+        run = engine.start("LLM agent memory", self.corpus_path)
+
+        self.assertEqual(run.status, RunStatus.WAITING)
+        self.assertEqual(run.current_stage, WorkflowStage.AWAITING_CORPUS_APPROVAL)
+        self.assertEqual(drafting.calls, [])
+        self.assertFalse(self.artifacts.exists(run.run_id, "final/survey.json"))
+
+    def test_approved_candidate_allows_resume_to_drafting(self) -> None:
+        paper = provider_paper(
+            "arxiv",
+            "novel-memory",
+            arxiv_id="2601.00001",
+            title="Novel Memory Reflection for LLM Agents",
+            year=2026,
+        )
+        service = DiscoveryService(
+            QueryPlanner(max_results=1),
+            {"arxiv": FixtureProvider("arxiv", (paper,))},
+        )
+        approval = ApprovalService(self.store)
+        drafting = RecordingHandler(WorkflowStage.COMPLETED, "final/survey.json")
+        engine = PersistentWorkflowEngine(
+            self.store,
+            self.artifacts,
+            {
+                WorkflowStage.PLANNING: PlanningHandler(discovery_enabled=True),
+                WorkflowStage.DISCOVERING: DiscoveryHandler(service),
+                WorkflowStage.SCREENING: ScreeningHandler(),
+                WorkflowStage.AWAITING_CORPUS_APPROVAL: ApprovalGateHandler(approval),
+                WorkflowStage.DRAFTING: drafting,
+            },
+            runtime_config={"discovery_enabled": True},
+        )
+        waiting = engine.start("LLM agent memory", self.corpus_path)
+        pending = self.store.list_candidates(
+            waiting.run_id, status=CandidateStatus.PENDING
+        )
+        approval.approve(
+            waiting.run_id,
+            pending[0].candidate_id,
+            reason="Relevant new evidence",
+            category="memory mechanism",
+            contribution="Introduces a memory reflection mechanism.",
+            tags=("memory", "reflection"),
+        )
+
+        completed = engine.resume(waiting.run_id)
+
+        self.assertEqual(completed.status, RunStatus.COMPLETED)
+        self.assertEqual(len(drafting.calls), 1)
+        approved = self.artifacts.read_json(
+            waiting.run_id, "discovery/approved_corpus.json"
+        )
+        self.assertIn(
+            "Novel Memory Reflection for LLM Agents",
+            [item["title"] for item in approved],
+        )
 
 
 if __name__ == "__main__":

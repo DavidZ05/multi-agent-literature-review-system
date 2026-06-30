@@ -13,7 +13,12 @@ ALLOWED_TRANSITIONS: dict[WorkflowStage, frozenset[WorkflowStage]] = {
         {WorkflowStage.DISCOVERING, WorkflowStage.DRAFTING}
     ),
     WorkflowStage.DISCOVERING: frozenset({WorkflowStage.SCREENING}),
-    WorkflowStage.SCREENING: frozenset({WorkflowStage.AWAITING_CORPUS_APPROVAL}),
+    WorkflowStage.SCREENING: frozenset(
+        {
+            WorkflowStage.AWAITING_CORPUS_APPROVAL,
+            WorkflowStage.DRAFTING,
+        }
+    ),
     WorkflowStage.AWAITING_CORPUS_APPROVAL: frozenset({WorkflowStage.DRAFTING}),
     WorkflowStage.DRAFTING: frozenset(
         {WorkflowStage.REVIEWING, WorkflowStage.COMPLETED}

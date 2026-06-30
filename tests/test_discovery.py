@@ -12,6 +12,7 @@ from src.literature_review.discovery.normalization import (
 )
 from src.literature_review.discovery.planner import QueryPlanner
 from src.literature_review.discovery.screening import screen_candidate
+from src.literature_review.discovery.service import DiscoveryService
 from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
@@ -21,6 +22,9 @@ from src.literature_review.models import (
     ScreeningRecommendation,
     SearchQuery,
 )
+from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 class DiscoveryModelTests(unittest.TestCase):
@@ -252,6 +256,65 @@ class ScreeningTests(unittest.TestCase):
         self.assertEqual(result.recommendation, ScreeningRecommendation.INCLUDE)
         self.assertEqual(candidate.status, CandidateStatus.PENDING)
         self.assertIn("topic_overlap", result.components)
+
+
+class FixtureProvider:
+    def __init__(self, provider_id, papers=(), error=None) -> None:
+        self.provider_id = provider_id
+        self.papers = tuple(papers)
+        self.error = error
+
+    def search(self, query):
+        if self.error:
+            raise self.error
+        return ProviderSearchResult(
+            self.provider_id,
+            query.query_id,
+            f"https://example.com/{query.query_id}",
+            self.papers,
+            b"fixture",
+            {},
+        )
+
+
+class DiscoveryServiceTests(unittest.TestCase):
+    def test_partial_provider_failure_keeps_successful_candidates(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SQLiteWorkflowStore(root / "workflow.db")
+            store.initialize()
+            from src.literature_review.models import ResearchRun
+
+            run = ResearchRun.create("LLM agent memory")
+            store.create_run(run)
+            paper = provider_paper("arxiv", "2304.03442", arxiv_id="2304.03442")
+            service = DiscoveryService(
+                QueryPlanner(max_results=2),
+                {
+                    "arxiv": FixtureProvider("arxiv", (paper,)),
+                    "semantic_scholar": FixtureProvider(
+                        "semantic_scholar",
+                        error=RuntimeError("quota"),
+                    ),
+                },
+            )
+
+            outcome = service.run(
+                run,
+                LocalArtifactStore(root / "artifacts"),
+                store,
+            )
+
+            self.assertGreater(len(outcome.candidates), 0)
+            self.assertIn("semantic_scholar", outcome.failed_providers)
+            self.assertTrue(
+                all(
+                    item.status == CandidateStatus.PENDING
+                    for item in outcome.candidates
+                )
+            )
+            event_types = [event.event_type for event in store.list_events(run.run_id)]
+            self.assertIn("provider_failed", event_types)
 
 
 if __name__ == "__main__":

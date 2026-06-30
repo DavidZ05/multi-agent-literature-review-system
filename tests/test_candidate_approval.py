@@ -2,6 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+from src.literature_review.discovery.approval import ApprovalService
 from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
@@ -23,7 +24,7 @@ def candidate(
 ) -> CandidatePaper:
     return CandidatePaper(
         candidate_id=candidate_id,
-        title="Generative Agents",
+        title="Novel Reflective Memory Agents",
         authors=("Joon Sung Park",),
         year=2023,
         venue="UIST",
@@ -115,6 +116,69 @@ class CandidateRepositoryTests(unittest.TestCase):
         self.assertEqual(cache.get("arxiv:key"), b"body")
         now[0] = 111.0
         self.assertIsNone(cache.get("arxiv:key"))
+
+
+class ApprovalServiceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.store = SQLiteWorkflowStore(self.root / "workflow.db")
+        self.store.initialize()
+        self.run = ResearchRun.create("Memory agents")
+        self.store.create_run(self.run)
+        self.store.upsert_candidate(self.run.run_id, candidate())
+        self.service = ApprovalService(self.store)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_approval_requires_writer_visible_metadata(self) -> None:
+        with self.assertRaisesRegex(ValueError, "category"):
+            self.service.approve(
+                self.run.run_id,
+                "cand_one",
+                reason="Useful",
+                category="",
+                contribution="Contribution",
+                tags=("memory",),
+            )
+
+    def test_only_approved_candidate_enters_validated_corpus(self) -> None:
+        self.service.approve(
+            self.run.run_id,
+            "cand_one",
+            reason="Core evidence",
+            category="memory mechanism",
+            contribution="Introduces reflective agent memory.",
+            tags=("memory", "reflection"),
+        )
+        seed_path = Path(__file__).resolve().parents[1] / "data" / "papers.json"
+
+        records = self.service.build_approved_corpus(self.run.run_id, seed_path)
+
+        added = next(
+            record
+            for record in records
+            if record["title"] == "Novel Reflective Memory Agents"
+        )
+        self.assertTrue(added["citation_key"].startswith("park2023"))
+        self.assertEqual(
+            added["evidence"],
+            "metadata verified; full-text verification pending",
+        )
+
+    def test_rejected_candidate_never_enters_corpus(self) -> None:
+        self.service.reject(
+            self.run.run_id,
+            "cand_one",
+            reason="Outside scope",
+        )
+        seed_path = Path(__file__).resolve().parents[1] / "data" / "papers.json"
+        records = self.service.build_approved_corpus(self.run.run_id, seed_path)
+        self.assertNotIn(
+            "Novel Reflective Memory Agents",
+            [item["title"] for item in records],
+        )
 
 
 if __name__ == "__main__":
