@@ -38,7 +38,63 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         self.store.initialize()
         with sqlite3.connect(self.path) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-        self.assertEqual(version, 1)
+        self.assertEqual(version, 2)
+
+    def test_version_one_database_migrates_without_losing_data(self) -> None:
+        legacy_path = Path(self.tmp.name) / "legacy.db"
+        with sqlite3.connect(legacy_path) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE runs (
+                    run_id TEXT PRIMARY KEY,
+                    topic TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    current_stage TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    corpus_version INTEGER NOT NULL,
+                    revision_count INTEGER NOT NULL
+                );
+                CREATE TABLE workflow_events (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                    event_type TEXT NOT NULL,
+                    stage TEXT,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE checkpoints (
+                    run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                    stage TEXT NOT NULL,
+                    input_fingerprint TEXT NOT NULL,
+                    output_hashes_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (run_id, stage)
+                );
+                PRAGMA user_version = 1;
+                """
+            )
+        legacy = SQLiteWorkflowStore(legacy_path)
+        legacy.initialize()
+        legacy.create_run(self.run)
+        checkpoint = StageCheckpoint(
+            self.run.run_id,
+            WorkflowStage.PLANNING,
+            "a" * 64,
+            {},
+            "completed",
+            utc_now_iso(),
+            WorkflowStage.DRAFTING,
+        )
+        legacy.put_checkpoint(checkpoint)
+
+        self.assertEqual(
+            legacy.get_checkpoint(self.run.run_id, WorkflowStage.PLANNING),
+            checkpoint,
+        )
+        with sqlite3.connect(legacy_path) as connection:
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
 
     def test_create_get_list_and_update_run(self) -> None:
         self.store.create_run(self.run)
@@ -105,6 +161,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             {"request": "b" * 64},
             "completed",
             utc_now_iso(),
+            WorkflowStage.DRAFTING,
         )
         second = replace(first, input_fingerprint="c" * 64)
         self.store.put_checkpoint(first)
@@ -124,11 +181,11 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
     def test_future_schema_is_rejected_without_change(self) -> None:
         future = Path(self.tmp.name) / "future.db"
         with sqlite3.connect(future) as connection:
-            connection.execute("PRAGMA user_version = 2")
+            connection.execute("PRAGMA user_version = 3")
         with self.assertRaises(UnsupportedSchemaVersionError):
             SQLiteWorkflowStore(future).initialize()
         with sqlite3.connect(future) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 3)
 
 
 class LocalArtifactStoreTests(unittest.TestCase):

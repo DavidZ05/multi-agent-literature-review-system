@@ -1,4 +1,12 @@
 from src.literature_review.workflow.checkpoints import fingerprint_inputs
+from src.literature_review.workflow.engine import (
+    PersistentWorkflowEngine,
+    StageContext,
+    StageExecutionError,
+    StageHandler,
+    StageResult,
+    WorkflowStore,
+)
 from src.literature_review.workflow.state import (
     ALLOWED_TRANSITIONS,
     InvalidTransitionError,
@@ -9,6 +17,12 @@ from src.literature_review.workflow.state import (
 __all__ = [
     "ALLOWED_TRANSITIONS",
     "InvalidTransitionError",
+    "PersistentWorkflowEngine",
+    "StageContext",
+    "StageExecutionError",
+    "StageHandler",
+    "StageResult",
+    "WorkflowStore",
     "can_transition",
     "fingerprint_inputs",
     "require_transition",

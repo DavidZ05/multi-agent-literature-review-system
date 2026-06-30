@@ -39,6 +39,7 @@ def _parse_utc_timestamp(value: str, field_name: str) -> datetime:
 
 class RunStatus(str, Enum):
     ACTIVE = "active"
+    PAUSED = "paused"
     WAITING = "waiting"
     RETRY_WAIT = "retry_wait"
     COMPLETED = "completed"
@@ -186,10 +187,13 @@ class StageCheckpoint:
     output_artifact_hashes: Mapping[str, str]
     status: str
     created_at: str
+    next_stage: WorkflowStage | None = None
 
     def __post_init__(self) -> None:
         _validate_run_id(self.run_id)
         _require_enum(self.stage, WorkflowStage, "stage")
+        if self.next_stage is not None:
+            _require_enum(self.next_stage, WorkflowStage, "next_stage")
         _parse_utc_timestamp(self.created_at, "created_at")
         object.__setattr__(
             self,
@@ -205,6 +209,7 @@ class StageCheckpoint:
             "output_artifact_hashes": dict(self.output_artifact_hashes),
             "status": self.status,
             "created_at": self.created_at,
+            "next_stage": (None if self.next_stage is None else self.next_stage.value),
         }
 
     @classmethod
@@ -216,6 +221,11 @@ class StageCheckpoint:
             output_artifact_hashes=dict(data["output_artifact_hashes"]),
             status=data["status"],
             created_at=data["created_at"],
+            next_stage=(
+                None
+                if data.get("next_stage") is None
+                else WorkflowStage(data["next_stage"])
+            ),
         )
 
 

@@ -424,11 +424,13 @@ class StageCheckpointTests(unittest.TestCase):
             },
             status="ready",
             created_at="2026-01-01T00:00:00+00:00",
+            next_stage=WorkflowStage.REVISING,
         )
 
         serialized = checkpoint.to_dict()
 
         self.assertEqual(serialized["stage"], "reviewing")
+        self.assertEqual(serialized["next_stage"], "revising")
         self.assertEqual(json.loads(json.dumps(serialized)), serialized)
         self.assertEqual(StageCheckpoint.from_dict(serialized), checkpoint)
 

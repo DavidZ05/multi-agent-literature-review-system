@@ -13,12 +13,8 @@ ALLOWED_TRANSITIONS: dict[WorkflowStage, frozenset[WorkflowStage]] = {
         {WorkflowStage.DISCOVERING, WorkflowStage.DRAFTING}
     ),
     WorkflowStage.DISCOVERING: frozenset({WorkflowStage.SCREENING}),
-    WorkflowStage.SCREENING: frozenset(
-        {WorkflowStage.AWAITING_CORPUS_APPROVAL}
-    ),
-    WorkflowStage.AWAITING_CORPUS_APPROVAL: frozenset(
-        {WorkflowStage.DRAFTING}
-    ),
+    WorkflowStage.SCREENING: frozenset({WorkflowStage.AWAITING_CORPUS_APPROVAL}),
+    WorkflowStage.AWAITING_CORPUS_APPROVAL: frozenset({WorkflowStage.DRAFTING}),
     WorkflowStage.DRAFTING: frozenset(
         {WorkflowStage.REVIEWING, WorkflowStage.COMPLETED}
     ),
@@ -26,9 +22,7 @@ ALLOWED_TRANSITIONS: dict[WorkflowStage, frozenset[WorkflowStage]] = {
         {WorkflowStage.REVISING, WorkflowStage.POLISHING}
     ),
     WorkflowStage.REVISING: frozenset({WorkflowStage.REVIEWING}),
-    WorkflowStage.POLISHING: frozenset(
-        {WorkflowStage.FINAL_VERIFICATION}
-    ),
+    WorkflowStage.POLISHING: frozenset({WorkflowStage.FINAL_VERIFICATION}),
     WorkflowStage.FINAL_VERIFICATION: frozenset(
         {WorkflowStage.COMPLETED, WorkflowStage.REVISING}
     ),

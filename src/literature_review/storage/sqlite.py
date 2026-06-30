@@ -32,7 +32,7 @@ class UnsupportedSchemaVersionError(WorkflowStoreError):
 
 
 class SQLiteWorkflowStore:
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -55,11 +55,10 @@ class SQLiteWorkflowStore:
                 raise UnsupportedSchemaVersionError(
                     f"database schema {version} is newer than supported {self.SCHEMA_VERSION}"
                 )
-            if version == self.SCHEMA_VERSION:
-                return
-            with connection:
-                connection.executescript(
-                    """
+            if version == 0:
+                with connection:
+                    connection.executescript(
+                        """
                     CREATE TABLE runs (
                         run_id TEXT PRIMARY KEY,
                         topic TEXT NOT NULL,
@@ -85,11 +84,19 @@ class SQLiteWorkflowStore:
                         output_hashes_json TEXT NOT NULL,
                         status TEXT NOT NULL,
                         created_at TEXT NOT NULL,
+                        next_stage TEXT,
                         PRIMARY KEY (run_id, stage)
                     );
-                    PRAGMA user_version = 1;
+                    PRAGMA user_version = 2;
                     """
-                )
+                    )
+                return
+            if version == 1:
+                with connection:
+                    connection.execute(
+                        "ALTER TABLE checkpoints ADD COLUMN next_stage TEXT"
+                    )
+                    connection.execute("PRAGMA user_version = 2")
 
     def create_run(self, run: ResearchRun) -> None:
         values = run.to_dict()
@@ -187,12 +194,14 @@ class SQLiteWorkflowStore:
         with self._connection() as connection, connection:
             connection.execute(
                 """INSERT INTO checkpoints
-                (run_id,stage,input_fingerprint,output_hashes_json,status,created_at)
-                VALUES (?,?,?,?,?,?)
+                (run_id,stage,input_fingerprint,output_hashes_json,status,
+                 created_at,next_stage)
+                VALUES (?,?,?,?,?,?,?)
                 ON CONFLICT(run_id,stage) DO UPDATE SET
                 input_fingerprint=excluded.input_fingerprint,
                 output_hashes_json=excluded.output_hashes_json,
-                status=excluded.status,created_at=excluded.created_at""",
+                status=excluded.status,created_at=excluded.created_at,
+                next_stage=excluded.next_stage""",
                 (
                     checkpoint.run_id,
                     checkpoint.stage.value,
@@ -204,6 +213,11 @@ class SQLiteWorkflowStore:
                     ),
                     checkpoint.status,
                     checkpoint.created_at,
+                    (
+                        None
+                        if checkpoint.next_stage is None
+                        else checkpoint.next_stage.value
+                    ),
                 ),
             )
 
@@ -226,6 +240,7 @@ class SQLiteWorkflowStore:
                 "output_artifact_hashes": json.loads(row["output_hashes_json"]),
                 "status": row["status"],
                 "created_at": row["created_at"],
+                "next_stage": row["next_stage"],
             }
         )
 
