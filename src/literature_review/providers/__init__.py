@@ -11,6 +11,9 @@ from src.literature_review.providers.http import (
     ProviderResponseTooLargeError,
     UrllibHttpTransport,
 )
+from src.literature_review.providers.semantic_scholar import (
+    SemanticScholarProvider,
+)
 
 __all__ = [
     "HttpResponse",
@@ -21,5 +24,6 @@ __all__ = [
     "ProviderResponseTooLargeError",
     "ResponseCache",
     "SearchProvider",
+    "SemanticScholarProvider",
     "UrllibHttpTransport",
 ]

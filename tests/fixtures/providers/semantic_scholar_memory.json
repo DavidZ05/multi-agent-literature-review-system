@@ -1,0 +1,32 @@
+{
+  "total": 2,
+  "offset": 0,
+  "next": 2,
+  "data": [
+    {
+      "paperId": "s2-generative-agents",
+      "title": "Generative Agents: Interactive Simulacra of Human Behavior",
+      "abstract": "Agents store, reflect on, and retrieve memories.",
+      "year": 2023,
+      "venue": "UIST",
+      "authors": [{"authorId": "1", "name": "Joon Sung Park"}],
+      "externalIds": {
+        "DOI": "10.1145/3586183.3606763",
+        "ArXiv": "2304.03442"
+      },
+      "url": "https://www.semanticscholar.org/paper/s2-generative-agents",
+      "openAccessPdf": {"url": "https://arxiv.org/pdf/2304.03442"}
+    },
+    {
+      "paperId": "s2-memory-survey",
+      "title": "A Survey on the Memory Mechanism of Large Language Model Based Agents",
+      "abstract": null,
+      "year": 2024,
+      "venue": null,
+      "authors": [{"authorId": "2", "name": "  Zeyu Zhang  "}],
+      "externalIds": {"ArXiv": "2404.13501v2"},
+      "url": "https://www.semanticscholar.org/paper/s2-memory-survey",
+      "openAccessPdf": null
+    }
+  ]
+}
