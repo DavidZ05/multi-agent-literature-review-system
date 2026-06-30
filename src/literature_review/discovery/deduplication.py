@@ -56,19 +56,28 @@ def _identity(candidate: CandidatePaper, paper: ProviderPaper) -> bool:
     )
 
 
-def _candidate_id(paper: ProviderPaper) -> str:
+def _candidate_id(
+    paper: ProviderPaper,
+    *,
+    disambiguator: str | None = None,
+) -> str:
     strongest = (
         normalize_doi(paper.doi)
         or normalize_arxiv_id(paper.arxiv_id)
         or paper.semantic_scholar_id
         or f"{normalize_title_key(paper.title)}:{paper.year}"
     )
-    return "cand_" + hashlib.sha256(strongest.encode("utf-8")).hexdigest()[:24]
+    identity = strongest if disambiguator is None else f"{strongest}\0{disambiguator}"
+    return "cand_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
 
 
-def _new_candidate(paper: ProviderPaper) -> CandidatePaper:
+def _new_candidate(
+    paper: ProviderPaper,
+    *,
+    disambiguator: str | None = None,
+) -> CandidatePaper:
     return CandidatePaper(
-        candidate_id=_candidate_id(paper),
+        candidate_id=_candidate_id(paper, disambiguator=disambiguator),
         title=paper.title,
         authors=paper.authors,
         year=paper.year,
@@ -139,7 +148,12 @@ def deduplicate_papers(
                     "conflicting year or disjoint authors",
                 )
             )
-            candidates.append(_new_candidate(paper))
+            candidates.append(
+                _new_candidate(
+                    paper,
+                    disambiguator=f"{paper.provider}:{paper.provider_id}",
+                )
+            )
             continue
         candidates[candidates.index(match)] = _merge(match, paper)
     return candidates, ambiguous

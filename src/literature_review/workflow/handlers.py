@@ -59,6 +59,7 @@ class DiscoveryHandler:
                 context.run,
                 context.artifact_store,
                 context.workflow_store,
+                cancellation_check=context.is_cancelled,
             )
         except AllProvidersFailedError as exc:
             raise RetryableStageError(str(exc)) from exc

@@ -158,17 +158,79 @@ python3 -m src.memory_review_pipeline \
   status RUN_ID
 ```
 
-The current persistent path uses the supplied approved local corpus. It does not
-yet contact external literature services.
+### Automatic Literature Discovery
+
+Add `--discover` to query arXiv and Semantic Scholar before drafting:
+
+```bash
+python3 -m src.memory_review_pipeline start \
+  --topic "Memory-Augmented LLM Agents" \
+  --corpus data/papers.json \
+  --discover \
+  --providers arxiv semantic_scholar \
+  --max-results 10
+```
+
+The workflow searches, normalizes, deduplicates, and scores candidates, then
+stops with `status=waiting` at `awaiting_corpus_approval`. Discovered papers
+cannot be cited at this point and have no citation key.
+
+```bash
+python3 -m src.memory_review_pipeline candidates RUN_ID
+python3 -m src.memory_review_pipeline candidates RUN_ID --status pending
+
+python3 -m src.memory_review_pipeline approve RUN_ID CANDIDATE_ID \
+  --reason "Core evidence" \
+  --category "memory mechanism" \
+  --contribution "Introduces a reflective memory mechanism." \
+  --tags memory reflection
+
+python3 -m src.memory_review_pipeline reject RUN_ID CANDIDATE_ID \
+  --reason "Outside the review scope"
+
+python3 -m src.memory_review_pipeline defer RUN_ID CANDIDATE_ID \
+  --reason "Full text should be checked first"
+
+python3 -m src.memory_review_pipeline close-discovery RUN_ID
+python3 -m src.memory_review_pipeline resume RUN_ID
+```
+
+`resume` is refused while any candidate remains pending. Approved candidates
+receive deterministic citation keys, are merged with the seed corpus, and pass
+the existing corpus validator before Writer can see them. Writer generates
+evidence paragraphs from every approved category, so newly approved papers
+enter the body discussion as well as the references.
+
+Provider responses are cached in SQLite for 24 hours. arXiv calls are spaced by
+at least three seconds; Semantic Scholar calls use conservative throttling.
+Partial provider failure is recorded and successful results continue. If every
+provider fails, the run enters `retry_wait` and can be resumed later.
 
 ## API Configuration
 
-API use is optional. The current submission includes a configuration interface for future API-backed agents, while the runnable project still defaults to deterministic local logic. The current code records resolved API settings but does not require external requests to complete the assignment workflow.
+There are two separate API concerns:
+
+- Literature discovery uses public arXiv and Semantic Scholar endpoints.
+- Agent generation still defaults to deterministic local logic; its API profile
+  remains an extension interface.
+
+arXiv needs no account or key. Semantic Scholar also permits limited anonymous
+requests; an optional key can improve quota:
+
+```env
+SEMANTIC_SCHOLAR_API_KEY=
+```
+
+The key is sent only in the `x-api-key` header. It is never written to URLs,
+events, SQLite records, artifacts, or command output.
 
 Create a local env file if you want to experiment with API configuration:
 
 ```bash
 cp .env.example .env
+set -a
+source .env
+set +a
 ```
 
 Keep `.env` local and do not submit it, because it may contain API keys. Submit `.env.example` only. The generated `outputs/runtime_config.json` sanitizes keys as `<configured>` when a key is present.
@@ -227,6 +289,13 @@ For this final project, API configuration demonstrates extensibility. The requir
 
 ```bash
 python3 -m unittest discover -s tests -v
+```
+
+This suite uses recorded provider fixtures and does not need network access.
+Optional live checks request at most two records per provider:
+
+```bash
+RUN_LIVE_PROVIDER_TESTS=1 python3 -m unittest tests.test_live_providers -v
 ```
 
 ## Anti-Hallucination Design

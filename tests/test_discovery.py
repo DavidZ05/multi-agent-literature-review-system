@@ -228,6 +228,7 @@ class DeduplicationTests(unittest.TestCase):
             ]
         )
         self.assertEqual(len(candidates), 2)
+        self.assertEqual(len({item.candidate_id for item in candidates}), 2)
         self.assertEqual(len(ambiguous), 1)
 
 
@@ -263,8 +264,10 @@ class FixtureProvider:
         self.provider_id = provider_id
         self.papers = tuple(papers)
         self.error = error
+        self.calls = 0
 
     def search(self, query):
+        self.calls += 1
         if self.error:
             raise self.error
         return ProviderSearchResult(
@@ -315,6 +318,31 @@ class DiscoveryServiceTests(unittest.TestCase):
             )
             event_types = [event.event_type for event in store.list_events(run.run_id)]
             self.assertIn("provider_failed", event_types)
+
+    def test_cancellation_check_stops_between_provider_requests(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = SQLiteWorkflowStore(root / "workflow.db")
+            store.initialize()
+            from src.literature_review.models import ResearchRun
+
+            run = ResearchRun.create("LLM agent memory")
+            store.create_run(run)
+            provider = FixtureProvider(
+                "arxiv",
+                (provider_paper("arxiv", "2304.03442", arxiv_id="2304.03442"),),
+            )
+            checks = iter((False, True))
+            service = DiscoveryService(QueryPlanner(max_results=1), {"arxiv": provider})
+
+            service.run(
+                run,
+                LocalArtifactStore(root / "artifacts"),
+                store,
+                cancellation_check=lambda: next(checks),
+            )
+
+            self.assertEqual(provider.calls, 1)
 
 
 if __name__ == "__main__":

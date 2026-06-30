@@ -56,7 +56,11 @@ flowchart LR
     Engine --> Checkpoints["Stage checkpoints<br/>input fingerprints"]
     Engine --> Artifacts["Run-scoped artifacts<br/>atomic writes + SHA-256"]
     Engine --> Planning["Planning Handler"]
-    Planning --> Drafting["Drafting Handler"]
+    Planning -->|"local corpus mode"| Drafting["Drafting Handler"]
+    Planning --> Discovery["arXiv + Semantic Scholar"]
+    Discovery --> Screening["Normalize, deduplicate, screen"]
+    Screening --> Approval["Human corpus approval"]
+    Approval --> Drafting
     Drafting --> Orchestrator["Existing Multi-Agent Orchestrator"]
     Orchestrator --> Artifacts
 ```
@@ -66,6 +70,15 @@ the terminal `cancelled` state. Resume reuses a completed stage only when its
 input fingerprint and every output artifact hash still match. Each checkpoint
 also stores the next stage, so interruption between checkpoint creation and
 state transition does not cause an agent to run twice.
+
+Discovery uses provider adapters behind an injectable HTTP transport. arXiv is
+the primary structured source for this computer-science topic; Semantic Scholar
+adds cross-index metadata and acts as a secondary source. Raw responses,
+queries, candidate provenance, screening scores, and human decisions are
+auditable. DOI match has highest deduplication priority, followed by arXiv ID,
+Semantic Scholar ID, normalized title and year, and high-similarity title with
+overlapping authors. Conflicting years or disjoint authors are not silently
+merged.
 
 ## Modular Implementation
 
@@ -203,7 +216,8 @@ In short, the system is automated by default, but humans intervene at scope, evi
 
 - judging whether the topic is interesting enough;
 - deciding whether a marginal paper belongs in the corpus;
-- automatically downloading additional papers during a long task;
+- approving discovered papers and adding scholarly contribution notes;
+- downloading and reading every candidate PDF in full;
 - verifying full paper content beyond metadata-level and lightweight claim-alignment checks;
 - making final academic-quality judgments;
 - submitting the assignment.
@@ -234,7 +248,11 @@ the checkpoint.
 
 ## Agent Evaluation and Reflection
 
-Search Agent performed well as a corpus organizer. Its main strength is converting `data/papers.json` into a structured handoff that downstream agents can consume. This makes the pipeline more stable than passing a long free-form note to the Writer Agent. Its limitation is that the current implementation does not independently crawl arXiv, Semantic Scholar, or Crossref. In a stronger version, Search Agent would combine API search, deduplication, and metadata verification.
+Search Agent now has two layers. Discovery queries arXiv and Semantic Scholar,
+normalizes metadata, merges cross-provider duplicates, and produces transparent
+screening recommendations. The corpus organizer then groups only seed and
+human-approved records for Writer. Its main limitation is evidence depth:
+provider metadata and abstracts are not equivalent to full-paper verification.
 
 Writer Agent performed well at turning structured source memory into a coherent survey. It produced sections on methodology, taxonomy, mechanism families, evaluation, reliability risks, multi-agent implications, open problems, and references. Its main risk is overgeneralization: it may write claims that sound reasonable but are broader than the corpus supports. For this reason, Writer Agent must remain constrained by citation keys and must be followed by the Expert Review Panel.
 
@@ -255,7 +273,7 @@ Orchestrator performed the role of process controller. It makes the system repro
 Future versions could improve the system in five directions:
 
 1. Add real API-backed generation while preserving the same artifact contracts, citation gates, and deterministic fallback.
-2. Connect Search Agent to arXiv, Semantic Scholar, or Crossref for candidate discovery, DOI checks, deduplication, and metadata verification.
+2. Add Crossref or OpenAlex as another structured fallback and enrich DOI metadata.
 3. Add full-text PDF extraction so Reviewer can verify claim-reference alignment beyond metadata-level checks.
 4. Add a small command-line or web interface for human approval of seed-corpus additions and citation-risk decisions.
 5. Extend the modular package with additional interfaces or deeper verification components while preserving the compatibility entrypoint and current artifact contracts.

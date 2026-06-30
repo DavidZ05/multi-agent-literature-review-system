@@ -89,6 +89,8 @@ The exact number of discovered tests may grow as documentation and compatibility
 ## Design Highlights
 
 - Search Agent groups verified papers from `data/papers.json`.
+- The optional persistent path can discover arXiv and Semantic Scholar
+  candidates, but requires human approval before Writer receives them.
 - Writer Agent drafts the survey using only verified citation keys.
 - Expert Review Panel checks citation integrity, topical coverage, and structure.
 - Review Synthesizer passes blocking feedback back to Writer.
@@ -96,6 +98,8 @@ The exact number of discovered tests may grow as documentation and compatibility
 - Final Verification Reviewer checks the polished draft before final output.
 - Orchestrator coordinates the workflow and stops when Review Synthesizer returns `accepted` or the loop limit is reached.
 - `.env.example` documents optional single-API and multi-agent API configuration; local deterministic execution is the default.
+- Discovery keys and runtime state stay local under `.env` and
+  `.review-workflow/`; neither is required for the reproducible submission run.
 
 ## Human Intervention Points
 

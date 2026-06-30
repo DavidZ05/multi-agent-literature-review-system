@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from src.literature_review.discovery.deduplication import deduplicate_papers
 from src.literature_review.discovery.planner import QueryPlanner
@@ -36,6 +36,7 @@ class DiscoveryService:
         run: ResearchRun,
         artifact_store: LocalArtifactStore,
         workflow_store: SQLiteWorkflowStore,
+        cancellation_check: Callable[[], bool] | None = None,
     ) -> DiscoveryOutcome:
         del artifact_store
         queries = self.planner.plan(run.topic, tuple(self.providers))
@@ -43,7 +44,11 @@ class DiscoveryService:
         failed: set[str] = set()
         succeeded: set[str] = set()
         artifacts: dict[str, Any] = {}
+        cancelled = False
         for query in queries:
+            if cancellation_check is not None and cancellation_check():
+                cancelled = True
+                break
             workflow_store.save_search_query(run.run_id, query)
             workflow_store.append_event(
                 run.run_id,
@@ -84,7 +89,7 @@ class DiscoveryService:
                 run.current_stage,
             )
 
-        if not succeeded:
+        if not succeeded and not cancelled:
             raise AllProvidersFailedError("all literature providers failed")
 
         candidates, ambiguous = deduplicate_papers(papers)
