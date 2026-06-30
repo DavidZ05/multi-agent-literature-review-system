@@ -1,8 +1,10 @@
 import unittest
 from dataclasses import replace
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from src.literature_review.config import AgentRuntimeConfig
 from src.literature_review.models import RunStatus, WorkflowStage, utc_now_iso
 from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
 from src.literature_review.workflow.checkpoints import fingerprint_inputs
@@ -12,6 +14,7 @@ from src.literature_review.workflow.engine import (
     StageExecutionError,
     StageResult,
 )
+from src.literature_review.workflow.handlers import DraftingHandler, PlanningHandler
 from src.literature_review.workflow.state import (
     InvalidTransitionError,
     can_transition,
@@ -293,6 +296,154 @@ class PersistentWorkflowEngineTests(unittest.TestCase):
 
         self.assertEqual(cancelled.status, RunStatus.CANCELLED)
         self.assertEqual(resumed.status, RunStatus.CANCELLED)
+
+
+class FakeOrchestrator:
+    instances: list["FakeOrchestrator"] = []
+
+    def __init__(
+        self,
+        corpus_path: Path,
+        output_dir: Path,
+        runtime_config: AgentRuntimeConfig,
+        run_id: str | None = None,
+    ) -> None:
+        self.corpus_path = corpus_path
+        self.output_dir = output_dir
+        self.runtime_config = runtime_config
+        self.run_id = run_id
+        self.__class__.instances.append(self)
+
+    def run(self) -> dict[str, object]:
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        (self.output_dir / "survey.md").write_text(
+            "# Durable survey\n", encoding="utf-8"
+        )
+        for filename in (
+            "review_report.json",
+            "final_verification.json",
+            "evaluation_report.json",
+            "revision_log.json",
+        ):
+            (self.output_dir / filename).write_text(
+                json.dumps({"status": "accepted"}),
+                encoding="utf-8",
+            )
+        (self.output_dir / "reflection_log.md").write_text(
+            "# Reflection\n", encoding="utf-8"
+        )
+        return {"status": "accepted"}
+
+
+class DurableHandlerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.store = SQLiteWorkflowStore(root / "workflow.db")
+        self.store.initialize()
+        self.artifacts = LocalArtifactStore(root / "artifacts")
+        self.corpus_path = root / "papers.json"
+        self.corpus_path.write_text("[]\n", encoding="utf-8")
+        self.run = self._create_run()
+        self.context = StageContext(
+            run=replace(
+                self.run,
+                current_stage=WorkflowStage.PLANNING,
+                updated_at=utc_now_iso(),
+            ),
+            artifact_store=self.artifacts,
+            workflow_store=self.store,
+            corpus_path=self.corpus_path,
+            runtime_config={"backend": "deterministic"},
+            _cancellation_check=lambda: False,
+        )
+        FakeOrchestrator.instances.clear()
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _create_run(self):
+        from src.literature_review.models import ResearchRun
+
+        run = ResearchRun.create("Memory agents")
+        self.store.create_run(run)
+        return run
+
+    def test_planning_handler_emits_research_request(self) -> None:
+        result = PlanningHandler()(self.context)
+
+        self.assertEqual(result.next_stage, WorkflowStage.DRAFTING)
+        self.assertEqual(
+            result.output_artifacts["inputs/research_request.json"],
+            {
+                "topic": "Memory agents",
+                "corpus_path": str(self.corpus_path.resolve()),
+                "runtime_config": {"backend": "deterministic"},
+            },
+        )
+
+    def test_drafting_handler_imports_final_artifact_contract(self) -> None:
+        runtime_config = AgentRuntimeConfig()
+        drafting_context = replace(
+            self.context,
+            run=replace(
+                self.context.run,
+                current_stage=WorkflowStage.DRAFTING,
+                updated_at=utc_now_iso(),
+            ),
+        )
+        handler = DraftingHandler(
+            runtime_config,
+            orchestrator_factory=FakeOrchestrator,
+        )
+
+        result = handler(drafting_context)
+
+        self.assertEqual(result.next_stage, WorkflowStage.COMPLETED)
+        self.assertEqual(
+            set(result.output_artifacts),
+            {
+                "final/survey.md",
+                "final/review_report.json",
+                "final/final_verification.json",
+                "final/evaluation_report.json",
+                "final/reflection_log.md",
+                "final/revision_log.json",
+            },
+        )
+        instance = FakeOrchestrator.instances[0]
+        self.assertEqual(instance.run_id, self.run.run_id)
+        self.assertEqual(instance.corpus_path, self.corpus_path)
+        self.assertEqual(instance.runtime_config, runtime_config)
+
+    def test_real_orchestrator_completes_inside_persistent_engine(self) -> None:
+        runtime_config = AgentRuntimeConfig()
+        engine = PersistentWorkflowEngine(
+            self.store,
+            self.artifacts,
+            {
+                WorkflowStage.PLANNING: PlanningHandler(),
+                WorkflowStage.DRAFTING: DraftingHandler(runtime_config),
+            },
+            runtime_config=runtime_config.public_dict(),
+        )
+        corpus = Path(__file__).resolve().parents[1] / "data" / "papers.json"
+
+        completed = engine.start("Memory agents", corpus)
+
+        self.assertEqual(completed.status, RunStatus.COMPLETED)
+        for relative_path in (
+            "final/survey.md",
+            "final/review_report.json",
+            "final/final_verification.json",
+            "final/evaluation_report.json",
+            "final/reflection_log.md",
+            "final/revision_log.json",
+        ):
+            self.assertTrue(
+                self.artifacts.exists(completed.run_id, relative_path),
+                relative_path,
+            )
 
 
 if __name__ == "__main__":

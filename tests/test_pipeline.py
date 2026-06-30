@@ -56,7 +56,9 @@ class PipelineTests(unittest.TestCase):
                 [paper["citation_key"] for paper in papers],
                 ["packer2023memgpt", "shinn2023reflexion"],
             )
-            self.assertTrue(all(paper["url"].startswith("https://") for paper in papers))
+            self.assertTrue(
+                all(paper["url"].startswith("https://") for paper in papers)
+            )
 
     def test_orchestrator_generates_survey_and_review_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -93,6 +95,39 @@ class PipelineTests(unittest.TestCase):
             ]
             for artifact in expected_artifacts:
                 self.assertTrue(artifact.exists(), f"{artifact} was not generated")
+
+    def test_orchestrator_preserves_optional_run_trace(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "papers.json"
+            corpus.write_text(
+                json.dumps(
+                    [
+                        {
+                            "citation_key": "seed2026",
+                            "title": "Seed",
+                            "authors": ["A. Author"],
+                            "year": 2026,
+                            "venue": "Test Venue",
+                            "url": "https://example.com/seed",
+                            "category": "memory mechanism",
+                            "contribution": "A seed memory mechanism.",
+                            "evidence": "Metadata checked.",
+                            "tags": ["memory"],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            run_id = "run_0123456789abcdef0123456789abcdef"
+
+            result = Orchestrator(
+                corpus_path=corpus,
+                output_dir=root / "outputs",
+                run_id=run_id,
+            ).run()
+
+            self.assertEqual(result["run_id"], run_id)
 
     def test_reviewer_flags_unknown_citations(self) -> None:
         papers = [
