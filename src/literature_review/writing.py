@@ -22,11 +22,7 @@ class WriterAgent(RuntimeAwareAgent):
         review_feedback: dict[str, Any] | None = None,
     ) -> str:
         grouped = search_report["grouped_papers"]
-        all_papers = [
-            paper
-            for papers in grouped.values()
-            for paper in papers
-        ]
+        all_papers = [paper for papers in grouped.values() for paper in papers]
         self._fallback_papers = all_papers
 
         mechanism_papers = grouped.get("memory mechanism", [])
@@ -127,6 +123,9 @@ class WriterAgent(RuntimeAwareAgent):
             "",
             self._paper_table(all_papers),
             "",
+            "## 3.1 Approved Evidence by Category",
+            "",
+            *self._dynamic_evidence_sections(grouped),
             "### Mechanism Comparison",
             "",
             "| Mechanism family | Typical representation | Main strength | Main risk | Best fit in this project |",
@@ -413,15 +412,38 @@ class WriterAgent(RuntimeAwareAgent):
             "| Source | Category | Contribution |",
             "|---|---|---|",
         ]
-        for paper in sorted(papers, key=lambda item: (item["year"], item["citation_key"])):
+        for paper in sorted(
+            papers, key=lambda item: (item["year"], item["citation_key"])
+        ):
             rows.append(
                 f"| {citation_label(paper)} | {paper['category']} | {paper['contribution']} |"
             )
         return "\n".join(rows)
 
+    def _dynamic_evidence_sections(
+        self,
+        grouped: dict[str, list[dict[str, Any]]],
+    ) -> list[str]:
+        sections = []
+        for category in sorted(grouped):
+            sections.extend([f"### {category.title()}", ""])
+            for paper in grouped[category]:
+                sections.extend(
+                    [
+                        (
+                            f"{citation_label(paper)} contributes evidence to "
+                            f"this category by {paper['contribution']}"
+                        ),
+                        "",
+                    ]
+                )
+        return sections
+
     def _references(self, papers: list[dict[str, Any]]) -> list[str]:
         refs = []
-        for paper in sorted(papers, key=lambda item: (first_author_last_name(item), item["year"])):
+        for paper in sorted(
+            papers, key=lambda item: (first_author_last_name(item), item["year"])
+        ):
             author_text = self._format_authors(paper["authors"])
             refs.append(
                 f"- [{paper['citation_key']}] {author_text} ({paper['year']}). "

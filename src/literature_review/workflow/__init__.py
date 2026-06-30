@@ -1,6 +1,7 @@
 from src.literature_review.workflow.checkpoints import fingerprint_inputs
 from src.literature_review.workflow.engine import (
     PersistentWorkflowEngine,
+    RetryableStageError,
     StageContext,
     StageExecutionError,
     StageHandler,
@@ -28,6 +29,7 @@ __all__ = [
     "DraftingHandler",
     "DiscoveryHandler",
     "PersistentWorkflowEngine",
+    "RetryableStageError",
     "PlanningHandler",
     "ScreeningHandler",
     "StageContext",

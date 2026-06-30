@@ -486,6 +486,26 @@ class DurableHandlerTests(unittest.TestCase):
         self.assertEqual(drafting.calls, [])
         self.assertFalse(self.artifacts.exists(run.run_id, "final/survey.json"))
 
+    def test_all_provider_failures_enter_retry_wait(self) -> None:
+        service = DiscoveryService(
+            QueryPlanner(max_results=1),
+            {"arxiv": FixtureProvider("arxiv", error=RuntimeError("temporary outage"))},
+        )
+        engine = PersistentWorkflowEngine(
+            self.store,
+            self.artifacts,
+            {
+                WorkflowStage.PLANNING: PlanningHandler(discovery_enabled=True),
+                WorkflowStage.DISCOVERING: DiscoveryHandler(service),
+            },
+            runtime_config={"discovery_enabled": True},
+        )
+
+        run = engine.start("LLM agent memory", self.corpus_path)
+
+        self.assertEqual(run.status, RunStatus.RETRY_WAIT)
+        self.assertEqual(run.current_stage, WorkflowStage.DISCOVERING)
+
     def test_approved_candidate_allows_resume_to_drafting(self) -> None:
         paper = provider_paper(
             "arxiv",

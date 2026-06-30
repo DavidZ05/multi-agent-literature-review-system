@@ -83,6 +83,10 @@ class StageExecutionError(RuntimeError):
     pass
 
 
+class RetryableStageError(RuntimeError):
+    pass
+
+
 class PersistentWorkflowEngine:
     _TERMINAL_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.CANCELLED})
 
@@ -216,6 +220,23 @@ class PersistentWorkflowEngine:
             except KeyboardInterrupt:
                 self.pause(run_id)
                 raise
+            except RetryableStageError as exc:
+                retrying = replace(
+                    self.workflow_store.get_run(run_id),
+                    status=RunStatus.RETRY_WAIT,
+                    updated_at=utc_now_iso(),
+                )
+                self.workflow_store.update_run(retrying)
+                self.workflow_store.append_event(
+                    run_id,
+                    "stage_retry_wait",
+                    {
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    },
+                    stage,
+                )
+                return retrying
             except Exception as exc:
                 self._fail(run, exc)
                 raise StageExecutionError(f"{stage.value} stage failed: {exc}") from exc
@@ -423,6 +444,7 @@ class PersistentWorkflowEngine:
 
 __all__ = [
     "PersistentWorkflowEngine",
+    "RetryableStageError",
     "StageContext",
     "StageExecutionError",
     "StageHandler",

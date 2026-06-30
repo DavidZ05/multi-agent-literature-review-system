@@ -1,5 +1,6 @@
 import io
 import json
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -7,6 +8,16 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
 from src.literature_review.cli import main
+from src.literature_review.models import (
+    CandidatePaper,
+    CandidateStatus,
+    ResearchRun,
+    RunStatus,
+    ScreeningRecommendation,
+    WorkflowStage,
+    utc_now_iso,
+)
+from src.literature_review.storage import SQLiteWorkflowStore
 
 
 class PersistentCLITests(unittest.TestCase):
@@ -111,6 +122,96 @@ class PersistentCLITests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIsNone(output)
         self.assertIn("run_not_found", stderr)
+
+    def test_candidate_approval_commands_are_json_and_persistent(self) -> None:
+        store = SQLiteWorkflowStore(self.db_path)
+        store.initialize()
+        run = ResearchRun.create("Memory agents")
+        store.create_run(run)
+        store.upsert_candidate(
+            run.run_id,
+            CandidatePaper(
+                candidate_id="cand_cli",
+                title="New Agent Memory",
+                authors=("A. Author",),
+                year=2026,
+                venue="arXiv",
+                abstract="Memory.",
+                doi=None,
+                arxiv_id="2601.00001",
+                semantic_scholar_id=None,
+                source_urls=("https://arxiv.org/abs/2601.00001",),
+                open_access_pdf_url=None,
+                provenance=("arxiv:2601.00001",),
+                recommendation=ScreeningRecommendation.INCLUDE,
+                relevance_score=0.9,
+                status=CandidateStatus.PENDING,
+            ),
+        )
+
+        code, candidates, stderr = self._run("candidates", run.run_id)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(candidates[0]["status"], "pending")
+        code, decision, stderr = self._run(
+            "approve",
+            run.run_id,
+            "cand_cli",
+            "--reason",
+            "Core evidence",
+            "--category",
+            "memory mechanism",
+            "--contribution",
+            "Introduces a new memory mechanism.",
+            "--tags",
+            "memory",
+            "mechanism",
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(decision["status"], "approved")
+        _, approved, _ = self._run("candidates", run.run_id, "--status", "approved")
+        self.assertEqual([item["candidate_id"] for item in approved], ["cand_cli"])
+
+    def test_resume_refuses_pending_approval_without_failing_run(self) -> None:
+        store = SQLiteWorkflowStore(self.db_path)
+        store.initialize()
+        run = ResearchRun.create("Memory agents")
+        waiting = replace(
+            run,
+            status=RunStatus.WAITING,
+            current_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
+            updated_at=utc_now_iso(),
+        )
+        store.create_run(waiting)
+        store.upsert_candidate(
+            waiting.run_id,
+            CandidatePaper(
+                "cand_waiting",
+                "Pending paper",
+                ("A. Author",),
+                2026,
+                "arXiv",
+                "Memory",
+                None,
+                "2601.00002",
+                None,
+                ("https://arxiv.org/abs/2601.00002",),
+                None,
+                ("arxiv:2601.00002",),
+                ScreeningRecommendation.REVIEW,
+                0.5,
+                CandidateStatus.PENDING,
+            ),
+        )
+
+        code, output, stderr = self._run("resume", waiting.run_id)
+
+        self.assertEqual(code, 3)
+        self.assertIsNone(output)
+        self.assertIn("approval_required", stderr)
+        self.assertEqual(
+            store.get_run(waiting.run_id).status,
+            RunStatus.WAITING,
+        )
 
     def test_no_arguments_preserve_legacy_one_shot_command(self) -> None:
         fake_result = {"status": "accepted", "survey": "outputs/survey.md"}

@@ -2,22 +2,38 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Sequence
 
 from src.literature_review.config import AgentRuntimeConfig
-from src.literature_review.models import WorkflowStage
+from src.literature_review.discovery import (
+    ApprovalService,
+    DiscoveryService,
+    QueryPlanner,
+)
+from src.literature_review.models import CandidateStatus, WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
 from src.literature_review.storage import (
     LocalArtifactStore,
+    CandidateNotFoundError,
     RunNotFoundError,
+    SQLiteResponseCache,
     SQLiteWorkflowStore,
 )
+from src.literature_review.providers import (
+    ArxivProvider,
+    SemanticScholarProvider,
+    UrllibHttpTransport,
+)
 from src.literature_review.workflow import (
+    ApprovalGateHandler,
+    DiscoveryHandler,
     DraftingHandler,
     PersistentWorkflowEngine,
     PlanningHandler,
+    ScreeningHandler,
     StageExecutionError,
 )
 
@@ -41,6 +57,14 @@ def _parser() -> argparse.ArgumentParser:
     start = commands.add_parser("start", help="start a persistent review run")
     start.add_argument("--topic", required=True)
     start.add_argument("--corpus", required=True, type=Path)
+    start.add_argument("--discover", action="store_true")
+    start.add_argument(
+        "--providers",
+        nargs="+",
+        choices=("arxiv", "semantic_scholar"),
+        default=("arxiv", "semantic_scholar"),
+    )
+    start.add_argument("--max-results", type=int, default=10)
 
     resume = commands.add_parser("resume", help="resume a stored run")
     resume.add_argument("run_id")
@@ -55,23 +79,99 @@ def _parser() -> argparse.ArgumentParser:
 
     cancel = commands.add_parser("cancel", help="cancel a stored run")
     cancel.add_argument("run_id")
+
+    candidates = commands.add_parser("candidates", help="list discovered papers")
+    candidates.add_argument("run_id")
+    candidates.add_argument(
+        "--status",
+        choices=tuple(status.value for status in CandidateStatus),
+    )
+
+    approve = commands.add_parser("approve", help="approve one candidate")
+    approve.add_argument("run_id")
+    approve.add_argument("candidate_id")
+    approve.add_argument("--reason", required=True)
+    approve.add_argument("--category", required=True)
+    approve.add_argument("--contribution", required=True)
+    approve.add_argument("--tags", nargs="+", required=True)
+
+    for name in ("reject", "defer"):
+        decision = commands.add_parser(name, help=f"{name} one candidate")
+        decision.add_argument("run_id")
+        decision.add_argument("candidate_id")
+        decision.add_argument("--reason", required=True)
+
+    close = commands.add_parser(
+        "close-discovery", help="confirm all candidate decisions are complete"
+    )
+    close.add_argument("run_id")
     return parser
 
 
 def _engine(
     store: SQLiteWorkflowStore,
     artifact_root: Path,
+    *,
+    discovery_enabled: bool = False,
+    providers: tuple[str, ...] = ("arxiv", "semantic_scholar"),
+    max_results: int = 10,
 ) -> PersistentWorkflowEngine:
     runtime_config = AgentRuntimeConfig.from_env()
+    handlers = {
+        WorkflowStage.PLANNING: PlanningHandler(discovery_enabled=discovery_enabled),
+        WorkflowStage.DRAFTING: DraftingHandler(runtime_config),
+    }
+    workflow_config = runtime_config.public_dict()
+    workflow_config.update(
+        {
+            "discovery_enabled": discovery_enabled,
+            "discovery_providers": list(providers),
+            "discovery_max_results": max_results,
+        }
+    )
+    if discovery_enabled:
+        transport = UrllibHttpTransport()
+        cache = SQLiteResponseCache(store.path)
+        provider_instances = {}
+        if "arxiv" in providers:
+            provider_instances["arxiv"] = ArxivProvider(transport, cache)
+        if "semantic_scholar" in providers:
+            provider_instances["semantic_scholar"] = SemanticScholarProvider(
+                transport,
+                cache,
+                api_key=os.environ.get("SEMANTIC_SCHOLAR_API_KEY", ""),
+            )
+        approval = ApprovalService(store)
+        handlers.update(
+            {
+                WorkflowStage.DISCOVERING: DiscoveryHandler(
+                    DiscoveryService(
+                        QueryPlanner(max_results=max_results),
+                        provider_instances,
+                    )
+                ),
+                WorkflowStage.SCREENING: ScreeningHandler(),
+                WorkflowStage.AWAITING_CORPUS_APPROVAL: ApprovalGateHandler(approval),
+            }
+        )
     return PersistentWorkflowEngine(
         store,
         LocalArtifactStore(artifact_root),
-        {
-            WorkflowStage.PLANNING: PlanningHandler(),
-            WorkflowStage.DRAFTING: DraftingHandler(runtime_config),
-        },
-        runtime_config=runtime_config.public_dict(),
+        handlers,
+        runtime_config=workflow_config,
     )
+
+
+def _resume_settings(
+    artifact_store: LocalArtifactStore,
+    run_id: str,
+) -> tuple[bool, tuple[str, ...], int]:
+    request = artifact_store.read_json(run_id, "inputs/research_request.json")
+    config = request.get("runtime_config", {})
+    enabled = bool(config.get("discovery_enabled", False))
+    providers = tuple(config.get("discovery_providers", ("arxiv", "semantic_scholar")))
+    max_results = int(config.get("discovery_max_results", 10))
+    return enabled, providers, max_results
 
 
 def _print_json(value: Any, *, stream: Any | None = None) -> None:
@@ -112,8 +212,88 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "events":
             _print_json([event.to_dict() for event in store.list_events(args.run_id)])
             return 0
+        if args.command == "candidates":
+            status = None if args.status is None else CandidateStatus(args.status)
+            _print_json(
+                [
+                    candidate.to_dict()
+                    for candidate in store.list_candidates(args.run_id, status=status)
+                ]
+            )
+            return 0
+        approval = ApprovalService(store)
+        if args.command == "approve":
+            decision = approval.approve(
+                args.run_id,
+                args.candidate_id,
+                reason=args.reason,
+                category=args.category,
+                contribution=args.contribution,
+                tags=tuple(args.tags),
+            )
+            _print_json(decision.to_dict())
+            return 0
+        if args.command in {"reject", "defer"}:
+            method = approval.reject if args.command == "reject" else approval.defer
+            decision = method(
+                args.run_id,
+                args.candidate_id,
+                reason=args.reason,
+            )
+            _print_json(decision.to_dict())
+            return 0
+        if args.command == "close-discovery":
+            pending = store.list_candidates(args.run_id, status=CandidateStatus.PENDING)
+            if pending:
+                _print_json(
+                    {
+                        "error": "approval_required",
+                        "pending_candidate_count": len(pending),
+                    },
+                    stream=sys.stderr,
+                )
+                return 3
+            _print_json({"run_id": args.run_id, "status": "ready_to_resume"})
+            return 0
 
-        engine = _engine(store, args.artifacts)
+        artifact_store = LocalArtifactStore(args.artifacts)
+        if args.command == "resume":
+            stored_run = store.get_run(args.run_id)
+            if stored_run.current_stage == WorkflowStage.AWAITING_CORPUS_APPROVAL:
+                pending = store.list_candidates(
+                    args.run_id, status=CandidateStatus.PENDING
+                )
+                if pending:
+                    _print_json(
+                        {
+                            "error": "approval_required",
+                            "run_id": args.run_id,
+                            "pending_candidate_count": len(pending),
+                        },
+                        stream=sys.stderr,
+                    )
+                    return 3
+            enabled, providers, max_results = _resume_settings(
+                artifact_store, args.run_id
+            )
+            engine = _engine(
+                store,
+                args.artifacts,
+                discovery_enabled=enabled,
+                providers=providers,
+                max_results=max_results,
+            )
+        elif args.command == "start":
+            engine = _engine(
+                store,
+                args.artifacts,
+                discovery_enabled=args.discover,
+                providers=tuple(args.providers),
+                max_results=args.max_results,
+            )
+        else:
+            engine = _engine(store, args.artifacts)
+
         if args.command == "start":
             run = engine.start(args.topic, args.corpus)
         elif args.command == "resume":
@@ -124,7 +304,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise AssertionError(f"unhandled command: {args.command}")
         _print_json(run.to_dict())
         return 0
-    except RunNotFoundError as exc:
+    except (RunNotFoundError, CandidateNotFoundError) as exc:
         _print_json(
             {"error": "run_not_found", "run_id": str(exc)},
             stream=sys.stderr,

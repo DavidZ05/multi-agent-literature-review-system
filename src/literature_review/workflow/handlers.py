@@ -8,11 +8,18 @@ from typing import Any, Protocol
 
 from src.literature_review.config import AgentRuntimeConfig
 from src.literature_review.discovery.approval import ApprovalService
-from src.literature_review.discovery.service import DiscoveryService
+from src.literature_review.discovery.service import (
+    AllProvidersFailedError,
+    DiscoveryService,
+)
 from src.literature_review.models import CandidateStatus
 from src.literature_review.models import WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
-from src.literature_review.workflow.engine import StageContext, StageResult
+from src.literature_review.workflow.engine import (
+    RetryableStageError,
+    StageContext,
+    StageResult,
+)
 
 
 class OrchestratorRunner(Protocol):
@@ -47,11 +54,14 @@ class DiscoveryHandler:
         self.service = service
 
     def __call__(self, context: StageContext) -> StageResult:
-        outcome = self.service.run(
-            context.run,
-            context.artifact_store,
-            context.workflow_store,
-        )
+        try:
+            outcome = self.service.run(
+                context.run,
+                context.artifact_store,
+                context.workflow_store,
+            )
+        except AllProvidersFailedError as exc:
+            raise RetryableStageError(str(exc)) from exc
         return StageResult(
             next_stage=WorkflowStage.SCREENING,
             output_artifacts=outcome.output_artifacts,

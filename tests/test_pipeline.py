@@ -9,6 +9,8 @@ from src.memory_review_pipeline import (
     FinalVerificationReviewer,
     Orchestrator,
     ReviewerAgent,
+    SearchAgent,
+    WriterAgent,
     load_papers,
 )
 
@@ -127,6 +129,33 @@ class PipelineTests(unittest.TestCase):
             ).run()
 
             self.assertEqual(result["run_id"], run_id)
+
+    def test_writer_discusses_new_approved_category_in_body(self) -> None:
+        papers = [
+            {
+                "citation_key": "new2026social",
+                "title": "Social Memory Protocols for Agent Teams",
+                "authors": ["N. Researcher"],
+                "year": 2026,
+                "venue": "arXiv",
+                "url": "https://arxiv.org/abs/2601.00001",
+                "category": "social memory protocol",
+                "contribution": (
+                    "Defines provenance-aware memory exchange protocols "
+                    "for collaborative agents."
+                ),
+                "evidence": "metadata verified",
+                "tags": ["social memory", "provenance", "multi-agent"],
+            }
+        ]
+        search_report = SearchAgent().run(papers)
+
+        draft = WriterAgent().run(search_report)
+
+        body = draft.split("## References", 1)[0]
+        self.assertIn("### Social Memory Protocol", body)
+        self.assertIn("[new2026social]", body)
+        self.assertIn("provenance-aware memory exchange protocols", body)
 
     def test_reviewer_flags_unknown_citations(self) -> None:
         papers = [
