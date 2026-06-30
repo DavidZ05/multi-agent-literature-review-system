@@ -78,12 +78,8 @@ class LocalArtifactStore:
     ) -> ArtifactRecord:
         return self._write_bytes(run_id, relative_path, content.encode("utf-8"))
 
-    def write_json(
-        self, run_id: str, relative_path: str, data: Any
-    ) -> ArtifactRecord:
-        content = json.dumps(
-            data, ensure_ascii=True, indent=2, sort_keys=True
-        ) + "\n"
+    def write_json(self, run_id: str, relative_path: str, data: Any) -> ArtifactRecord:
+        content = json.dumps(data, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
         return self.write_text(run_id, relative_path, content)
 
     def read_text(self, run_id: str, relative_path: str) -> str:

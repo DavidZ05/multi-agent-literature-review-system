@@ -38,7 +38,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         self.store.initialize()
         with sqlite3.connect(self.path) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-        self.assertEqual(version, 2)
+        self.assertEqual(version, 3)
 
     def test_version_one_database_migrates_without_losing_data(self) -> None:
         legacy_path = Path(self.tmp.name) / "legacy.db"
@@ -94,7 +94,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             checkpoint,
         )
         with sqlite3.connect(legacy_path) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 3)
 
     def test_create_get_list_and_update_run(self) -> None:
         self.store.create_run(self.run)
@@ -181,11 +181,11 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
     def test_future_schema_is_rejected_without_change(self) -> None:
         future = Path(self.tmp.name) / "future.db"
         with sqlite3.connect(future) as connection:
-            connection.execute("PRAGMA user_version = 3")
+            connection.execute("PRAGMA user_version = 4")
         with self.assertRaises(UnsupportedSchemaVersionError):
             SQLiteWorkflowStore(future).initialize()
         with sqlite3.connect(future) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
 
 
 class LocalArtifactStoreTests(unittest.TestCase):
