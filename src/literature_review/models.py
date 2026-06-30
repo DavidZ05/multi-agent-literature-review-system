@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+import re
 from types import MappingProxyType
 from typing import Any, Mapping
 from uuid import uuid4
@@ -15,6 +16,25 @@ def utc_now_iso() -> str:
 def _require_enum(value: Any, enum_type: type[Enum], field_name: str) -> None:
     if not isinstance(value, enum_type):
         raise TypeError(f"{field_name} must be a {enum_type.__name__}")
+
+
+def _validate_run_id(run_id: str) -> None:
+    if not re.fullmatch(r"run_[0-9a-f]{32}", run_id):
+        raise ValueError("run_id must match run_ + 32 lowercase hex characters")
+
+
+def _parse_utc_timestamp(value: str, field_name: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be a valid ISO 8601 timestamp") from exc
+
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field_name} must be timezone-aware UTC")
+    if parsed.utcoffset() != timezone.utc.utcoffset(None):
+        raise ValueError(f"{field_name} must be timezone-aware UTC")
+
+    return parsed
 
 
 class RunStatus(str, Enum):
@@ -52,6 +72,7 @@ class ResearchRun:
     revision_count: int
 
     def __post_init__(self) -> None:
+        _validate_run_id(self.run_id)
         normalized_topic = self.topic.strip()
         if not normalized_topic:
             raise ValueError("topic must be nonblank")
@@ -62,6 +83,10 @@ class ResearchRun:
 
         _require_enum(self.status, RunStatus, "status")
         _require_enum(self.current_stage, WorkflowStage, "current_stage")
+        created_at = _parse_utc_timestamp(self.created_at, "created_at")
+        updated_at = _parse_utc_timestamp(self.updated_at, "updated_at")
+        if updated_at < created_at:
+            raise ValueError("updated_at must be greater than or equal to created_at")
 
         object.__setattr__(self, "topic", normalized_topic)
 
@@ -115,8 +140,19 @@ class WorkflowEvent:
     created_at: str
 
     def __post_init__(self) -> None:
+        _validate_run_id(self.run_id)
+        if self.event_id is not None:
+            if isinstance(self.event_id, bool) or not isinstance(self.event_id, int):
+                raise TypeError("event_id must be a nonnegative int or None")
+            if self.event_id < 0:
+                raise ValueError("event_id must be nonnegative")
+        normalized_event_type = self.event_type.strip()
+        if not normalized_event_type:
+            raise ValueError("event_type must be nonblank")
         if self.stage is not None:
             _require_enum(self.stage, WorkflowStage, "stage")
+        _parse_utc_timestamp(self.created_at, "created_at")
+        object.__setattr__(self, "event_type", normalized_event_type)
         object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
 
     def to_dict(self) -> dict[str, Any]:
@@ -152,7 +188,9 @@ class StageCheckpoint:
     created_at: str
 
     def __post_init__(self) -> None:
+        _validate_run_id(self.run_id)
         _require_enum(self.stage, WorkflowStage, "stage")
+        _parse_utc_timestamp(self.created_at, "created_at")
         object.__setattr__(
             self,
             "output_artifact_hashes",
