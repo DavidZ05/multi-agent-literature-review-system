@@ -49,6 +49,20 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         self.assertEqual(self.store.get_run(self.run.run_id), updated)
         self.assertEqual(self.store.list_runs(), [updated])
 
+    def test_list_runs_orders_newest_first(self) -> None:
+        older = self.run
+        newer = replace(
+            ResearchRun.create("Newer"),
+            created_at=utc_now_iso(),
+            updated_at=utc_now_iso(),
+        )
+        self.store.create_run(older)
+        self.store.create_run(newer)
+        self.assertEqual(
+            [run.run_id for run in self.store.list_runs()],
+            [newer.run_id, older.run_id],
+        )
+
     def test_duplicate_and_unknown_runs_raise_domain_errors(self) -> None:
         self.store.create_run(self.run)
         with self.assertRaises(RunAlreadyExistsError):
@@ -91,8 +105,10 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         second = replace(first, input_fingerprint="c" * 64)
         self.store.put_checkpoint(first)
         self.store.put_checkpoint(second)
+        reopened = SQLiteWorkflowStore(self.path)
+        reopened.initialize()
         self.assertEqual(
-            self.store.get_checkpoint(self.run.run_id, WorkflowStage.PLANNING),
+            reopened.get_checkpoint(self.run.run_id, WorkflowStage.PLANNING),
             second,
         )
         missing = ResearchRun.create("Missing")
