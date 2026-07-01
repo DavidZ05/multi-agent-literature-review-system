@@ -432,6 +432,21 @@ class SQLiteWorkflowStore:
             ).fetchall()
         return [self.get_candidate(run_id, row["candidate_id"]) for row in rows]
 
+    def list_candidate_counts_by_run(
+        self,
+    ) -> dict[str, dict[CandidateStatus, int]]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """SELECT run_id,status,COUNT(*) AS candidate_count
+                FROM candidate_papers GROUP BY run_id,status"""
+            ).fetchall()
+        counts: dict[str, dict[CandidateStatus, int]] = {}
+        for row in rows:
+            counts.setdefault(row["run_id"], {})[
+                CandidateStatus(row["status"])
+            ] = row["candidate_count"]
+        return counts
+
     def append_corpus_decision(
         self,
         decision: CorpusDecision,

@@ -35,6 +35,15 @@ def candidate(candidate_id: str, status: CandidateStatus) -> CandidatePaper:
     )
 
 
+class NoCandidateHydrationStore(SQLiteWorkflowStore):
+    def list_candidates(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> list[CandidatePaper]:
+        raise AssertionError("list_runs must not hydrate candidates")
+
+
 class WorkbenchServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
@@ -62,7 +71,9 @@ class WorkbenchServiceTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_list_runs_is_newest_first_with_complete_candidate_counts(self) -> None:
-        result = self.service.list_runs()
+        service = WorkbenchService(NoCandidateHydrationStore(self.store.path))
+
+        result = service.list_runs()
 
         self.assertEqual(
             [item["run_id"] for item in result],
