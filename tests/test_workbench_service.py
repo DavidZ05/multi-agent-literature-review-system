@@ -1,18 +1,22 @@
 from dataclasses import replace
 import json
 from pathlib import Path
+import shlex
 from tempfile import TemporaryDirectory
 import unittest
 
+from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
     ResearchRun,
+    RunStatus,
     ScreeningRecommendation,
     WorkflowStage,
 )
-from src.literature_review.storage import SQLiteWorkflowStore
-from src.literature_review.workbench import WorkbenchService
+from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
+from src.literature_review.workbench import PendingCandidatesError, WorkbenchService
+from src.literature_review.workflow import PersistentWorkflowEngine
 
 
 def candidate(candidate_id: str, status: CandidateStatus) -> CandidatePaper:
@@ -142,6 +146,262 @@ class WorkbenchServiceTests(unittest.TestCase):
             ),
             [self.approved.to_dict()],
         )
+
+    def test_approve_candidate_delegates_with_workbench_actor_and_safe_command(
+        self,
+    ) -> None:
+        reason = "Strong evidence; don't execute $(touch /tmp/nope)"
+        category = "memory mechanism"
+        contribution = "Explains 'reflection' and recall."
+        tags = ("memory systems", "reviewer's-choice")
+
+        result = self.service.approve_candidate(
+            self.older_run.run_id,
+            self.pending.candidate_id,
+            reason,
+            category,
+            contribution,
+            tags,
+        )
+
+        stored_candidate = self.store.get_candidate(
+            self.older_run.run_id,
+            self.pending.candidate_id,
+        )
+        decision, details = self.store.list_corpus_decisions(
+            self.older_run.run_id
+        )[0]
+        self.assertEqual(stored_candidate.status, CandidateStatus.APPROVED)
+        self.assertEqual(decision.actor, "workbench")
+        self.assertEqual(
+            details,
+            {
+                "category": category,
+                "contribution": contribution,
+                "tags": list(tags),
+            },
+        )
+        self.assertEqual(result["candidate"], stored_candidate.to_dict())
+        self.assertEqual(result["decision"], decision.to_dict())
+        self.assertEqual(
+            result["equivalent_command"],
+            shlex.join(
+                [
+                    "python3",
+                    "-m",
+                    "src.memory_review_pipeline",
+                    "approve",
+                    self.older_run.run_id,
+                    self.pending.candidate_id,
+                    "--reason",
+                    reason,
+                    "--category",
+                    category,
+                    "--contribution",
+                    contribution,
+                    "--tags",
+                    *tags,
+                ]
+            ),
+        )
+        json.dumps(result)
+
+    def test_reject_candidate_delegates_with_workbench_actor(self) -> None:
+        reason = "Outside scope; quoted as 'irrelevant'"
+
+        result = self.service.reject_candidate(
+            self.older_run.run_id,
+            self.pending.candidate_id,
+            reason,
+        )
+
+        stored_candidate = self.store.get_candidate(
+            self.older_run.run_id,
+            self.pending.candidate_id,
+        )
+        decision, details = self.store.list_corpus_decisions(
+            self.older_run.run_id
+        )[0]
+        self.assertEqual(stored_candidate.status, CandidateStatus.REJECTED)
+        self.assertEqual(decision.actor, "workbench")
+        self.assertEqual(details, {})
+        self.assertEqual(result["candidate"], stored_candidate.to_dict())
+        self.assertEqual(result["decision"], decision.to_dict())
+        self.assertEqual(
+            result["equivalent_command"],
+            shlex.join(
+                [
+                    "python3",
+                    "-m",
+                    "src.memory_review_pipeline",
+                    "reject",
+                    self.older_run.run_id,
+                    self.pending.candidate_id,
+                    "--reason",
+                    reason,
+                ]
+            ),
+        )
+        json.dumps(result)
+
+    def test_defer_candidate_delegates_with_workbench_actor(self) -> None:
+        reason = "Read full text before deciding"
+
+        result = self.service.defer_candidate(
+            self.older_run.run_id,
+            self.pending.candidate_id,
+            reason,
+        )
+
+        stored_candidate = self.store.get_candidate(
+            self.older_run.run_id,
+            self.pending.candidate_id,
+        )
+        decision, details = self.store.list_corpus_decisions(
+            self.older_run.run_id
+        )[0]
+        self.assertEqual(stored_candidate.status, CandidateStatus.DEFERRED)
+        self.assertEqual(decision.actor, "workbench")
+        self.assertEqual(details, {})
+        self.assertEqual(result["candidate"], stored_candidate.to_dict())
+        self.assertEqual(result["decision"], decision.to_dict())
+        self.assertEqual(
+            result["equivalent_command"],
+            shlex.join(
+                [
+                    "python3",
+                    "-m",
+                    "src.memory_review_pipeline",
+                    "defer",
+                    self.older_run.run_id,
+                    self.pending.candidate_id,
+                    "--reason",
+                    reason,
+                ]
+            ),
+        )
+        json.dumps(result)
+
+    def test_decision_validation_errors_remain_meaningful(self) -> None:
+        with self.assertRaisesRegex(ValueError, "category is required"):
+            self.service.approve_candidate(
+                self.older_run.run_id,
+                self.pending.candidate_id,
+                "Useful",
+                " ",
+                "Contribution",
+                ("memory",),
+            )
+        with self.assertRaisesRegex(ValueError, "reason is required"):
+            self.service.reject_candidate(
+                self.older_run.run_id,
+                self.pending.candidate_id,
+                " ",
+            )
+        with self.assertRaisesRegex(ValueError, "nonblank tag"):
+            self.service.approve_candidate(
+                self.older_run.run_id,
+                self.pending.candidate_id,
+                "Useful",
+                "Memory",
+                "Contribution",
+                ("memory", " "),
+            )
+
+        self.assertEqual(
+            self.store.get_candidate(
+                self.older_run.run_id,
+                self.pending.candidate_id,
+            ).status,
+            CandidateStatus.PENDING,
+        )
+        self.assertEqual(
+            self.store.list_corpus_decisions(self.older_run.run_id),
+            [],
+        )
+
+    def test_close_discovery_refuses_when_candidates_remain_pending(self) -> None:
+        with self.assertRaises(PendingCandidatesError) as raised:
+            self.service.close_discovery(self.older_run.run_id)
+
+        self.assertEqual(raised.exception.pending_count, 1)
+        self.assertEqual(raised.exception.run_id, self.older_run.run_id)
+        self.assertEqual(
+            self.store.get_run(self.older_run.run_id),
+            self.older_run,
+        )
+
+    def test_close_discovery_returns_ready_without_mutating_run(self) -> None:
+        ApprovalService(self.store).defer(
+            self.older_run.run_id,
+            self.pending.candidate_id,
+            reason="Review later",
+        )
+
+        result = self.service.close_discovery(self.older_run.run_id)
+
+        self.assertEqual(
+            result,
+            {
+                "run_id": self.older_run.run_id,
+                "status": "ready_to_resume",
+                "equivalent_command": shlex.join(
+                    [
+                        "python3",
+                        "-m",
+                        "src.memory_review_pipeline",
+                        "close-discovery",
+                        self.older_run.run_id,
+                    ]
+                ),
+            },
+        )
+        self.assertEqual(
+            self.store.get_run(self.older_run.run_id),
+            self.older_run,
+        )
+        json.dumps(result)
+
+    def test_cancel_run_delegates_to_engine_and_serializes_result(self) -> None:
+        engine = PersistentWorkflowEngine(
+            self.store,
+            LocalArtifactStore(Path(self.tmp.name) / "artifacts"),
+            {},
+        )
+        calls: list[str] = []
+
+        def cancel(run_id: str) -> ResearchRun:
+            calls.append(run_id)
+            return engine.cancel(run_id)
+
+        service = WorkbenchService(self.store, cancel=cancel)
+
+        result = service.cancel_run(self.newer_run.run_id)
+
+        cancelled = self.store.get_run(self.newer_run.run_id)
+        self.assertEqual(calls, [self.newer_run.run_id])
+        self.assertEqual(cancelled.status, RunStatus.CANCELLED)
+        self.assertEqual(result["run"], cancelled.to_dict())
+        self.assertEqual(
+            result["equivalent_command"],
+            shlex.join(
+                [
+                    "python3",
+                    "-m",
+                    "src.memory_review_pipeline",
+                    "cancel",
+                    self.newer_run.run_id,
+                ]
+            ),
+        )
+        self.assertEqual(
+            [
+                event.event_type
+                for event in self.store.list_events(self.newer_run.run_id)
+            ],
+            ["run_cancelled"],
+        )
+        json.dumps(result)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,6 @@
-from src.literature_review.workbench.service import WorkbenchService
+from src.literature_review.workbench.service import (
+    PendingCandidatesError,
+    WorkbenchService,
+)
 
-__all__ = ["WorkbenchService"]
+__all__ = ["PendingCandidatesError", "WorkbenchService"]
