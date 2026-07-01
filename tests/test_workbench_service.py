@@ -14,7 +14,11 @@ from src.literature_review.models import (
     ScreeningRecommendation,
     WorkflowStage,
 )
-from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
+from src.literature_review.storage import (
+    LocalArtifactStore,
+    RunNotFoundError,
+    SQLiteWorkflowStore,
+)
 from src.literature_review.workbench import PendingCandidatesError, WorkbenchService
 from src.literature_review.workflow import PersistentWorkflowEngine
 
@@ -282,6 +286,26 @@ class WorkbenchServiceTests(unittest.TestCase):
         )
         json.dumps(result)
 
+    def test_defer_candidate_rejects_blank_reason(self) -> None:
+        with self.assertRaisesRegex(ValueError, "reason is required"):
+            self.service.defer_candidate(
+                self.older_run.run_id,
+                self.pending.candidate_id,
+                " ",
+            )
+
+        self.assertEqual(
+            self.store.get_candidate(
+                self.older_run.run_id,
+                self.pending.candidate_id,
+            ).status,
+            CandidateStatus.PENDING,
+        )
+        self.assertEqual(
+            self.store.list_corpus_decisions(self.older_run.run_id),
+            [],
+        )
+
     def test_decision_validation_errors_remain_meaningful(self) -> None:
         with self.assertRaisesRegex(ValueError, "category is required"):
             self.service.approve_candidate(
@@ -402,6 +426,26 @@ class WorkbenchServiceTests(unittest.TestCase):
             ["run_cancelled"],
         )
         json.dumps(result)
+
+    def test_cancel_run_propagates_unknown_run_from_engine(self) -> None:
+        engine = PersistentWorkflowEngine(
+            self.store,
+            LocalArtifactStore(Path(self.tmp.name) / "artifacts"),
+            {},
+        )
+        calls: list[str] = []
+
+        def cancel(run_id: str) -> ResearchRun:
+            calls.append(run_id)
+            return engine.cancel(run_id)
+
+        service = WorkbenchService(self.store, cancel=cancel)
+        missing_run_id = ResearchRun.create("Missing run").run_id
+
+        with self.assertRaisesRegex(RunNotFoundError, missing_run_id):
+            service.cancel_run(missing_run_id)
+
+        self.assertEqual(calls, [missing_run_id])
 
 
 if __name__ == "__main__":
