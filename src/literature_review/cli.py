@@ -2,40 +2,35 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 import sys
 from typing import Any, Sequence
 
-from src.literature_review.config import AgentRuntimeConfig
-from src.literature_review.discovery import (
-    ApprovalService,
-    DiscoveryService,
-    QueryPlanner,
-)
+from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import CandidateStatus, WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
+from src.literature_review.runtime import build_engine, load_resume_settings
 from src.literature_review.storage import (
     LocalArtifactStore,
     CandidateNotFoundError,
     RunNotFoundError,
-    SQLiteResponseCache,
     SQLiteWorkflowStore,
 )
-from src.literature_review.providers import (
-    ArxivProvider,
-    SemanticScholarProvider,
-    UrllibHttpTransport,
-)
-from src.literature_review.workflow import (
-    ApprovalGateHandler,
-    DiscoveryHandler,
-    DraftingHandler,
-    PersistentWorkflowEngine,
-    PlanningHandler,
-    ScreeningHandler,
-    StageExecutionError,
-)
+from src.literature_review.workflow import StageExecutionError
+
+
+class _ExtendTupleAction(argparse.Action):
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Sequence[str],
+        option_string: str | None = None,
+    ) -> None:
+        current = getattr(namespace, self.dest, self.default)
+        if isinstance(current, tuple):
+            current = []
+        setattr(namespace, self.dest, [*current, *values])
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -61,6 +56,7 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument(
         "--providers",
         nargs="+",
+        action=_ExtendTupleAction,
         choices=("arxiv", "semantic_scholar"),
         default=("arxiv", "semantic_scholar"),
     )
@@ -106,72 +102,6 @@ def _parser() -> argparse.ArgumentParser:
     )
     close.add_argument("run_id")
     return parser
-
-
-def _engine(
-    store: SQLiteWorkflowStore,
-    artifact_root: Path,
-    *,
-    discovery_enabled: bool = False,
-    providers: tuple[str, ...] = ("arxiv", "semantic_scholar"),
-    max_results: int = 10,
-) -> PersistentWorkflowEngine:
-    runtime_config = AgentRuntimeConfig.from_env()
-    handlers = {
-        WorkflowStage.PLANNING: PlanningHandler(discovery_enabled=discovery_enabled),
-        WorkflowStage.DRAFTING: DraftingHandler(runtime_config),
-    }
-    workflow_config = runtime_config.public_dict()
-    workflow_config.update(
-        {
-            "discovery_enabled": discovery_enabled,
-            "discovery_providers": list(providers),
-            "discovery_max_results": max_results,
-        }
-    )
-    if discovery_enabled:
-        transport = UrllibHttpTransport()
-        cache = SQLiteResponseCache(store.path)
-        provider_instances = {}
-        if "arxiv" in providers:
-            provider_instances["arxiv"] = ArxivProvider(transport, cache)
-        if "semantic_scholar" in providers:
-            provider_instances["semantic_scholar"] = SemanticScholarProvider(
-                transport,
-                cache,
-                api_key=os.environ.get("SEMANTIC_SCHOLAR_API_KEY", ""),
-            )
-        approval = ApprovalService(store)
-        handlers.update(
-            {
-                WorkflowStage.DISCOVERING: DiscoveryHandler(
-                    DiscoveryService(
-                        QueryPlanner(max_results=max_results),
-                        provider_instances,
-                    )
-                ),
-                WorkflowStage.SCREENING: ScreeningHandler(),
-                WorkflowStage.AWAITING_CORPUS_APPROVAL: ApprovalGateHandler(approval),
-            }
-        )
-    return PersistentWorkflowEngine(
-        store,
-        LocalArtifactStore(artifact_root),
-        handlers,
-        runtime_config=workflow_config,
-    )
-
-
-def _resume_settings(
-    artifact_store: LocalArtifactStore,
-    run_id: str,
-) -> tuple[bool, tuple[str, ...], int]:
-    request = artifact_store.read_json(run_id, "inputs/research_request.json")
-    config = request.get("runtime_config", {})
-    enabled = bool(config.get("discovery_enabled", False))
-    providers = tuple(config.get("discovery_providers", ("arxiv", "semantic_scholar")))
-    max_results = int(config.get("discovery_max_results", 10))
-    return enabled, providers, max_results
 
 
 def _print_json(value: Any, *, stream: Any | None = None) -> None:
@@ -273,10 +203,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         stream=sys.stderr,
                     )
                     return 3
-            enabled, providers, max_results = _resume_settings(
+            enabled, providers, max_results = load_resume_settings(
                 artifact_store, args.run_id
             )
-            engine = _engine(
+            engine = build_engine(
                 store,
                 args.artifacts,
                 discovery_enabled=enabled,
@@ -284,7 +214,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 max_results=max_results,
             )
         elif args.command == "start":
-            engine = _engine(
+            engine = build_engine(
                 store,
                 args.artifacts,
                 discovery_enabled=args.discover,
@@ -292,7 +222,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 max_results=args.max_results,
             )
         else:
-            engine = _engine(store, args.artifacts)
+            engine = build_engine(store, args.artifacts)
 
         if args.command == "start":
             run = engine.start(args.topic, args.corpus)
