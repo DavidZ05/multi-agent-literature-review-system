@@ -2,6 +2,7 @@ from concurrent.futures import Future
 import http.client
 import json
 from pathlib import Path
+import socket
 from tempfile import TemporaryDirectory
 import threading
 import unittest
@@ -130,7 +131,11 @@ class WorkbenchHTTPTests(unittest.TestCase):
             response_headers = {
                 key.lower(): value for key, value in response.getheaders()
             }
-            return response.status, response_headers, json.loads(raw)
+            return (
+                response.status,
+                response_headers,
+                None if not raw else json.loads(raw),
+            )
         finally:
             connection.close()
 
@@ -370,6 +375,92 @@ class WorkbenchHTTPTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 403)
                 self.assertEqual(payload["error"]["code"], "forbidden")
+
+    def test_server_rejects_non_loopback_bind_host(self) -> None:
+        rejected_server = None
+        try:
+            rejected_server = create_workbench_server(
+                self.service,
+                self.manager,
+                host="0.0.0.0",
+                port=0,
+                mutation_token=self.token,
+            )
+        except ValueError:
+            pass
+        else:
+            self.fail("non-loopback bind host was accepted")
+        finally:
+            if rejected_server is not None:
+                rejected_server.server_close()
+
+    def test_server_accepts_supported_hosts_and_fixed_ports(self) -> None:
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        fixed_port = probe.getsockname()[1]
+        probe.close()
+
+        servers = []
+        try:
+            servers.append(
+                create_workbench_server(
+                    self.service,
+                    self.manager,
+                    host="127.0.0.1",
+                    port=fixed_port,
+                    mutation_token=self.token,
+                )
+            )
+            servers.append(
+                create_workbench_server(
+                    self.service,
+                    self.manager,
+                    host="localhost",
+                    port=0,
+                    mutation_token=self.token,
+                )
+            )
+            self.assertEqual(servers[0].server_address[1], fixed_port)
+            self.assertGreater(servers[1].server_address[1], 0)
+        finally:
+            for server in servers:
+                server.server_close()
+
+    def test_unsupported_methods_use_json_errors_and_head_has_no_body(self) -> None:
+        for path in ("/api/runs", "/"):
+            for method in ("OPTIONS", "TRACE"):
+                with self.subTest(path=path, method=method):
+                    status, headers, payload = self.request(method, path)
+                    self.assertEqual(status, 404)
+                    self.assertEqual(payload["error"]["code"], "not_found")
+                    self.assert_json_headers(headers)
+
+            with self.subTest(path=path, method="HEAD"):
+                status, headers, payload = self.request("HEAD", path)
+                self.assertEqual(status, 404)
+                self.assertIsNone(payload)
+                self.assert_json_headers(headers)
+
+    def test_unknown_actions_return_not_found_before_body_validation(self) -> None:
+        paths = (
+            f"/api/runs/{self.run.run_id}/unknown",
+            (
+                f"/api/runs/{self.run.run_id}/candidates/"
+                f"{self.pending.candidate_id}/unknown"
+            ),
+        )
+        headers = self.mutation_headers(**{"Content-Type": "application/json"})
+        for path in paths:
+            with self.subTest(path=path):
+                status, response_headers, payload = self.request(
+                    "POST",
+                    path,
+                    b"{not-json",
+                    headers=headers,
+                )
+                self.assertEqual(status, 404)
+                self.assertEqual(payload["error"]["code"], "not_found")
+                self.assert_json_headers(response_headers)
 
     def test_post_requires_json_and_valid_bounded_body(self) -> None:
         cases = (

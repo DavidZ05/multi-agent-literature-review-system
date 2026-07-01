@@ -66,6 +66,12 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
         mutation_token: str | None = None,
         static_root: Path | None = None,
     ) -> None:
+        if not isinstance(host, str) or host.lower() not in {
+            "127.0.0.1",
+            "localhost",
+        }:
+            raise ValueError("host must be a loopback hostname or address")
+        host = host.lower()
         self.workbench_service = service
         self.job_manager = job_manager
         self.mutation_token = (
@@ -99,10 +105,19 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:
         self._send_not_found()
 
+    def do_HEAD(self) -> None:
+        self._send_not_found(include_body=False)
+
+    def do_OPTIONS(self) -> None:
+        self._send_not_found()
+
     def do_PATCH(self) -> None:
         self._send_not_found()
 
     def do_PUT(self) -> None:
+        self._send_not_found()
+
+    def do_TRACE(self) -> None:
         self._send_not_found()
 
     def log_message(self, format: str, *args: object) -> None:
@@ -173,20 +188,27 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
 
     def _dispatch_post(self) -> tuple[int, object]:
         self._require_mutation_access()
-        body = self._read_json_body()
         segments, query = self._request_target()
         if query:
             raise _APIError(400, "invalid_request", "Request validation failed.")
 
         if segments == ["api", "runs"]:
+            body = self._read_json_body()
             return 202, self._start_run(body)
-        if len(segments) == 4 and segments[:2] == ["api", "runs"]:
+        if (
+            len(segments) == 4
+            and segments[:2] == ["api", "runs"]
+            and segments[3] in {"resume", "cancel", "close-discovery"}
+        ):
+            body = self._read_json_body()
             return self._run_action(segments[2], segments[3], body)
         if (
             len(segments) == 6
             and segments[:2] == ["api", "runs"]
             and segments[3] == "candidates"
+            and segments[5] in {"approve", "reject", "defer"}
         ):
+            body = self._read_json_body()
             return self._candidate_action(
                 segments[2],
                 segments[4],
@@ -391,22 +413,36 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
             raise ValueError(f"{name} must be a nonblank string")
         return value
 
-    def _send_not_found(self) -> None:
-        self._send_error(404, "not_found", "The requested resource was not found.")
+    def _send_not_found(self, *, include_body: bool = True) -> None:
+        self._send_error(
+            404,
+            "not_found",
+            "The requested resource was not found.",
+            include_body=include_body,
+        )
 
     def _send_error(
         self,
         status: int,
         code: str,
         message: str,
+        *,
+        include_body: bool = True,
         **fields: object,
     ) -> None:
         self._send_json(
             status,
             {"error": {"code": code, "message": message, **fields}},
+            include_body=include_body,
         )
 
-    def _send_json(self, status: int, payload: object) -> None:
+    def _send_json(
+        self,
+        status: int,
+        payload: object,
+        *,
+        include_body: bool = True,
+    ) -> None:
         body = json.dumps(
             payload,
             ensure_ascii=True,
@@ -418,7 +454,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(body)
+        if include_body:
+            self.wfile.write(body)
 
 
 def create_workbench_server(
