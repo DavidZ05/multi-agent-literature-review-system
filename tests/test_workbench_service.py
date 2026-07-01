@@ -5,6 +5,7 @@ import shlex
 from tempfile import TemporaryDirectory
 import unittest
 
+from src.literature_review import cli
 from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import (
     CandidatePaper,
@@ -197,18 +198,74 @@ class WorkbenchServiceTests(unittest.TestCase):
                     "approve",
                     self.older_run.run_id,
                     self.pending.candidate_id,
-                    "--reason",
-                    reason,
-                    "--category",
-                    category,
-                    "--contribution",
-                    contribution,
-                    "--tags",
-                    *tags,
+                    f"--reason={reason}",
+                    f"--category={category}",
+                    f"--contribution={contribution}",
+                    *(f"--tags={tag}" for tag in tags),
                 ]
             ),
         )
         json.dumps(result)
+
+    def test_approve_equivalent_command_replays_dash_and_spaced_values(
+        self,
+    ) -> None:
+        cases = (
+            ("-reason", "-category", "-contribution", ("-tag", "-second")),
+            (
+                "-reason with spaces",
+                "-category with spaces",
+                "-contribution with spaces",
+                ("-tag with spaces", "-second tag"),
+            ),
+        )
+        for reason, category, contribution, tags in cases:
+            with self.subTest(reason=reason):
+                result = self.service.approve_candidate(
+                    self.older_run.run_id,
+                    self.pending.candidate_id,
+                    reason,
+                    category,
+                    contribution,
+                    tags,
+                )
+                tokens = shlex.split(result["equivalent_command"])
+
+                self.assertEqual(
+                    tokens[:3],
+                    ["python3", "-m", "src.memory_review_pipeline"],
+                )
+                try:
+                    parsed = cli._parser().parse_args(tokens[3:])
+                except SystemExit as exc:
+                    self.fail(f"equivalent command did not parse: {exc}")
+                self.assertEqual(parsed.command, "approve")
+                self.assertEqual(parsed.run_id, self.older_run.run_id)
+                self.assertEqual(parsed.candidate_id, self.pending.candidate_id)
+                self.assertEqual(parsed.reason, reason)
+                self.assertEqual(parsed.category, category)
+                self.assertEqual(parsed.contribution, contribution)
+                self.assertEqual(parsed.tags, list(tags))
+
+    def test_approve_parser_preserves_legacy_multi_value_tags(self) -> None:
+        parsed = cli._parser().parse_args(
+            [
+                "approve",
+                self.older_run.run_id,
+                self.pending.candidate_id,
+                "--reason",
+                "Useful",
+                "--category",
+                "Memory",
+                "--contribution",
+                "Adds evidence",
+                "--tags",
+                "memory",
+                "reflection",
+            ]
+        )
+
+        self.assertEqual(parsed.tags, ["memory", "reflection"])
 
     def test_reject_candidate_delegates_with_workbench_actor(self) -> None:
         reason = "Outside scope; quoted as 'irrelevant'"
@@ -241,8 +298,7 @@ class WorkbenchServiceTests(unittest.TestCase):
                     "reject",
                     self.older_run.run_id,
                     self.pending.candidate_id,
-                    "--reason",
-                    reason,
+                    f"--reason={reason}",
                 ]
             ),
         )
@@ -279,8 +335,7 @@ class WorkbenchServiceTests(unittest.TestCase):
                     "defer",
                     self.older_run.run_id,
                     self.pending.candidate_id,
-                    "--reason",
-                    reason,
+                    f"--reason={reason}",
                 ]
             ),
         )

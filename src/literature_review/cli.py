@@ -93,7 +93,7 @@ def _parser() -> argparse.ArgumentParser:
     approve.add_argument("--reason", required=True)
     approve.add_argument("--category", required=True)
     approve.add_argument("--contribution", required=True)
-    approve.add_argument("--tags", nargs="+", required=True)
+    approve.add_argument("--tags", action="extend", nargs="+", required=True)
 
     for name in ("reject", "defer"):
         decision = commands.add_parser(name, help=f"{name} one candidate")

@@ -93,14 +93,10 @@ class WorkbenchService:
                 "approve",
                 run_id,
                 candidate_id,
-                "--reason",
-                reason,
-                "--category",
-                category,
-                "--contribution",
-                contribution,
-                "--tags",
-                *tag_values,
+                f"--reason={reason}",
+                f"--category={category}",
+                f"--contribution={contribution}",
+                *(f"--tags={tag}" for tag in tag_values),
             ),
         )
 
@@ -124,8 +120,7 @@ class WorkbenchService:
                 "reject",
                 run_id,
                 candidate_id,
-                "--reason",
-                reason,
+                f"--reason={reason}",
             ),
         )
 
@@ -149,8 +144,7 @@ class WorkbenchService:
                 "defer",
                 run_id,
                 candidate_id,
-                "--reason",
-                reason,
+                f"--reason={reason}",
             ),
         )
 
