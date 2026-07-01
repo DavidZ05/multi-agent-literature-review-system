@@ -120,6 +120,28 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
     def do_TRACE(self) -> None:
         self._send_not_found()
 
+    def send_error(
+        self,
+        code: int,
+        message: str | None = None,
+        explain: str | None = None,
+    ) -> None:
+        include_body = self.command != "HEAD"
+        if int(code) == 501:
+            self._send_error(
+                501,
+                "unsupported_method",
+                "The requested method is not supported.",
+                include_body=include_body,
+            )
+            return
+        self._send_error(
+            int(code),
+            "http_error",
+            "The HTTP request could not be processed.",
+            include_body=include_body,
+        )
+
     def log_message(self, format: str, *args: object) -> None:
         return
 

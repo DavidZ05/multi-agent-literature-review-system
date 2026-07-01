@@ -441,6 +441,22 @@ class WorkbenchHTTPTests(unittest.TestCase):
                 self.assertIsNone(payload)
                 self.assert_json_headers(headers)
 
+    def test_arbitrary_unsupported_methods_use_json_errors(self) -> None:
+        for method in ("CONNECT", "BREW"):
+            with self.subTest(method=method):
+                status, headers, payload = self.request(method, "/api/runs")
+                self.assertEqual(status, 501)
+                self.assertEqual(
+                    payload,
+                    {
+                        "error": {
+                            "code": "unsupported_method",
+                            "message": "The requested method is not supported.",
+                        }
+                    },
+                )
+                self.assert_json_headers(headers)
+
     def test_unknown_actions_return_not_found_before_body_validation(self) -> None:
         paths = (
             f"/api/runs/{self.run.run_id}/unknown",
