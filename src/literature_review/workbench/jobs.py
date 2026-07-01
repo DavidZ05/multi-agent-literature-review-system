@@ -177,7 +177,7 @@ class WorkflowJobManager:
             if pending_count:
                 raise PendingCandidatesError(run_id, pending_count)
 
-        command = shlex.join([*_COMMAND_PREFIX, "resume", run_id])
+        command = self._equivalent_command("resume", run_id)
         job = self._new_job("resume", command, run_id=run_id)
         self._schedule(job, lambda: self._resume(run_id))
         return self._accepted_payload(job)
@@ -279,10 +279,8 @@ class WorkflowJobManager:
             "equivalent_command": job.equivalent_command,
         }
 
-    @staticmethod
-    def _start_command(request: StartRunRequest) -> str:
+    def _start_command(self, request: StartRunRequest) -> str:
         arguments = [
-            *_COMMAND_PREFIX,
             "start",
             f"--topic={request.topic}",
             f"--corpus={request.corpus_path}",
@@ -291,7 +289,17 @@ class WorkflowJobManager:
             arguments.append("--discover")
         arguments.extend(f"--providers={provider}" for provider in request.providers)
         arguments.append(f"--max-results={request.max_results}")
-        return shlex.join(arguments)
+        return self._equivalent_command(*arguments)
+
+    def _equivalent_command(self, *arguments: str) -> str:
+        return shlex.join(
+            [
+                *_COMMAND_PREFIX,
+                f"--db={self.store.path}",
+                f"--artifacts={self.artifact_root}",
+                *arguments,
+            ]
+        )
 
 
 __all__ = [

@@ -235,14 +235,42 @@ class WorkflowJobManagerTests(unittest.TestCase):
         parsed = cli._parser().parse_args(tokens[3:])
 
         self.assertEqual(parsed.command, "start")
+        self.assertEqual(parsed.db, self.store.path)
+        self.assertEqual(parsed.artifacts, self.artifact_root.resolve())
         self.assertEqual(parsed.topic, request.topic)
         self.assertEqual(parsed.corpus, request.corpus_path)
         self.assertTrue(parsed.discover)
         self.assertEqual(tuple(parsed.providers), request.providers)
         self.assertEqual(parsed.max_results, request.max_results)
+        self.assertEqual(tokens[3], f"--db={self.store.path}")
+        self.assertEqual(tokens[4], f"--artifacts={self.artifact_root.resolve()}")
+        self.assertEqual(tokens[5], "start")
         self.assertIn(f"--topic={request.topic}", tokens)
         self.assertIn(f"--corpus={request.corpus_path}", tokens)
         self.assertIn(f"--max-results={request.max_results}", tokens)
+
+    def test_resume_command_replays_configured_persistence_paths(self) -> None:
+        executor = ManualExecutor()
+        run = ResearchRun.create("Memory agents")
+        self.store.create_run(run)
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            engine_builder=lambda *args, **kwargs: FakeEngine(run),
+            executor=executor,
+        )
+
+        accepted = manager.submit_resume(run.run_id)
+        tokens = shlex.split(accepted["equivalent_command"])
+        parsed = cli._parser().parse_args(tokens[3:])
+
+        self.assertEqual(parsed.db, self.store.path)
+        self.assertEqual(parsed.artifacts, self.artifact_root.resolve())
+        self.assertEqual(parsed.command, "resume")
+        self.assertEqual(parsed.run_id, run.run_id)
+        self.assertEqual(tokens[3], f"--db={self.store.path}")
+        self.assertEqual(tokens[4], f"--artifacts={self.artifact_root.resolve()}")
+        self.assertEqual(tokens[5:], ["resume", run.run_id])
 
     def test_failure_is_captured_without_traceback(self) -> None:
         executor = ManualExecutor()
