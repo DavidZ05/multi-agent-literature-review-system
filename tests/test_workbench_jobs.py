@@ -1,3 +1,5 @@
+from concurrent.futures import Future
+from contextlib import chdir
 from dataclasses import FrozenInstanceError, replace
 import json
 from pathlib import Path
@@ -28,15 +30,25 @@ from src.literature_review.workbench.jobs import (
 
 class ManualExecutor:
     def __init__(self) -> None:
-        self.tasks: list[tuple[object, tuple[object, ...]]] = []
+        self.tasks: list[tuple[Future[object], object, tuple[object, ...]]] = []
+        self.futures: list[Future[object]] = []
         self.shutdown_calls: list[bool] = []
 
-    def submit(self, function: object, *args: object) -> None:
-        self.tasks.append((function, args))
+    def submit(self, function: object, *args: object) -> Future[object]:
+        future: Future[object] = Future()
+        self.tasks.append((future, function, args))
+        self.futures.append(future)
+        return future
 
     def run_next(self) -> None:
-        function, args = self.tasks.pop(0)
-        function(*args)  # type: ignore[operator]
+        future, function, args = self.tasks.pop(0)
+        future.set_running_or_notify_cancel()
+        try:
+            result = function(*args)  # type: ignore[operator]
+        except BaseException as exc:
+            future.set_exception(exc)
+        else:
+            future.set_result(result)
 
     def shutdown(self, wait: bool = True) -> None:
         self.shutdown_calls.append(wait)
@@ -49,7 +61,7 @@ class FakeEngine:
         *,
         entered: threading.Event | None = None,
         release: threading.Event | None = None,
-        error: Exception | None = None,
+        error: BaseException | None = None,
     ) -> None:
         self.run = run
         self.entered = entered
@@ -180,14 +192,18 @@ class WorkflowJobManagerTests(unittest.TestCase):
             max_workers=1,
         )
 
-        accepted = manager.submit_start(self._request())
-
-        self.assertEqual(accepted["status"], "queued")
-        self.assertTrue(entered.wait(timeout=2), "worker did not start")
-        self.assertEqual(manager.get_job(accepted["job_id"])["status"], "running")
-        self.assertFalse(release.is_set())
-        release.set()
-        manager.shutdown()
+        try:
+            accepted = manager.submit_start(self._request())
+            self.assertEqual(accepted["status"], "queued")
+            self.assertTrue(entered.wait(timeout=2), "worker did not start")
+            self.assertEqual(
+                manager.get_job(accepted["job_id"])["status"],
+                "running",
+            )
+            self.assertFalse(release.is_set())
+        finally:
+            release.set()
+            manager.shutdown()
 
         completed = manager.get_job(accepted["job_id"])
         self.assertEqual(completed["status"], "succeeded")
@@ -272,11 +288,37 @@ class WorkflowJobManagerTests(unittest.TestCase):
         self.assertEqual(tokens[4], f"--artifacts={self.artifact_root.resolve()}")
         self.assertEqual(tokens[5:], ["resume", run.run_id])
 
-    def test_failure_is_captured_without_traceback(self) -> None:
+    def test_commands_resolve_relative_persistence_paths(self) -> None:
+        executor = ManualExecutor()
+        root = Path(self.tmp.name)
+        with chdir(root):
+            store = SQLiteWorkflowStore(Path("state/workflow.db"))
+            artifact_root = Path("state/artifacts")
+            manager = WorkflowJobManager(
+                store,
+                artifact_root,
+                engine_builder=lambda *args, **kwargs: FakeEngine(
+                    ResearchRun.create("Memory agents")
+                ),
+                executor=executor,
+            )
+            accepted = manager.submit_start(self._request())
+
+        parsed = cli._parser().parse_args(
+            shlex.split(accepted["equivalent_command"])[3:]
+        )
+        self.assertEqual(store.path, (root / "state/workflow.db").resolve())
+        self.assertEqual(parsed.db, store.path)
+        self.assertEqual(
+            parsed.artifacts,
+            (root / "state/artifacts").resolve(),
+        )
+
+    def test_failure_is_sanitized_and_logged_without_public_details(self) -> None:
         executor = ManualExecutor()
         engine = FakeEngine(
             ResearchRun.create("Memory agents"),
-            error=RuntimeError("provider unavailable"),
+            error=RuntimeError("provider token=secret-value"),
         )
         manager = WorkflowJobManager(
             self.store,
@@ -286,16 +328,84 @@ class WorkflowJobManagerTests(unittest.TestCase):
         )
         accepted = manager.submit_start(self._request())
 
-        executor.run_next()
+        with self.assertLogs("src.literature_review.workbench.jobs", level="ERROR"):
+            executor.run_next()
 
         failed = manager.get_job(accepted["job_id"])
         self.assertEqual(failed["status"], "failed")
         self.assertEqual(
             failed["error"],
-            {"type": "RuntimeError", "message": "provider unavailable"},
+            {
+                "type": "workflow_failed",
+                "message": "Workflow execution failed.",
+            },
         )
         self.assertIsNone(failed["result"])
-        self.assertNotIn("traceback", json.dumps(failed).lower())
+        public_payload = json.dumps(failed).lower()
+        self.assertNotIn("traceback", public_payload)
+        self.assertNotIn("secret-value", public_payload)
+
+    def test_validation_failure_uses_allowlisted_public_error(self) -> None:
+        executor = ManualExecutor()
+        engine = FakeEngine(
+            ResearchRun.create("Memory agents"),
+            error=ValueError("invalid value containing secret-value"),
+        )
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            engine_builder=lambda *args, **kwargs: engine,
+            executor=executor,
+        )
+        accepted = manager.submit_start(self._request())
+
+        with self.assertLogs("src.literature_review.workbench.jobs", level="ERROR"):
+            executor.run_next()
+
+        self.assertEqual(
+            manager.get_job(accepted["job_id"])["error"],
+            {
+                "type": "invalid_workflow_input",
+                "message": "Workflow input is invalid.",
+            },
+        )
+
+    def test_worker_interrupt_fails_job_and_releases_resume_reservation(self) -> None:
+        executor = ManualExecutor()
+        run = ResearchRun.create("Memory agents")
+        self.store.create_run(run)
+        engine = FakeEngine(run, error=KeyboardInterrupt("secret interrupt"))
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            engine_builder=lambda *args, **kwargs: engine,
+            resume_settings_loader=lambda *args: (
+                False,
+                ("arxiv", "semantic_scholar"),
+                10,
+            ),
+            executor=executor,
+        )
+        accepted = manager.submit_resume(run.run_id)
+
+        with self.assertLogs("src.literature_review.workbench.jobs", level="ERROR"):
+            executor.run_next()
+
+        self.assertIsInstance(executor.futures[0].exception(), KeyboardInterrupt)
+        self.assertEqual(
+            manager.get_job(accepted["job_id"]),
+            {
+                **accepted,
+                "status": "failed",
+                "result": None,
+                "error": {
+                    "type": "workflow_failed",
+                    "message": "Workflow execution failed.",
+                },
+            },
+        )
+        next_job = manager.submit_resume(run.run_id)
+        self.assertNotEqual(next_job["job_id"], accepted["job_id"])
 
     def test_duplicate_resume_conflicts_only_while_existing_job_is_active(
         self,
@@ -423,6 +533,25 @@ class WorkflowJobManagerTests(unittest.TestCase):
             load_resume_settings(artifact_store, run.run_id),
             (False, ("arxiv", "semantic_scholar"), 10),
         )
+
+    def test_resume_settings_loader_rejects_malformed_stored_types(self) -> None:
+        run = ResearchRun.create("Memory agents")
+        artifact_store = LocalArtifactStore(self.artifact_root)
+        invalid_configs = (
+            {"discovery_enabled": "false"},
+            {"discovery_providers": "arxiv"},
+            {"discovery_max_results": True},
+        )
+
+        for config in invalid_configs:
+            with self.subTest(config=config):
+                artifact_store.write_json(
+                    run.run_id,
+                    "inputs/research_request.json",
+                    {"runtime_config": config},
+                )
+                with self.assertRaises((TypeError, ValueError)):
+                    load_resume_settings(artifact_store, run.run_id)
 
 
 if __name__ == "__main__":

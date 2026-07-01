@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from concurrent.futures import Executor, ThreadPoolExecutor
+from concurrent.futures import CancelledError, Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 import shlex
 import threading
@@ -17,6 +18,7 @@ from src.literature_review.workbench.service import PendingCandidatesError
 
 _ALLOWED_PROVIDERS = frozenset({"arxiv", "semantic_scholar"})
 _COMMAND_PREFIX = ("python3", "-m", "src.memory_review_pipeline")
+_LOGGER = logging.getLogger(__name__)
 
 
 class WorkflowEngine(Protocol):
@@ -129,6 +131,7 @@ class WorkflowJobManager:
         max_workers: int = 2,
     ) -> None:
         self.store = store
+        self.store.path = self.store.path.expanduser().resolve()
         self.artifact_root = Path(artifact_root).expanduser().resolve()
         self._engine_builder = engine_builder
         self._resume_settings_loader = resume_settings_loader
@@ -143,6 +146,7 @@ class WorkflowJobManager:
         self._lock = threading.Lock()
         self._jobs: dict[str, _JobRecord] = {}
         self._active_resume_jobs: dict[str, str] = {}
+        self._futures: set[Future[Any]] = set()
 
     def submit_start(self, request: StartRunRequest) -> dict[str, object]:
         if not isinstance(request, StartRunRequest):
@@ -237,13 +241,18 @@ class WorkflowJobManager:
         operation: Callable[[], ResearchRun],
     ) -> None:
         try:
-            self._executor.submit(self._run_job, job.job_id, operation)
-        except Exception:
+            future = self._executor.submit(self._run_job, job.job_id, operation)
+        except BaseException:
             with self._lock:
                 self._jobs.pop(job.job_id, None)
                 if job.run_id is not None:
                     self._active_resume_jobs.pop(job.run_id, None)
             raise
+        with self._lock:
+            self._futures.add(future)
+        future.add_done_callback(
+            lambda completed: self._observe_future(job.job_id, completed)
+        )
 
     def _run_job(
         self,
@@ -254,21 +263,74 @@ class WorkflowJobManager:
             job = self._jobs[job_id]
             job.status = "running"
         try:
-            run = operation()
-        except Exception as exc:
+            result = operation().to_dict()
+        except BaseException as exc:
             with self._lock:
                 job.status = "failed"
-                job.error = {"type": type(exc).__name__, "message": str(exc)}
+                job.error = self._public_error(exc)
+            _LOGGER.exception("Workflow job %s failed", job_id)
+            if not isinstance(exc, Exception):
+                raise
+        else:
+            with self._lock:
+                job.status = "succeeded"
+                job.result = result
+        finally:
+            with self._lock:
                 self._release_resume(job)
+
+    def _observe_future(
+        self,
+        job_id: str,
+        future: Future[Any],
+    ) -> None:
+        try:
+            failure = future.exception()
+        except CancelledError as exc:
+            failure = exc
+        finally:
+            with self._lock:
+                self._futures.discard(future)
+
+        if failure is None:
             return
+        _LOGGER.error(
+            "Workflow job %s worker terminated",
+            job_id,
+            exc_info=(type(failure), failure, failure.__traceback__),
+        )
         with self._lock:
-            job.status = "succeeded"
-            job.result = run.to_dict()
-            self._release_resume(job)
+            job = self._jobs.get(job_id)
+            if job is not None and job.status in {"queued", "running"}:
+                job.status = "failed"
+                job.error = self._public_error(failure)
+                self._release_resume(job)
 
     def _release_resume(self, job: _JobRecord) -> None:
         if job.run_id is not None:
             self._active_resume_jobs.pop(job.run_id, None)
+
+    @staticmethod
+    def _public_error(exc: BaseException) -> dict[str, str]:
+        if isinstance(exc, (ValueError, TypeError, FileNotFoundError)):
+            return {
+                "type": "invalid_workflow_input",
+                "message": "Workflow input is invalid.",
+            }
+        if isinstance(exc, DuplicateResumeJobError):
+            return {
+                "type": "resume_conflict",
+                "message": "A resume job is already active for this run.",
+            }
+        if isinstance(exc, PendingCandidatesError):
+            return {
+                "type": "approval_required",
+                "message": "Candidate approval is required before resuming.",
+            }
+        return {
+            "type": "workflow_failed",
+            "message": "Workflow execution failed.",
+        }
 
     @staticmethod
     def _accepted_payload(job: _JobRecord) -> dict[str, object]:

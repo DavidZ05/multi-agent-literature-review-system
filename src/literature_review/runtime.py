@@ -29,6 +29,8 @@ from src.literature_review.workflow import (
     ScreeningHandler,
 )
 
+_DISCOVERY_PROVIDERS = frozenset({"arxiv", "semantic_scholar"})
+
 
 def build_engine(
     store: SQLiteWorkflowStore,
@@ -89,10 +91,37 @@ def load_resume_settings(
     run_id: str,
 ) -> tuple[bool, tuple[str, ...], int]:
     request = artifact_store.read_json(run_id, "inputs/research_request.json")
+    if not isinstance(request, dict):
+        raise TypeError("stored research request must be an object")
     config = request.get("runtime_config", {})
-    enabled = bool(config.get("discovery_enabled", False))
-    providers = tuple(config.get("discovery_providers", ("arxiv", "semantic_scholar")))
-    max_results = int(config.get("discovery_max_results", 10))
+    if not isinstance(config, dict):
+        raise TypeError("stored runtime_config must be an object")
+
+    enabled = config.get("discovery_enabled", False)
+    if not isinstance(enabled, bool):
+        raise TypeError("stored discovery_enabled must be a boolean")
+
+    provider_values = config.get(
+        "discovery_providers",
+        ("arxiv", "semantic_scholar"),
+    )
+    if (
+        not isinstance(provider_values, (list, tuple))
+        or any(not isinstance(provider, str) for provider in provider_values)
+    ):
+        raise TypeError("stored discovery_providers must be a list of strings")
+    providers = tuple(provider_values)
+    unknown_providers = set(providers) - _DISCOVERY_PROVIDERS
+    if unknown_providers:
+        raise ValueError("stored discovery_providers contains an unknown provider")
+    if enabled and not providers:
+        raise ValueError("stored discovery_providers must be nonempty")
+
+    max_results = config.get("discovery_max_results", 10)
+    if isinstance(max_results, bool) or not isinstance(max_results, int):
+        raise TypeError("stored discovery_max_results must be an integer")
+    if not 1 <= max_results <= 50:
+        raise ValueError("stored discovery_max_results must be between 1 and 50")
     return enabled, providers, max_results
 
 
