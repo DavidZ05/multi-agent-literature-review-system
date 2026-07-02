@@ -56,9 +56,17 @@ multi-agent-literature-review-system/
 │       ├── models.py
 │       ├── orchestrator.py
 │       ├── cli.py
+│       ├── runtime.py
+│       ├── discovery/
+│       ├── providers/
 │       ├── storage/
 │       │   ├── artifacts.py
 │       │   └── sqlite.py
+│       ├── workbench/
+│       │   ├── jobs.py
+│       │   ├── server.py
+│       │   ├── service.py
+│       │   └── static/
 │       └── workflow/
 │           ├── checkpoints.py
 │           ├── engine.py
@@ -75,6 +83,7 @@ multi-agent-literature-review-system/
 
 - `src/literature_review/`: canonical implementation modules organized by responsibility: corpus loading, runtime configuration, agent logic, orchestration, evaluation, and CLI entrypoints.
 - `src/memory_review_pipeline.py`: backward-compatible command and import entrypoint that re-exports the package API for existing `python -m` and `from src.memory_review_pipeline import ...` usage.
+- `src/literature_review/workbench/`: loopback-only browser interface, JSON API, and background-job adapter over the same persistent workflow used by the CLI.
 - `data/`: verified source memory used by Search Agent.
 - `prompts/`: role prompts for each agent.
 - `outputs/`: generated survey, audits, verification reports, and run logs.
@@ -157,6 +166,47 @@ python3 -m src.memory_review_pipeline \
   --artifacts /path/to/artifacts \
   status RUN_ID
 ```
+
+### Local Workbench
+
+Start the browser workbench from the repository root:
+
+```bash
+python3 -m src.memory_review_pipeline ui
+```
+
+The command serves a loopback-only site at `http://127.0.0.1:8765/` and opens
+the default browser. It reads and writes the same
+`.review-workflow/workflow.db` and `.review-workflow/artifacts` used by the
+persistent CLI. Existing runs therefore appear immediately, and decisions made
+in the browser can be inspected or replayed through the Bash commands below.
+
+The workbench supports run creation, status and event inspection, candidate
+filtering, approve/reject/defer decisions, discovery closure, resume, and
+cancellation. Every mutation displays its equivalent CLI command. The
+interface follows the browser language on first use, offers a Chinese/English
+toggle, and remembers the last manual choice.
+
+Runtime locations still precede the subcommand; workbench-only options follow
+it:
+
+```bash
+python3 -m src.memory_review_pipeline \
+  --db /path/to/workflow.db \
+  --artifacts /path/to/artifacts \
+  ui --port 8766 --no-browser
+```
+
+`--port` accepts `0` through `65535` and defaults to `8765`; port `0` asks the
+operating system to choose a free port. `--no-browser` starts the server without
+opening a tab. The host is restricted to `127.0.0.1` or `localhost`, and
+mutation requests require a per-process token injected into the served page.
+Press `Ctrl+C` in the terminal to stop the workbench.
+
+In the new-run dialog, **Maximum results per query** is the browser equivalent
+of `--max-results`. It defaults to `10` and accepts values from `1` to `50`.
+When discovery is enabled, at least one of arXiv or Semantic Scholar must be
+selected.
 
 ### Automatic Literature Discovery
 

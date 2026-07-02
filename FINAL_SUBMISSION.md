@@ -70,6 +70,20 @@ OK
 
 The exact number of discovered tests may grow as documentation and compatibility coverage expand, but the suite should complete with `OK`.
 
+## Optional Local Workbench
+
+The same persistent workflow can be operated through a loopback-only browser
+interface:
+
+```bash
+python3 -m src.memory_review_pipeline ui
+```
+
+The page uses the same SQLite database and artifact directory as the CLI. It
+supports bilingual candidate review, displays equivalent CLI commands for
+mutations, and can be stopped with `Ctrl+C`. No API key is required to open the
+interface or run the deterministic workflow.
+
 ## Output Files
 
 - `outputs/survey.md`: the generated survey report.
@@ -100,6 +114,8 @@ The exact number of discovered tests may grow as documentation and compatibility
 - `.env.example` documents optional single-API and multi-agent API configuration; local deterministic execution is the default.
 - Discovery keys and runtime state stay local under `.env` and
   `.review-workflow/`; neither is required for the reproducible submission run.
+- The optional browser workbench and persistent CLI operate on the same local
+  SQLite state rather than maintaining separate copies.
 
 ## Human Intervention Points
 

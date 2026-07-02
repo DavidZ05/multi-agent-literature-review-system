@@ -52,6 +52,10 @@ For long-running use, a durable workflow engine wraps the orchestrator:
 ```mermaid
 flowchart LR
     CLI["Persistent CLI"] --> Engine["Workflow Engine"]
+    Browser["Local Browser Workbench"] --> API["Loopback JSON API"]
+    API --> Jobs["Background Job Manager"]
+    API --> Approval["Human corpus approval"]
+    Jobs --> Engine
     Engine --> State["SQLite run state<br/>append-only events"]
     Engine --> Checkpoints["Stage checkpoints<br/>input fingerprints"]
     Engine --> Artifacts["Run-scoped artifacts<br/>atomic writes + SHA-256"]
@@ -59,7 +63,7 @@ flowchart LR
     Planning -->|"local corpus mode"| Drafting["Drafting Handler"]
     Planning --> Discovery["arXiv + Semantic Scholar"]
     Discovery --> Screening["Normalize, deduplicate, screen"]
-    Screening --> Approval["Human corpus approval"]
+    Screening --> Approval
     Approval --> Drafting
     Drafting --> Orchestrator["Existing Multi-Agent Orchestrator"]
     Orchestrator --> Artifacts
@@ -84,7 +88,7 @@ merged.
 
 The implementation now separates responsibilities into focused modules under `src/literature_review/`. `corpus.py` validates and loads the verified paper memory, while `config.py` resolves deterministic or API-backed runtime settings. `search.py` and `writing.py` define the Search, Writer, and Polish roles, and `review.py` groups the expert-panel and final-verification reviewers.
 
-`evaluation.py` computes the evaluation report and reflection content for the completed run. `orchestrator.py` controls the internal agent sequence and writes the review artifacts. `workflow/engine.py` controls durable stage execution, while `storage/sqlite.py` and `storage/artifacts.py` persist state and files. `cli.py` exposes both the legacy one-shot command and persistent run-management commands.
+`evaluation.py` computes the evaluation report and reflection content for the completed run. `orchestrator.py` controls the internal agent sequence and writes the review artifacts. `workflow/engine.py` controls durable stage execution, while `storage/sqlite.py` and `storage/artifacts.py` persist state and files. `cli.py` exposes the legacy one-shot command, persistent run-management commands, and the local `ui` launcher. `workbench/service.py`, `workbench/jobs.py`, and `workbench/server.py` expose the same workflow through a loopback-only browser interface.
 
 Dependencies flow one way: shared data/config utilities support agent modules, agent modules feed the orchestrator, and the CLI depends on the orchestrator rather than the reverse. The legacy `src/memory_review_pipeline.py` file remains as a compatibility entrypoint that re-exports the modular package API for existing imports and `python -m src.memory_review_pipeline` runs.
 
@@ -122,6 +126,7 @@ The agents communicate through shared files:
 - `outputs/survey.md`: final generated survey.
 - `.review-workflow/workflow.db`: persistent run, event, and checkpoint state.
 - `.review-workflow/artifacts/runs/<run_id>/`: atomic run-scoped inputs and final outputs.
+- Browser workbench: a bilingual view over the same database and artifacts; each mutation returns an equivalent CLI command.
 
 JSON is used when downstream agents need reliable fields. Markdown is used when humans need to read or submit the result.
 
@@ -142,6 +147,15 @@ It stores the research request, corpus path, and sanitized runtime
 configuration. Drafting then executes the existing orchestrator in a temporary
 directory and imports the six final artifacts only after that execution
 succeeds. Stage transitions and failures are recorded as immutable events.
+
+The local workbench is an additional control surface, not a second workflow.
+Its JSON API calls the same approval service, job manager, workflow engine,
+SQLite store, and artifact store as the CLI. The server binds only to loopback,
+injects a per-process mutation token into the page, and validates request
+origins when the browser supplies one. Background start and resume operations
+return job identifiers so the page can poll without blocking the interface.
+Candidate decisions display an equivalent CLI command, preserving
+inspectability and allowing the browser and Bash workflows to be cross-checked.
 
 ## Reviewer-Writer Feedback Loop
 
@@ -211,6 +225,7 @@ In short, the system is automated by default, but humans intervene at scope, evi
 - persisting run state and event history across process exits;
 - pausing on keyboard interruption and resuming from verified checkpoints;
 - cancelling runs without replaying later stages.
+- reviewing and approving discovered candidates through a bilingual local browser interface.
 
 ## What Is Not Fully Automated
 
@@ -246,6 +261,13 @@ next stage in one checkpoint. Resume verifies the files before skipping work;
 changed configuration, changed corpus content, or a modified output invalidates
 the checkpoint.
 
+The ninth pitfall was treating a front end as a separate demo. A static approval
+mockup can look complete while writing nothing to the workflow used by the CLI.
+The production workbench therefore uses the same SQLite database, artifact
+root, approval rules, and background workflow engine. It also shows the
+equivalent command after each mutation. This keeps the visual interface useful
+without creating two conflicting sources of truth.
+
 ## Agent Evaluation and Reflection
 
 Search Agent now has two layers. Discovery queries arXiv and Semantic Scholar,
@@ -275,8 +297,8 @@ Future versions could improve the system in five directions:
 1. Add real API-backed generation while preserving the same artifact contracts, citation gates, and deterministic fallback.
 2. Add Crossref or OpenAlex as another structured fallback and enrich DOI metadata.
 3. Add full-text PDF extraction so Reviewer can verify claim-reference alignment beyond metadata-level checks.
-4. Add a small command-line or web interface for human approval of seed-corpus additions and citation-risk decisions.
-5. Extend the modular package with additional interfaces or deeper verification components while preserving the compatibility entrypoint and current artifact contracts.
+4. Extend the existing workbench with side-by-side PDF evidence and claim-level review tools.
+5. Add richer job recovery and progress telemetry while preserving the CLI, compatibility entrypoint, and current artifact contracts.
 
 A more advanced version could also learn memory write/delete policies, but deterministic verification is safer for this course project. The current seed expansion is documented in `docs/seed_corpus_review.md`.
 
