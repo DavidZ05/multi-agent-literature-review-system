@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Literature Review Workbench</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script id="workbench-config" type="application/json">__WORKBENCH_CONFIG__</script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="workbench">
+    <header class="wb-top">
+      <h1 class="wb-brand" data-i18n="brand">Literature Review Workbench</h1>
+      <nav class="wb-top-actions" aria-label="Workbench actions" data-i18n-aria="workbenchActions">
+        <button class="wb-btn wb-language" id="language-toggle" type="button">
+          <span class="lang-zh">中文</span><span class="language-divider">/</span><span class="lang-en">EN</span>
+        </button>
+        <button class="wb-btn" id="events-button" type="button" data-i18n="events" disabled>Events</button>
+        <button class="wb-btn" id="resume-run-button" type="button" data-i18n="resumeRun" disabled>Resume</button>
+        <button class="wb-btn" id="close-discovery-button" type="button" data-i18n="closeDiscovery" disabled>Close discovery</button>
+        <button class="wb-btn danger" id="cancel-run-button" type="button" data-i18n="cancelRun" disabled>Cancel run</button>
+        <button class="wb-btn primary" id="new-run-button" type="button" data-i18n="newRun">New discovery run</button>
+      </nav>
+    </header>
+
+    <div class="feedback" id="feedback" role="status" aria-live="polite" hidden></div>
+    <div class="app-state" id="app-loading" role="status" data-i18n="loadingRuns">Loading research runs...</div>
+    <div class="app-state" id="app-empty" hidden>
+      <strong data-i18n="noRuns">No research runs yet.</strong>
+      <button class="text-button" id="empty-new-run-button" type="button" data-i18n="createFirstRun">Create the first run</button>
+    </div>
+    <div class="app-state error" id="app-error" role="alert" hidden>
+      <span id="app-error-message"></span>
+      <button class="text-button" id="retry-load-button" type="button" data-i18n="retry">Retry</button>
+    </div>
+
+    <div class="wb-shell" id="workbench-shell" hidden>
+      <aside class="wb-side" aria-labelledby="runs-heading">
+        <h2 class="wb-side-label" id="runs-heading" data-i18n="researchRuns">Research runs</h2>
+        <div class="runs-list" id="runs-list"></div>
+        <h2 class="wb-side-label storage-label" data-i18n="localStorage">Local storage</h2>
+        <div class="storage-card">
+          <strong>workflow.db</strong>
+          <span>.review-workflow/</span>
+        </div>
+      </aside>
+
+      <main class="wb-main">
+        <header class="run-header">
+          <div class="run-title">
+            <div>
+              <h2 id="run-topic"></h2>
+              <div class="run-meta" id="run-meta"></div>
+            </div>
+            <span class="status-badge" id="run-status"></span>
+          </div>
+          <div class="progress" id="run-progress" role="progressbar" aria-valuemin="1" aria-valuemax="6">
+            <span class="progress-step"></span><span class="progress-step"></span>
+            <span class="progress-step"></span><span class="progress-step"></span>
+            <span class="progress-step"></span><span class="progress-step"></span>
+          </div>
+        </header>
+
+        <section aria-labelledby="candidates-heading">
+          <h2 class="visually-hidden" id="candidates-heading" data-i18n="candidates">Candidates</h2>
+          <div class="candidate-toolbar" id="candidate-filters" aria-label="Candidate filters" data-i18n-aria="candidateFilters">
+            <button class="filter active" type="button" data-filter="pending" aria-pressed="true"></button>
+            <button class="filter" type="button" data-filter="recommended" aria-pressed="false"></button>
+            <button class="filter" type="button" data-filter="approved" aria-pressed="false"></button>
+            <button class="filter" type="button" data-filter="all" aria-pressed="false"></button>
+            <span class="candidate-count" id="candidate-count"></span>
+          </div>
+          <div class="table-wrap" tabindex="0" aria-label="Discovered literature candidates" data-i18n-aria="candidateTable">
+            <table class="candidate-table">
+              <caption class="visually-hidden" data-i18n="candidateTable">Discovered literature candidates</caption>
+              <thead>
+                <tr>
+                  <th scope="col" data-i18n="paper">Paper</th>
+                  <th scope="col" data-i18n="year">Year</th>
+                  <th scope="col" data-i18n="source">Source</th>
+                  <th scope="col" data-i18n="score">Score</th>
+                  <th scope="col" data-i18n="status">Status</th>
+                </tr>
+              </thead>
+              <tbody id="candidates-body"></tbody>
+            </table>
+            <div class="table-state" id="candidates-empty" data-i18n="noCandidates" hidden>No candidates match this filter.</div>
+          </div>
+        </section>
+      </main>
+
+      <aside class="wb-detail" id="candidate-detail" aria-labelledby="candidate-title">
+        <div id="candidate-empty">
+          <h2 data-i18n="selectCandidate">Select a candidate</h2>
+          <p class="muted" data-i18n="selectCandidateHint">Candidate metadata and decisions appear here.</p>
+        </div>
+        <div id="candidate-content" hidden>
+          <h2 id="candidate-title"></h2>
+          <div class="detail-meta" id="candidate-meta"></div>
+          <section class="detail-section" aria-labelledby="abstract-heading">
+            <h3 id="abstract-heading" data-i18n="abstractEvidence">Abstract evidence</h3>
+            <p id="candidate-abstract"></p>
+          </section>
+          <section class="detail-section" aria-labelledby="recommendation-heading">
+            <h3 id="recommendation-heading" data-i18n="screeningRecommendation">Screening recommendation</h3>
+            <p id="candidate-recommendation"></p>
+          </section>
+          <section class="detail-section" aria-labelledby="identifiers-heading">
+            <h3 id="identifiers-heading" data-i18n="identifiers">Identifiers and sources</h3>
+            <div id="candidate-identifiers"></div>
+          </section>
+          <form id="approval-form">
+            <fieldset class="approval-fields">
+              <legend data-i18n="approvalMetadata">Approval metadata</legend>
+              <label for="candidate-category" data-i18n="category">Category</label>
+              <input class="field" id="candidate-category" name="category" autocomplete="off">
+              <label for="candidate-contribution" data-i18n="contribution">Contribution</label>
+              <textarea class="field" id="candidate-contribution" name="contribution" rows="3"></textarea>
+              <label for="candidate-tags" data-i18n="tags">Tags</label>
+              <input class="field" id="candidate-tags" name="tags" autocomplete="off">
+              <label for="candidate-reason" data-i18n="decisionReason">Decision reason</label>
+              <textarea class="field" id="candidate-reason" name="reason" rows="2" required></textarea>
+            </fieldset>
+            <div class="decision-actions">
+              <button class="decision approve" id="approve-button" type="submit" data-i18n="approve">Approve</button>
+              <button class="decision" id="defer-button" type="button" data-i18n="defer">Defer</button>
+              <button class="decision danger" id="reject-button" type="button" data-i18n="reject">Reject</button>
+            </div>
+          </form>
+        </div>
+        <div class="command-panel" id="command-panel" hidden>
+          <span data-i18n="equivalentCli">Equivalent CLI:</span>
+          <code id="equivalent-command"></code>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <dialog id="new-run-dialog" aria-labelledby="new-run-heading">
+    <form class="dialog-form" id="new-run-form">
+      <div class="dialog-header">
+        <h2 id="new-run-heading" data-i18n="newRun">New discovery run</h2>
+        <button class="icon-button" type="button" data-close-dialog="new-run-dialog" aria-label="Close" data-i18n-aria="close">×</button>
+      </div>
+      <label for="new-run-topic" data-i18n="topic">Topic</label>
+      <input class="field" id="new-run-topic" name="topic" required autocomplete="off">
+      <label for="new-run-corpus" data-i18n="corpusPath">Corpus path</label>
+      <input class="field mono" id="new-run-corpus" name="corpus_path" required autocomplete="off">
+      <label class="check-row" for="new-run-discover">
+        <input id="new-run-discover" name="discover" type="checkbox" checked>
+        <span data-i18n="enableDiscovery">Discover additional literature</span>
+      </label>
+      <fieldset class="provider-fields">
+        <legend data-i18n="providers">Providers</legend>
+        <label class="check-row" for="provider-arxiv">
+          <input id="provider-arxiv" name="providers" type="checkbox" value="arxiv" checked>
+          <span>arXiv</span>
+        </label>
+        <label class="check-row" for="provider-s2">
+          <input id="provider-s2" name="providers" type="checkbox" value="semantic_scholar" checked>
+          <span>Semantic Scholar</span>
+        </label>
+      </fieldset>
+      <label for="new-run-max-results" data-i18n="maxResults">Maximum results per query</label>
+      <input class="field number-field" id="new-run-max-results" name="max_results" type="number" value="10" min="1" max="50" required>
+      <div class="dialog-actions">
+        <button class="wb-btn" type="button" data-close-dialog="new-run-dialog" data-i18n="close">Close</button>
+        <button class="wb-btn primary" id="start-run-button" type="submit" data-i18n="startRun">Start run</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="events-dialog" aria-labelledby="events-heading">
+    <div class="dialog-form events-dialog">
+      <div class="dialog-header">
+        <h2 id="events-heading" data-i18n="events">Events</h2>
+        <button class="icon-button" type="button" data-close-dialog="events-dialog" aria-label="Close" data-i18n-aria="close">×</button>
+      </div>
+      <div class="events-list" id="events-list"></div>
+      <div class="dialog-actions">
+        <button class="wb-btn" type="button" data-close-dialog="events-dialog" data-i18n="close">Close</button>
+      </div>
+    </div>
+  </dialog>
+</body>
+</html>

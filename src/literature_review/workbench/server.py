@@ -27,6 +27,18 @@ from src.literature_review.workbench.service import (
 
 
 MAX_JSON_BODY_BYTES = 1024 * 1024
+_DEFAULT_STATIC_ROOT = Path(__file__).with_name("static")
+_STATIC_ASSETS = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/static/styles.css": ("styles.css", "text/css; charset=utf-8"),
+    "/static/app.js": ("app.js", "application/javascript; charset=utf-8"),
+}
+_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; "
+    "connect-src 'self'; object-src 'none'; base-uri 'none'; "
+    "frame-ancestors 'none'"
+)
+_CONFIG_MARKER = b"__WORKBENCH_CONFIG__"
 
 
 class _APIError(Exception):
@@ -65,6 +77,7 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
         port: int = 0,
         mutation_token: str | None = None,
         static_root: Path | None = None,
+        default_corpus_path: Path | None = None,
     ) -> None:
         if not isinstance(host, str) or host.lower() not in {
             "127.0.0.1",
@@ -79,7 +92,14 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
         )
         if not isinstance(self.mutation_token, str) or not self.mutation_token:
             raise ValueError("mutation_token must be a nonempty string")
-        self.static_root = None if static_root is None else Path(static_root)
+        self.static_root = (
+            _DEFAULT_STATIC_ROOT if static_root is None else Path(static_root)
+        )
+        self.default_corpus_path = (
+            None
+            if default_corpus_path is None
+            else str(Path(default_corpus_path))
+        )
         super().__init__((host, port), WorkbenchRequestHandler)
 
     @property
@@ -97,6 +117,9 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
     server: WorkbenchHTTPServer
 
     def do_GET(self) -> None:
+        if self.path in _STATIC_ASSETS:
+            self._serve_static(self.path)
+            return
         self._handle(self._dispatch_get)
 
     def do_POST(self) -> None:
@@ -480,6 +503,44 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         if include_body:
             self.wfile.write(body)
 
+    def _serve_static(self, request_path: str) -> None:
+        filename, content_type = _STATIC_ASSETS[request_path]
+        try:
+            body = (self.server.static_root / filename).read_bytes()
+            if request_path == "/":
+                body = self._inject_workbench_config(body)
+        except (OSError, ValueError):
+            self._send_not_found()
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", _CONTENT_SECURITY_POLICY)
+        self.send_header("X-Frame-Options", "DENY")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _inject_workbench_config(self, template: bytes) -> bytes:
+        if template.count(_CONFIG_MARKER) != 1:
+            raise ValueError("index template must contain one config marker")
+        config = json.dumps(
+            {
+                "mutationToken": self.server.mutation_token,
+                "defaultCorpusPath": self.server.default_corpus_path,
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        safe_config = (
+            config.replace("&", "\\u0026")
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+        )
+        return template.replace(_CONFIG_MARKER, safe_config.encode("ascii"))
+
 
 def create_workbench_server(
     service: WorkbenchService,
@@ -489,6 +550,7 @@ def create_workbench_server(
     port: int = 0,
     mutation_token: str | None = None,
     static_root: Path | None = None,
+    default_corpus_path: Path | None = None,
 ) -> WorkbenchHTTPServer:
     return WorkbenchHTTPServer(
         service,
@@ -497,6 +559,7 @@ def create_workbench_server(
         port=port,
         mutation_token=mutation_token,
         static_root=static_root,
+        default_corpus_path=default_corpus_path,
     )
 
 

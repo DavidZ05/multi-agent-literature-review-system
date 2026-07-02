@@ -1,5 +1,6 @@
 from concurrent.futures import Future
 import http.client
+from html.parser import HTMLParser
 import json
 from pathlib import Path
 import socket
@@ -91,6 +92,7 @@ class WorkbenchHTTPTests(unittest.TestCase):
             host="127.0.0.1",
             port=0,
             mutation_token=self.token,
+            default_corpus_path=self.corpus_path,
         )
         self.thread = threading.Thread(
             target=self.server.serve_forever,
@@ -136,6 +138,23 @@ class WorkbenchHTTPTests(unittest.TestCase):
                 response_headers,
                 None if not raw else json.loads(raw),
             )
+        finally:
+            connection.close()
+
+    def request_bytes(
+        self,
+        method: str,
+        path: str,
+    ) -> tuple[int, dict[str, str], bytes]:
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)
+        try:
+            connection.request(method, path)
+            response = connection.getresponse()
+            body = response.read()
+            headers = {
+                key.lower(): value for key, value in response.getheaders()
+            }
+            return response.status, headers, body
         finally:
             connection.close()
 
@@ -640,12 +659,215 @@ class WorkbenchHTTPTests(unittest.TestCase):
         )
         self.assertNotIn(secret, json.dumps(payload))
 
-    def test_static_and_non_api_routes_do_not_capture_unknown_api_routes(self) -> None:
-        for path in ("/", "/assets/app.js", "/api/runs/extra/path"):
+    def test_static_routes_serve_allowlisted_utf8_assets_with_security_headers(
+        self,
+    ) -> None:
+        expected = {
+            "/": "text/html; charset=utf-8",
+            "/static/styles.css": "text/css; charset=utf-8",
+            "/static/app.js": "application/javascript; charset=utf-8",
+        }
+        for path, content_type in expected.items():
             with self.subTest(path=path):
-                status, _, payload = self.request("GET", path)
+                status, headers, body = self.request_bytes("GET", path)
+                self.assertEqual(status, 200)
+                self.assertEqual(headers["content-type"], content_type)
+                self.assertEqual(headers["cache-control"], "no-store")
+                self.assertEqual(headers["x-content-type-options"], "nosniff")
+                self.assertEqual(headers["x-frame-options"], "DENY")
+                self.assertEqual(
+                    headers["content-security-policy"],
+                    (
+                        "default-src 'self'; script-src 'self'; style-src 'self'; "
+                        "connect-src 'self'; object-src 'none'; base-uri 'none'; "
+                        "frame-ancestors 'none'"
+                    ),
+                )
+                self.assertEqual(int(headers["content-length"]), len(body))
+                body.decode("utf-8")
+
+    def test_index_injects_safe_json_config(self) -> None:
+        status, _, body = self.request_bytes("GET", "/")
+        parser = _WorkbenchConfigParser()
+        parser.feed(body.decode("utf-8"))
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            json.loads(parser.config),
+            {
+                "mutationToken": self.token,
+                "defaultCorpusPath": str(self.corpus_path),
+            },
+        )
+        self.assertNotIn("__WORKBENCH_CONFIG__", body.decode("utf-8"))
+
+    def test_index_config_escapes_script_closing_sequences(self) -> None:
+        server = create_workbench_server(
+            self.service,
+            self.manager,
+            mutation_token="token</script><script>alert(1)</script>",
+            default_corpus_path=Path("</script><img src=x>"),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection(
+                "127.0.0.1",
+                server.server_address[1],
+                timeout=3,
+            )
+            connection.request("GET", "/")
+            response = connection.getresponse()
+            body = response.read().decode("utf-8")
+            connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        parser = _WorkbenchConfigParser()
+        parser.feed(body)
+        config = json.loads(parser.config)
+        self.assertEqual(
+            config["mutationToken"],
+            "token</script><script>alert(1)</script>",
+        )
+        self.assertNotIn("</script><script>alert(1)</script>", body)
+        self.assertNotIn("</script><img src=x>", body)
+
+    def test_static_allowlist_rejects_unknown_and_traversal_paths(self) -> None:
+        paths = (
+            "/static/index.html",
+            "/static/unknown.css",
+            "/static/../app.js",
+            "/static/%2e%2e/app.js",
+            "/assets/app.js",
+            "/api/runs/extra/path",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                status, headers, payload = self.request("GET", path)
                 self.assertEqual(status, 404)
                 self.assertEqual(payload["error"]["code"], "not_found")
+                self.assert_json_headers(headers)
+
+
+class _WorkbenchConfigParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._capture = False
+        self.config = ""
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        values = dict(attrs)
+        self._capture = tag == "script" and values.get("id") == "workbench-config"
+
+    def handle_data(self, data: str) -> None:
+        if self._capture:
+            self.config += data
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self._capture = False
+
+
+class WorkbenchStaticContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.static_root = (
+            Path(__file__).parents[1]
+            / "src"
+            / "literature_review"
+            / "workbench"
+            / "static"
+        )
+
+    def test_index_contains_required_semantic_controls_and_states(self) -> None:
+        index = (self.static_root / "index.html").read_text(encoding="utf-8")
+        required_fragments = (
+            "<h1",
+            'id="language-toggle"',
+            'id="new-run-button"',
+            'id="events-button"',
+            'id="cancel-run-button"',
+            'id="resume-run-button"',
+            'id="close-discovery-button"',
+            'id="runs-list"',
+            'id="candidate-filters"',
+            'id="candidates-body"',
+            'id="candidate-detail"',
+            'id="approval-form"',
+            'id="new-run-dialog"',
+            'id="events-dialog"',
+            'id="app-loading"',
+            'id="app-empty"',
+            'id="app-error"',
+            'id="feedback"',
+            'id="equivalent-command"',
+            'id="workbench-config"',
+            "__WORKBENCH_CONFIG__",
+        )
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, index)
+        self.assertEqual(index.count("<h1"), 1)
+
+    def test_client_declares_api_routes_statuses_and_translation_dictionaries(
+        self,
+    ) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        required_fragments = (
+            "const messages =",
+            '"en"',
+            '"zh-CN"',
+            '"/api/runs"',
+            '"/api/jobs/"',
+            '"/events"',
+            '"/candidates"',
+            '"/approve"',
+            '"/defer"',
+            '"/reject"',
+            '"/resume"',
+            '"/cancel"',
+            '"/close-discovery"',
+            '"waiting"',
+            '"active"',
+            '"paused"',
+            '"retry_wait"',
+            '"failed"',
+            '"cancelled"',
+            '"completed"',
+            "localStorage",
+            "navigator.languages",
+            "X-Workbench-Token",
+            "pagehide",
+            "setTimeout",
+        )
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, script)
+
+    def test_styles_define_approved_responsive_layout(self) -> None:
+        styles = (self.static_root / "styles.css").read_text(encoding="utf-8")
+        required_fragments = (
+            "#176b54",
+            "grid-template-columns: 190px minmax(0, 1fr) 330px",
+            "@media (max-width: 1100px)",
+            "@media (max-width: 720px)",
+            "@media (max-width: 480px)",
+            "grid-template-columns: repeat(4, minmax(0, 1fr))",
+            "grid-template-columns: repeat(3, minmax(0, 1fr))",
+            ".candidate-row",
+            ":focus-visible",
+        )
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, styles)
+        self.assertNotIn("gradient(", styles)
 
 
 if __name__ == "__main__":
