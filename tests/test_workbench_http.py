@@ -142,6 +142,38 @@ class WorkbenchHTTPTests(unittest.TestCase):
     def mutation_headers(self, **extra: str) -> dict[str, str]:
         return {"X-Workbench-Token": self.token, **extra}
 
+    def raw_post(
+        self,
+        framing_headers: tuple[str, ...],
+        body: bytes = b"{}",
+    ) -> tuple[int, dict[str, str], object]:
+        request = (
+            (
+                f"POST /api/runs/{self.run.run_id}/cancel HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{self.port}\r\n"
+                f"X-Workbench-Token: {self.token}\r\n"
+                "Content-Type: application/json\r\n"
+                + "".join(f"{header}\r\n" for header in framing_headers)
+                + "Connection: close\r\n\r\n"
+            ).encode("ascii")
+            + body
+        )
+        with socket.create_connection(("127.0.0.1", self.port), timeout=3) as client:
+            client.sendall(request)
+            client.shutdown(socket.SHUT_WR)
+            chunks = []
+            while chunk := client.recv(65536):
+                chunks.append(chunk)
+
+        header_block, response_body = b"".join(chunks).split(b"\r\n\r\n", 1)
+        lines = header_block.decode("ascii").split("\r\n")
+        status = int(lines[0].split(" ", 2)[1])
+        headers = {
+            name.lower(): value.strip()
+            for name, value in (line.split(":", 1) for line in lines[1:])
+        }
+        return status, headers, json.loads(response_body)
+
     def assert_json_headers(self, headers: dict[str, str]) -> None:
         self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
         self.assertEqual(headers["cache-control"], "no-store")
@@ -514,6 +546,37 @@ class WorkbenchHTTPTests(unittest.TestCase):
                 )
                 self.assertEqual(status, expected_status)
                 self.assertEqual(payload["error"]["code"], code)
+
+    def test_ambiguous_or_unsupported_request_framing_is_rejected(self) -> None:
+        mutation_calls = []
+        original_cancel = self.service.cancel_run
+
+        def tracked_cancel(run_id: str) -> dict[str, object]:
+            mutation_calls.append(run_id)
+            return original_cancel(run_id)
+
+        self.service.cancel_run = tracked_cancel  # type: ignore[method-assign]
+        cases = (
+            ("duplicate_same", ("Content-Length: 2", "Content-Length: 2")),
+            ("duplicate_conflicting", ("Content-Length: 2", "Content-Length: 3")),
+            ("comma_joined", ("Content-Length: 2, 2",)),
+            ("signed", ("Content-Length: +2",)),
+            ("leading_zero", ("Content-Length: 02",)),
+            ("negative", ("Content-Length: -1",)),
+            ("trailing_space", ("Content-Length: 2 ",)),
+            (
+                "transfer_encoding",
+                ("Content-Length: 2", "Transfer-Encoding: chunked"),
+            ),
+        )
+        for name, framing_headers in cases:
+            with self.subTest(name=name):
+                status, headers, payload = self.raw_post(framing_headers)
+                self.assertEqual(status, 400)
+                self.assertEqual(payload["error"]["code"], "invalid_request")
+                self.assert_json_headers(headers)
+
+        self.assertEqual(mutation_calls, [])
 
     def test_validation_not_found_and_unknown_routes_use_structured_errors(
         self,

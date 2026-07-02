@@ -352,19 +352,20 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 "unsupported_media_type",
                 "Content-Type must be application/json.",
             )
-        if self.headers.get("Transfer-Encoding") is not None:
+        if self.headers.get_all("Transfer-Encoding", []):
             raise _APIError(400, "invalid_request", "Request body is invalid.")
-        content_length = self.headers.get("Content-Length")
-        try:
-            length = int(content_length) if content_length is not None else -1
-        except ValueError as exc:
-            raise _APIError(
-                400,
-                "invalid_request",
-                "Request body is invalid.",
-            ) from exc
-        if length < 0:
+        content_lengths = self.headers.get_all("Content-Length", [])
+        if len(content_lengths) != 1:
             raise _APIError(400, "invalid_request", "Request body is invalid.")
+        content_length = content_lengths[0]
+        if (
+            not content_length
+            or not content_length.isascii()
+            or not content_length.isdigit()
+            or (len(content_length) > 1 and content_length.startswith("0"))
+        ):
+            raise _APIError(400, "invalid_request", "Request body is invalid.")
+        length = int(content_length)
         if length > MAX_JSON_BODY_BYTES:
             raise _APIError(
                 413,
