@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.literature_review.cli import main
 from src.literature_review.models import (
@@ -224,6 +224,86 @@ class PersistentCLITests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(stdout.getvalue()), fake_result)
+
+    def test_ui_dispatches_shared_runtime_paths_and_browser_preference(self) -> None:
+        with patch(
+            "src.literature_review.cli.run_workbench",
+            return_value=0,
+        ) as runner:
+            code = main(
+                [
+                    "--db",
+                    str(self.db_path),
+                    "--artifacts",
+                    str(self.artifact_path),
+                    "ui",
+                    "--host",
+                    "localhost",
+                    "--port",
+                    "8123",
+                    "--no-browser",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        runner.assert_called_once()
+        call = runner.call_args
+        self.assertEqual(call.args[0].path, self.db_path)
+        self.assertEqual(call.args[1], self.artifact_path)
+        self.assertEqual(call.kwargs["host"], "localhost")
+        self.assertEqual(call.kwargs["port"], 8123)
+        self.assertFalse(call.kwargs["open_browser"])
+        self.assertEqual(call.kwargs["default_corpus_path"], self.corpus_path)
+
+    def test_run_workbench_opens_browser_and_closes_runtime_on_interrupt(self) -> None:
+        from src.literature_review.cli import run_workbench
+
+        store = SQLiteWorkflowStore(self.db_path)
+        store.initialize()
+        manager = MagicMock()
+        server = MagicMock()
+        server.server_address = ("127.0.0.1", 8765)
+        server.serve_forever.side_effect = KeyboardInterrupt
+
+        with (
+            patch(
+                "src.literature_review.cli.WorkflowJobManager",
+                return_value=manager,
+            ),
+            patch(
+                "src.literature_review.cli.create_workbench_server",
+                return_value=server,
+            ) as create_server,
+            patch("src.literature_review.cli.webbrowser.open") as open_browser,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            code = run_workbench(
+                store,
+                self.artifact_path,
+                host="127.0.0.1",
+                port=8765,
+                open_browser=True,
+                default_corpus_path=self.corpus_path,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertIn("http://127.0.0.1:8765/", stdout.getvalue())
+        open_browser.assert_called_once_with("http://127.0.0.1:8765/")
+        create_server.assert_called_once()
+        manager.shutdown.assert_called_once_with(wait=True)
+        server.server_close.assert_called_once_with()
+
+    def test_ui_rejects_out_of_range_port_before_launch(self) -> None:
+        with (
+            patch(
+                "src.literature_review.cli.run_workbench",
+            ) as runner,
+            redirect_stderr(io.StringIO()),
+        ):
+            with self.assertRaises(SystemExit):
+                main(["ui", "--port", "70000", "--no-browser"])
+
+        runner.assert_not_called()
 
 
 if __name__ == "__main__":

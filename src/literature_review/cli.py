@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 from typing import Any, Sequence
+import webbrowser
 
 from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import CandidateStatus, WorkflowStage
@@ -17,6 +18,9 @@ from src.literature_review.storage import (
     SQLiteWorkflowStore,
 )
 from src.literature_review.workflow import StageExecutionError
+from src.literature_review.workbench.jobs import WorkflowJobManager
+from src.literature_review.workbench.server import create_workbench_server
+from src.literature_review.workbench.service import WorkbenchService
 
 
 class _ExtendTupleAction(argparse.Action):
@@ -31,6 +35,13 @@ class _ExtendTupleAction(argparse.Action):
         if isinstance(current, tuple):
             current = []
         setattr(namespace, self.dest, [*current, *values])
+
+
+def _port_number(value: str) -> int:
+    port = int(value)
+    if not 0 <= port <= 65535:
+        raise argparse.ArgumentTypeError("port must be between 0 and 65535")
+    return port
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -101,6 +112,19 @@ def _parser() -> argparse.ArgumentParser:
         "close-discovery", help="confirm all candidate decisions are complete"
     )
     close.add_argument("run_id")
+
+    ui = commands.add_parser("ui", help="open the local review workbench")
+    ui.add_argument(
+        "--host",
+        choices=("127.0.0.1", "localhost"),
+        default="127.0.0.1",
+    )
+    ui.add_argument("--port", type=_port_number, default=8765)
+    ui.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="serve the workbench without opening a browser",
+    )
     return parser
 
 
@@ -121,6 +145,48 @@ def _legacy_main() -> int:
     return 0
 
 
+def run_workbench(
+    store: SQLiteWorkflowStore,
+    artifact_root: Path,
+    *,
+    host: str,
+    port: int,
+    open_browser: bool,
+    default_corpus_path: Path,
+) -> int:
+    artifact_root = Path(artifact_root).expanduser().resolve()
+    manager = WorkflowJobManager(store, artifact_root)
+    server = None
+    try:
+        service = WorkbenchService(
+            store,
+            cancel=lambda run_id: build_engine(
+                store,
+                artifact_root,
+            ).cancel(run_id),
+        )
+        server = create_workbench_server(
+            service,
+            manager,
+            host=host,
+            port=port,
+            default_corpus_path=default_corpus_path,
+        )
+        url = f"http://{host}:{server.server_address[1]}/"
+        print(f"Literature Review Workbench: {url}", flush=True)
+        if open_browser:
+            webbrowser.open(url)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        return 0
+    finally:
+        manager.shutdown(wait=True)
+        if server is not None:
+            server.server_close()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if not arguments:
@@ -133,6 +199,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     store = SQLiteWorkflowStore(args.db)
     store.initialize()
     try:
+        if args.command == "ui":
+            return run_workbench(
+                store,
+                args.artifacts,
+                host=args.host,
+                port=args.port,
+                open_browser=not args.no_browser,
+                default_corpus_path=(
+                    Path(__file__).resolve().parents[2] / "data" / "papers.json"
+                ),
+            )
         if args.command == "status":
             _print_json(store.get_run(args.run_id).to_dict())
             return 0
@@ -262,4 +339,4 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["main"]
+__all__ = ["main", "run_workbench"]
