@@ -6,12 +6,14 @@
       brand: "Literature Review Workbench", workbenchActions: "Workbench actions",
       events: "Events", resumeRun: "Resume", closeDiscovery: "Close discovery",
       cancelRun: "Cancel run", newRun: "New discovery run", researchRuns: "Research runs",
-      localStorage: "Local storage", loadingRuns: "Loading research runs...",
+      localStorage: "Local storage", database: "Database", artifacts: "Artifacts",
+      loadingRuns: "Loading research runs...", loadingDetail: "Loading run details...",
       noRuns: "No research runs yet.", createFirstRun: "Create the first run",
       retry: "Retry", candidates: "Candidates", candidateFilters: "Candidate filters",
       candidateTable: "Discovered literature candidates", paper: "Paper", year: "Year",
       source: "Source", score: "Score", status: "Status", noCandidates: "No candidates match this filter.",
       selectCandidate: "Select a candidate", selectCandidateHint: "Candidate metadata and decisions appear here.",
+      detailLoadFailed: "Run details unavailable",
       abstractEvidence: "Abstract evidence", screeningRecommendation: "Screening recommendation",
       identifiers: "Identifiers and sources", approvalMetadata: "Approval metadata",
       category: "Category", contribution: "Contribution", tags: "Tags",
@@ -32,6 +34,7 @@
       discoveryClosed: "Discovery closed.", eventsEmpty: "No events recorded.",
       loadingEvents: "Loading events...", reasonRequired: "A decision reason is required.",
       approvalFieldsRequired: "Category and contribution are required for approval.",
+      tagsRequired: "Enter at least one tag before approval.",
       providerRequired: "Select at least one provider when discovery is enabled.",
       loadFailed: "Could not load the workbench.", requestFailed: "The request failed.",
       forbidden: "Mutation access was denied.", invalid_request: "Check the submitted fields.",
@@ -45,12 +48,14 @@
       brand: "文献综述工作台", workbenchActions: "工作台操作",
       events: "事件记录", resumeRun: "继续运行", closeDiscovery: "关闭检索",
       cancelRun: "取消运行", newRun: "新建文献检索", researchRuns: "研究任务",
-      localStorage: "本地存储", loadingRuns: "正在加载研究任务...",
+      localStorage: "本地存储", database: "数据库", artifacts: "产物目录",
+      loadingRuns: "正在加载研究任务...", loadingDetail: "正在加载运行详情...",
       noRuns: "暂无研究任务。", createFirstRun: "创建首个任务",
       retry: "重试", candidates: "候选论文", candidateFilters: "候选论文筛选",
       candidateTable: "检索到的候选文献", paper: "论文", year: "年份",
       source: "来源", score: "评分", status: "状态", noCandidates: "当前筛选条件下没有候选论文。",
       selectCandidate: "请选择候选论文", selectCandidateHint: "此处显示论文元数据与审批操作。",
+      detailLoadFailed: "无法加载运行详情",
       abstractEvidence: "摘要证据", screeningRecommendation: "筛选建议",
       identifiers: "标识符与来源", approvalMetadata: "审批信息",
       category: "研究类别", contribution: "核心贡献", tags: "标签",
@@ -71,6 +76,7 @@
       discoveryClosed: "检索已关闭。", eventsEmpty: "暂无事件记录。",
       loadingEvents: "正在加载事件...", reasonRequired: "请填写审批理由。",
       approvalFieldsRequired: "批准论文时必须填写研究类别与核心贡献。",
+      tagsRequired: "批准论文前请至少填写一个标签。",
       providerRequired: "启用检索时，请至少选择一个平台。",
       loadFailed: "无法加载工作台。", requestFailed: "请求失败。",
       forbidden: "没有修改权限。", invalid_request: "请检查提交字段。",
@@ -102,16 +108,22 @@
     language: storedLanguage() || browserLanguage(),
     runs: [],
     detail: null,
+    candidates: [],
     selectedRunId: null,
     selectedCandidateId: null,
     filter: "pending",
+    detailState: "empty",
+    detailError: "",
+    runGeneration: 0,
+    candidateGeneration: 0,
+    activeRunRequests: new Set(),
+    activeCandidateRequests: new Set(),
     pending: false,
     stopped: false,
     jobIds: new Set(),
     jobTimer: null,
     runTimer: null,
     loadingRuns: false,
-    loadingDetail: false,
     pollingJobs: false
   };
 
@@ -135,7 +147,12 @@
     try {
       return JSON.parse(byId("workbench-config").textContent);
     } catch (_) {
-      return { mutationToken: "", defaultCorpusPath: null };
+      return {
+        mutationToken: "",
+        defaultCorpusPath: null,
+        databasePath: "",
+        artifactRoot: ""
+      };
     }
   }
 
@@ -255,6 +272,54 @@
     if (name === "error") byId("app-error-message").textContent = message;
   }
 
+  function resetCandidateForm(clearFeedback = true) {
+    byId("candidate-category").value = "";
+    byId("candidate-contribution").value = "";
+    byId("candidate-tags").value = "";
+    byId("candidate-reason").value = "";
+    if (clearFeedback) showFeedback("");
+  }
+
+  function beginRunSelection(runId) {
+    state.runGeneration += 1;
+    state.candidateGeneration += 1;
+    state.selectedRunId = runId;
+    state.selectedCandidateId = null;
+    state.detail = null;
+    state.candidates = [];
+    state.detailState = runId ? "loading" : "empty";
+    state.detailError = "";
+    clearTimeout(state.runTimer);
+    resetCandidateForm();
+    renderAll();
+    return state.runGeneration;
+  }
+
+  function isCurrentRunRequest(runId, generation) {
+    return state.selectedRunId === runId && state.runGeneration === generation;
+  }
+
+  function isCurrentCandidateRequest(runId, filter, runGeneration, candidateGeneration) {
+    return isCurrentRunRequest(runId, runGeneration)
+      && state.filter === filter
+      && state.candidateGeneration === candidateGeneration;
+  }
+
+  async function refreshRunDetail(runId) {
+    if (state.selectedRunId !== runId) return;
+    state.runGeneration += 1;
+    state.candidateGeneration += 1;
+    await loadRunDetail(runId, state.runGeneration);
+  }
+
+  function candidateRequestPath(runId, filter) {
+    const base = `${apiPaths.runs}/${encodeURIComponent(runId)}${apiPaths.candidates}`;
+    if (filter === "pending" || filter === "approved") {
+      return `${base}?status=${encodeURIComponent(filter)}`;
+    }
+    return base;
+  }
+
   async function loadRuns({ preserveSelection = true } = {}) {
     if (state.loadingRuns || state.stopped) return;
     state.loadingRuns = true;
@@ -264,17 +329,16 @@
       state.runs = Array.isArray(runs) ? runs : [];
       const selectedExists = state.runs.some((run) => run.run_id === state.selectedRunId);
       if (!preserveSelection || !selectedExists) {
-        state.selectedRunId = state.runs[0] ? state.runs[0].run_id : null;
+        beginRunSelection(state.runs[0] ? state.runs[0].run_id : null);
       }
       renderRuns();
       if (!state.selectedRunId) {
-        state.detail = null;
         setInitialState("empty");
         renderAll();
         return;
       }
       setInitialState("ready");
-      await loadRunDetail(state.selectedRunId);
+      await loadRunDetail(state.selectedRunId, state.runGeneration);
     } catch (error) {
       setInitialState("error", errorMessage(error));
     } finally {
@@ -282,23 +346,68 @@
     }
   }
 
-  async function loadRunDetail(runId, { quiet = false } = {}) {
-    if (!runId || state.loadingDetail || state.stopped) return;
-    state.loadingDetail = true;
+  async function loadRunDetail(runId, generation = state.runGeneration, { quiet = false } = {}) {
+    if (!runId || state.stopped || state.activeRunRequests.has(generation)) return;
+    state.activeRunRequests.add(generation);
     try {
       const detail = await api(`/api/runs/${encodeURIComponent(runId)}`);
-      if (state.selectedRunId !== runId) return;
+      if (!isCurrentRunRequest(runId, generation)) return;
       state.detail = detail;
-      const candidates = detail.candidates || [];
-      if (!candidates.some((candidate) => candidate.candidate_id === state.selectedCandidateId)) {
-        state.selectedCandidateId = null;
-      }
+      state.detailState = "ready";
+      state.detailError = "";
       renderAll();
+      await loadCandidates(runId, state.filter, generation, { preserveSelection: true });
       scheduleRunPoll();
     } catch (error) {
-      if (!quiet) showFeedback(errorMessage(error), true);
+      if (!isCurrentRunRequest(runId, generation)) return;
+      state.detail = null;
+      state.candidates = [];
+      state.selectedCandidateId = null;
+      state.detailState = "error";
+      state.detailError = errorMessage(error);
+      resetCandidateForm(false);
+      renderAll();
+      if (!quiet) showFeedback(state.detailError, true);
     } finally {
-      state.loadingDetail = false;
+      state.activeRunRequests.delete(generation);
+    }
+  }
+
+  async function loadCandidates(
+    runId,
+    filter,
+    runGeneration = state.runGeneration,
+    { preserveSelection = false } = {}
+  ) {
+    const candidateGeneration = ++state.candidateGeneration;
+    const requestKey = `${runGeneration}:${candidateGeneration}`;
+    state.activeCandidateRequests.add(requestKey);
+    try {
+      let candidates = await api(candidateRequestPath(runId, filter));
+      if (filter === "recommended") {
+        candidates = candidates.filter((candidate) => candidate.recommendation === "include");
+      }
+      if (!isCurrentCandidateRequest(runId, filter, runGeneration, candidateGeneration)) return;
+      state.candidates = Array.isArray(candidates) ? candidates : [];
+      const selectedExists = state.candidates.some(
+        (candidate) => candidate.candidate_id === state.selectedCandidateId
+      );
+      if (!preserveSelection || !selectedExists) {
+        state.selectedCandidateId = null;
+        resetCandidateForm();
+      }
+      renderCandidates();
+      renderCandidateDetail();
+    } catch (error) {
+      if (!isCurrentCandidateRequest(runId, filter, runGeneration, candidateGeneration)) return;
+      state.candidates = [];
+      state.selectedCandidateId = null;
+      resetCandidateForm(false);
+      renderCandidates();
+      renderCandidateDetail();
+      showFeedback(errorMessage(error), true);
+    } finally {
+      state.activeCandidateRequests.delete(requestKey);
     }
   }
 
@@ -317,6 +426,7 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "run-button";
+      button.disabled = state.pending;
       button.classList.toggle("selected", run.run_id === state.selectedRunId);
       if (run.run_id === state.selectedRunId) button.setAttribute("aria-current", "page");
       const title = document.createElement("strong");
@@ -337,7 +447,17 @@
 
   function renderRunDetail() {
     const run = state.detail && state.detail.run;
-    if (!run) return;
+    if (!run) {
+      const selected = state.runs.find((item) => item.run_id === state.selectedRunId);
+      byId("run-topic").textContent = selected ? selected.topic : "";
+      byId("run-meta").textContent = "";
+      byId("run-status").textContent = state.detailState === "loading" ? t("loadingDetail") : "";
+      byId("run-status").className = "status-badge";
+      byId("run-progress").querySelectorAll(".progress-step").forEach((step) => {
+        step.classList.remove("done", "current");
+      });
+      return;
+    }
     byId("run-topic").textContent = run.topic;
     byId("run-meta").textContent = t("runMeta", {
       id: shortId(run.run_id),
@@ -357,28 +477,25 @@
     });
   }
 
-  function filteredCandidates() {
-    const candidates = state.detail ? state.detail.candidates || [] : [];
-    if (state.filter === "pending") return candidates.filter((candidate) => candidate.status === "pending");
-    if (state.filter === "recommended") return candidates.filter((candidate) => candidate.recommendation === "include");
-    if (state.filter === "approved") return candidates.filter((candidate) => candidate.status === "approved");
-    return candidates;
-  }
-
   function candidateCounts() {
-    const candidates = state.detail ? state.detail.candidates || [] : [];
+    const stored = state.detail ? state.detail.candidate_counts || {} : {};
+    const all = Object.values(stored).reduce((sum, value) => sum + Number(value || 0), 0);
     return {
-      pending: candidates.filter((candidate) => candidate.status === "pending").length,
-      recommended: candidates.filter((candidate) => candidate.recommendation === "include").length,
-      approved: candidates.filter((candidate) => candidate.status === "approved").length,
-      all: candidates.length
+      pending: Number(stored.pending || 0),
+      recommended: state.detail
+        ? (state.detail.candidates || []).filter(
+            (candidate) => candidate.recommendation === "include"
+          ).length
+        : 0,
+      approved: Number(stored.approved || 0),
+      all
     };
   }
 
   function renderCandidates() {
     const body = byId("candidates-body");
     body.replaceChildren();
-    const candidates = filteredCandidates();
+    const candidates = state.candidates;
     const counts = candidateCounts();
     document.querySelectorAll("[data-filter]").forEach((button) => {
       const filter = button.dataset.filter;
@@ -390,12 +507,6 @@
     byId("candidate-count").textContent = t("deduplicatedCount", { count: counts.all });
     byId("candidates-empty").hidden = candidates.length !== 0;
     candidates.forEach((candidate) => body.append(candidateRow(candidate)));
-    if (!state.selectedCandidateId && candidates[0]) {
-      state.selectedCandidateId = candidates[0].candidate_id;
-      renderCandidateDetail();
-      const first = body.querySelector(".candidate-row");
-      if (first) first.classList.add("selected");
-    }
   }
 
   function candidateRow(candidate) {
@@ -420,6 +531,9 @@
       labeledCell(t(candidate.status || "unknown"), "status")
     );
     const select = () => {
+      if (state.selectedCandidateId !== candidate.candidate_id) {
+        resetCandidateForm();
+      }
       state.selectedCandidateId = candidate.candidate_id;
       renderCandidates();
       renderCandidateDetail();
@@ -453,25 +567,39 @@
   }
 
   function selectedCandidate() {
-    const candidates = state.detail ? state.detail.candidates || [] : [];
-    return candidates.find((candidate) => candidate.candidate_id === state.selectedCandidateId) || null;
+    return state.candidates.find(
+      (candidate) => candidate.candidate_id === state.selectedCandidateId
+    ) || null;
   }
 
   function renderCandidateDetail() {
     const candidate = selectedCandidate();
     byId("candidate-empty").hidden = Boolean(candidate);
     byId("candidate-content").hidden = !candidate;
-    if (!candidate) return;
+    byId("approval-form").querySelectorAll("input, textarea, button").forEach((control) => {
+      control.disabled = state.pending || !candidate || candidate.status !== "pending";
+    });
+    if (!candidate) {
+      const title = byId("candidate-state-title");
+      const message = byId("candidate-state-message");
+      if (state.detailState === "loading") {
+        title.textContent = t("loadingDetail");
+        message.textContent = "";
+      } else if (state.detailState === "error") {
+        title.textContent = t("detailLoadFailed");
+        message.textContent = state.detailError;
+      } else {
+        title.textContent = t("selectCandidate");
+        message.textContent = t("selectCandidateHint");
+      }
+      return;
+    }
     byId("candidate-title").textContent = candidate.title;
     const meta = [candidate.venue, candidate.year, (candidate.authors || []).join(", ")].filter(Boolean);
     byId("candidate-meta").textContent = meta.join(" · ");
     byId("candidate-abstract").textContent = candidate.abstract || t("noAbstract");
     byId("candidate-recommendation").textContent = `${t(candidate.recommendation)} · ${Number(candidate.relevance_score || 0).toFixed(2)}`;
     renderIdentifiers(candidate);
-    const decided = candidate.status !== "pending";
-    byId("approval-form").querySelectorAll("input, textarea, button").forEach((control) => {
-      control.disabled = state.pending || decided;
-    });
   }
 
   function renderIdentifiers(candidate) {
@@ -514,16 +642,15 @@
     byId("resume-run-button").disabled = !hasRun || state.pending || ["active", "completed", "cancelled"].includes(run && run.status);
     byId("close-discovery-button").disabled = !hasRun || state.pending || run.current_stage !== "awaiting_corpus_approval";
     byId("new-run-button").disabled = state.pending;
+    document.querySelectorAll("[data-filter]").forEach((button) => {
+      button.disabled = !hasRun || state.pending;
+    });
   }
 
   async function selectRun(runId) {
     if (runId === state.selectedRunId) return;
-    state.selectedRunId = runId;
-    state.selectedCandidateId = null;
-    state.detail = null;
-    clearTimeout(state.runTimer);
-    renderRuns();
-    await loadRunDetail(runId);
+    const generation = beginRunSelection(runId);
+    await loadRunDetail(runId, generation);
   }
 
   async function withPending(operation) {
@@ -579,18 +706,30 @@
     if (action === "approve") {
       body.category = byId("candidate-category").value.trim();
       body.contribution = byId("candidate-contribution").value.trim();
-      body.tags = byId("candidate-tags").value.split(",").map((tag) => tag.trim()).filter(Boolean);
+      const tags = byId("candidate-tags").value
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean);
       if (!body.category || !body.contribution) {
         showFeedback(t("approvalFieldsRequired"), true);
         return;
       }
+      if (tags.length === 0) {
+        showFeedback(t("tagsRequired"), true);
+        byId("candidate-tags").focus();
+        return;
+      }
+      body.tags = tags;
     }
+    const runId = state.selectedRunId;
+    const runGeneration = state.runGeneration;
     await withPending(async () => {
-      const path = `/api/runs/${encodeURIComponent(state.selectedRunId)}/candidates/${encodeURIComponent(candidate.candidate_id)}/${action}`;
+      const path = `/api/runs/${encodeURIComponent(runId)}/candidates/${encodeURIComponent(candidate.candidate_id)}/${action}`;
       const payload = await api(path, { method: "POST", body });
+      if (!isCurrentRunRequest(runId, runGeneration)) return;
       showCommand(payload);
       showFeedback(t("mutationSucceeded"));
-      await loadRunDetail(state.selectedRunId);
+      await refreshRunDetail(runId);
     });
   }
 
@@ -638,7 +777,9 @@
           state.jobIds.delete(jobId);
           completed = true;
           showFeedback(job.status === "succeeded" ? t("jobSucceeded") : t("jobFailed"), job.status === "failed");
-          if (job.result && job.result.run_id) state.selectedRunId = job.result.run_id;
+          if (job.result && job.result.run_id && job.result.run_id !== state.selectedRunId) {
+            beginRunSelection(job.result.run_id);
+          }
         }
       }
       if (completed) await loadRuns();
@@ -655,7 +796,9 @@
     const run = state.detail && state.detail.run;
     if (state.stopped || !run || !pollableRunStatuses.has(run.status)) return;
     state.runTimer = setTimeout(async () => {
-      if (!state.loadingDetail) await loadRunDetail(run.run_id, { quiet: true });
+      if (!state.activeRunRequests.has(state.runGeneration)) {
+        await loadRunDetail(run.run_id, state.runGeneration, { quiet: true });
+      }
       else scheduleRunPoll();
     }, 2500);
   }
@@ -724,11 +867,14 @@
     byId("reject-button").addEventListener("click", () => decideCandidate("reject"));
     byId("candidate-filters").addEventListener("click", (event) => {
       const button = event.target.closest("[data-filter]");
-      if (!button) return;
+      if (!button || button.disabled || !state.selectedRunId) return;
       state.filter = button.dataset.filter;
       state.selectedCandidateId = null;
+      state.candidates = [];
+      resetCandidateForm();
       renderCandidates();
       renderCandidateDetail();
+      loadCandidates(state.selectedRunId, state.filter, state.runGeneration);
     });
     document.querySelectorAll("[data-close-dialog]").forEach((button) => {
       button.addEventListener("click", () => closeDialog(button.dataset.closeDialog));
@@ -747,6 +893,8 @@
 
   function initialize() {
     byId("new-run-corpus").value = config.defaultCorpusPath || "";
+    byId("database-path").textContent = config.databasePath || "";
+    byId("artifact-root").textContent = config.artifactRoot || "";
     bindEvents();
     applyLanguage(state.language);
     loadRuns({ preserveSelection: false });

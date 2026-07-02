@@ -100,6 +100,8 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
             if default_corpus_path is None
             else str(Path(default_corpus_path))
         )
+        self.database_path = str(service.store.path.expanduser().resolve())
+        self.artifact_root = str(job_manager.artifact_root)
         super().__init__((host, port), WorkbenchRequestHandler)
 
     @property
@@ -530,6 +532,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
             {
                 "mutationToken": self.server.mutation_token,
                 "defaultCorpusPath": self.server.default_corpus_path,
+                "databasePath": self.server.database_path,
+                "artifactRoot": self.server.artifact_root,
             },
             ensure_ascii=True,
             separators=(",", ":"),

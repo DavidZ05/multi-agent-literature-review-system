@@ -41,8 +41,10 @@
         <div class="runs-list" id="runs-list"></div>
         <h2 class="wb-side-label storage-label" data-i18n="localStorage">Local storage</h2>
         <div class="storage-card">
-          <strong>workflow.db</strong>
-          <span>.review-workflow/</span>
+          <strong data-i18n="database">Database</strong>
+          <span id="database-path"></span>
+          <strong data-i18n="artifacts">Artifacts</strong>
+          <span id="artifact-root"></span>
         </div>
       </aside>
 
@@ -92,8 +94,8 @@
 
       <aside class="wb-detail" id="candidate-detail" aria-labelledby="candidate-title">
         <div id="candidate-empty">
-          <h2 data-i18n="selectCandidate">Select a candidate</h2>
-          <p class="muted" data-i18n="selectCandidateHint">Candidate metadata and decisions appear here.</p>
+          <h2 id="candidate-state-title"></h2>
+          <p class="muted" id="candidate-state-message"></p>
         </div>
         <div id="candidate-content" hidden>
           <h2 id="candidate-title"></h2>

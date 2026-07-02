@@ -267,8 +267,9 @@ dialog::backdrop { background: rgba(23, 32, 51, .42); }
   .runs-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .run-button { min-height: 88px; margin: 0; }
   .storage-label { margin-top: 8px; }
-  .storage-card { min-height: 40px; display: flex; align-items: center; gap: 12px; }
+  .storage-card { min-height: 40px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; }
   .storage-card strong { margin: 0; }
+  .storage-card span { overflow-wrap: anywhere; }
   .wb-main { border-top: 1px solid var(--border); }
   .wb-detail { grid-column: 1; }
   .candidate-toolbar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }

@@ -697,6 +697,8 @@ class WorkbenchHTTPTests(unittest.TestCase):
             {
                 "mutationToken": self.token,
                 "defaultCorpusPath": str(self.corpus_path),
+                "databasePath": str(self.store.path),
+                "artifactRoot": str(self.manager.artifact_root),
             },
         )
         self.assertNotIn("__WORKBENCH_CONFIG__", body.decode("utf-8"))
@@ -809,6 +811,10 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             'id="feedback"',
             'id="equivalent-command"',
             'id="workbench-config"',
+            'id="database-path"',
+            'id="artifact-root"',
+            'id="candidate-state-title"',
+            'id="candidate-state-message"',
             "__WORKBENCH_CONFIG__",
         )
         for fragment in required_fragments:
@@ -846,6 +852,52 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             "X-Workbench-Token",
             "pagehide",
             "setTimeout",
+        )
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, script)
+
+    def test_client_guards_stale_run_and_candidate_responses(self) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        required_fragments = (
+            "runGeneration: 0",
+            "candidateGeneration: 0",
+            "function beginRunSelection(",
+            "function isCurrentRunRequest(",
+            "function isCurrentCandidateRequest(",
+            "function refreshRunDetail(",
+            "beginRunSelection(runId)",
+            "isCurrentRunRequest(runId, generation)",
+            "isCurrentCandidateRequest(runId, filter, runGeneration, candidateGeneration)",
+            "await refreshRunDetail(runId)",
+        )
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, script)
+        self.assertNotIn("loadingDetail: false", script)
+
+    def test_client_calls_candidate_endpoint_for_each_filter_mode(self) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function candidateRequestPath(runId, filter)", script)
+        self.assertIn('filter === "pending" || filter === "approved"', script)
+        self.assertIn("encodeURIComponent(filter)", script)
+        self.assertIn("api(candidateRequestPath(runId, filter))", script)
+        self.assertIn('filter === "recommended"', script)
+        self.assertIn('candidate.recommendation === "include"', script)
+
+    def test_client_resets_form_and_requires_nonempty_trimmed_tags(self) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        required_fragments = (
+            "function resetCandidateForm(",
+            'byId("candidate-category").value = ""',
+            'byId("candidate-contribution").value = ""',
+            'byId("candidate-tags").value = ""',
+            'byId("candidate-reason").value = ""',
+            'showFeedback("")',
+            "tagsRequired:",
+            "if (tags.length === 0)",
+            'showFeedback(t("tagsRequired"), true)',
         )
         for fragment in required_fragments:
             with self.subTest(fragment=fragment):
