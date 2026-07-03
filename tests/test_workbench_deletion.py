@@ -11,6 +11,7 @@ from src.literature_review.workbench import (
 
 
 RUN_ID = "run_0123456789abcdef0123456789abcdef"
+OTHER_RUN_ID = "run_fedcba9876543210fedcba9876543210"
 
 
 class ArtifactDeletionManagerTests(unittest.TestCase):
@@ -150,6 +151,24 @@ class ArtifactDeletionManagerTests(unittest.TestCase):
         self.assertTrue(unrelated_dir.is_dir())
         self.assertTrue(recognized_file.is_file())
         self.assertTrue(unrelated_file.is_file())
+
+    def test_cleanup_pending_preserves_quarantines_for_excluded_runs(self) -> None:
+        pending = self.root / ".delete-pending"
+        excluded = pending / f"{RUN_ID}--delete-{'a' * 32}"
+        removable = pending / f"{OTHER_RUN_ID}--delete-{'b' * 32}"
+        excluded.mkdir(parents=True)
+        removable.mkdir()
+        (excluded / "result.txt").write_text("keep", encoding="utf-8")
+
+        removed = self.manager.cleanup_pending(exclude_run_ids={RUN_ID})
+
+        self.assertEqual(removed, 1)
+        self.assertTrue(excluded.is_dir())
+        self.assertEqual(
+            (excluded / "result.txt").read_text(encoding="utf-8"),
+            "keep",
+        )
+        self.assertFalse(removable.exists())
 
     def test_mutations_reject_paths_that_resolve_outside_artifact_root(self) -> None:
         outside = Path(self.tmp.name) / "outside"

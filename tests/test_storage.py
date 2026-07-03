@@ -15,6 +15,7 @@ from src.literature_review.models import (
 from src.literature_review.storage.sqlite import (
     RunAlreadyExistsError,
     RunNotFoundError,
+    RunStatusMismatchError,
     SQLiteWorkflowStore,
     UnsupportedSchemaVersionError,
 )
@@ -223,6 +224,43 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
     def test_delete_unknown_run_raises_domain_error(self) -> None:
         with self.assertRaises(RunNotFoundError):
             self.store.delete_run("missing-run")
+
+    def test_delete_run_with_expected_status_is_atomic(self) -> None:
+        completed = replace(self.run, status=RunStatus.COMPLETED)
+        self.store.create_run(completed)
+
+        self.store.delete_run(
+            completed.run_id,
+            expected_status=RunStatus.COMPLETED,
+        )
+
+        with self.assertRaises(RunNotFoundError):
+            self.store.get_run(completed.run_id)
+
+    def test_delete_run_distinguishes_status_mismatch_from_missing_run(
+        self,
+    ) -> None:
+        self.store.create_run(self.run)
+
+        with self.assertRaises(RunStatusMismatchError) as raised:
+            self.store.delete_run(
+                self.run.run_id,
+                expected_status=RunStatus.COMPLETED,
+            )
+
+        self.assertEqual(raised.exception.run_id, self.run.run_id)
+        self.assertEqual(
+            raised.exception.expected_status,
+            RunStatus.COMPLETED,
+        )
+        self.assertEqual(raised.exception.actual_status, RunStatus.ACTIVE)
+        self.assertEqual(self.store.get_run(self.run.run_id), self.run)
+
+        with self.assertRaises(RunNotFoundError):
+            self.store.delete_run(
+                ResearchRun.create("Missing").run_id,
+                expected_status=RunStatus.COMPLETED,
+            )
 
     def test_duplicate_and_unknown_runs_raise_domain_errors(self) -> None:
         self.store.create_run(self.run)

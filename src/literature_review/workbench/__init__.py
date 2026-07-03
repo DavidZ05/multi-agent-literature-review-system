@@ -10,6 +10,9 @@ from src.literature_review.workbench.jobs import (
 )
 from src.literature_review.workbench.service import (
     PendingCandidatesError,
+    RunDeletionConflictError,
+    RunDeletionRollbackError,
+    RunNotDeletableError,
     WorkbenchService,
 )
 from src.literature_review.workbench.server import (
@@ -26,6 +29,9 @@ __all__ = [
     "JobNotFoundError",
     "MAX_JSON_BODY_BYTES",
     "PendingCandidatesError",
+    "RunDeletionConflictError",
+    "RunDeletionRollbackError",
+    "RunNotDeletableError",
     "StartRunRequest",
     "WorkbenchHTTPServer",
     "WorkbenchRequestHandler",

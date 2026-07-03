@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
@@ -80,7 +81,15 @@ class ArtifactDeletionManager:
             _manager=self,
         )
 
-    def cleanup_pending(self) -> int:
+    def cleanup_pending(
+        self,
+        *,
+        exclude_run_ids: Iterable[str] = (),
+    ) -> int:
+        excluded = frozenset(exclude_run_ids)
+        for run_id in excluded:
+            self._validate_run_id(run_id)
+
         pending = self._resolve_parent_directory(
             self._pending_path,
             "delete-pending path",
@@ -90,7 +99,8 @@ class ArtifactDeletionManager:
 
         removed = 0
         for candidate in pending.iterdir():
-            if _QUARANTINE_NAME_PATTERN.fullmatch(candidate.name) is None:
+            match = _QUARANTINE_NAME_PATTERN.fullmatch(candidate.name)
+            if match is None or match.group(1) in excluded:
                 continue
             if candidate.is_symlink() or not candidate.is_dir():
                 continue

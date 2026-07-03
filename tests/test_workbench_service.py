@@ -4,6 +4,7 @@ from pathlib import Path
 import shlex
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from src.literature_review import cli
 from src.literature_review.discovery import ApprovalService
@@ -20,7 +21,14 @@ from src.literature_review.storage import (
     RunNotFoundError,
     SQLiteWorkflowStore,
 )
-from src.literature_review.workbench import PendingCandidatesError, WorkbenchService
+from src.literature_review.workbench import (
+    PendingCandidatesError,
+    RunDeletionConflictError,
+    RunDeletionRollbackError,
+    RunNotDeletableError,
+    WorkbenchService,
+)
+from src.literature_review.workbench.deletion import ArtifactDeletionManager
 from src.literature_review.workflow import PersistentWorkflowEngine
 
 
@@ -501,6 +509,523 @@ class WorkbenchServiceTests(unittest.TestCase):
             service.cancel_run(missing_run_id)
 
         self.assertEqual(calls, [missing_run_id])
+
+    def test_delete_run_allows_exactly_terminal_statuses(self) -> None:
+        artifact_root = Path(self.tmp.name) / "terminal-artifacts"
+        for status in (
+            RunStatus.CANCELLED,
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+        ):
+            with self.subTest(status=status):
+                run = replace(ResearchRun.create(status.value), status=status)
+                self.store.create_run(run)
+                run_dir = artifact_root / "runs" / run.run_id
+                run_dir.mkdir(parents=True)
+                (run_dir / "result.txt").write_text("delete", encoding="utf-8")
+
+                result = WorkbenchService(
+                    self.store,
+                    artifact_root=artifact_root,
+                ).delete_run(run.run_id)
+
+                with self.assertRaises(RunNotFoundError):
+                    self.store.get_run(run.run_id)
+                self.assertFalse(run_dir.exists())
+                self.assertEqual(result["status"], "deleted")
+
+    def test_delete_run_rejects_nonterminal_statuses_without_mutation(self) -> None:
+        artifact_root = Path(self.tmp.name) / "active-artifacts"
+        for status in (
+            RunStatus.ACTIVE,
+            RunStatus.WAITING,
+            RunStatus.RETRY_WAIT,
+            RunStatus.PAUSED,
+        ):
+            with self.subTest(status=status):
+                run = replace(ResearchRun.create(status.value), status=status)
+                self.store.create_run(run)
+                run_dir = artifact_root / "runs" / run.run_id
+                run_dir.mkdir(parents=True)
+                artifact = run_dir / "result.txt"
+                artifact.write_text("keep", encoding="utf-8")
+
+                with self.assertRaises(RunNotDeletableError) as raised:
+                    WorkbenchService(
+                        self.store,
+                        artifact_root=artifact_root,
+                    ).delete_run(run.run_id)
+
+                self.assertEqual(raised.exception.run_id, run.run_id)
+                self.assertEqual(raised.exception.status, status)
+                self.assertEqual(self.store.get_run(run.run_id), run)
+                self.assertEqual(artifact.read_text(encoding="utf-8"), "keep")
+
+    def test_delete_run_removes_db_artifacts_and_preserves_unrelated_data(
+        self,
+    ) -> None:
+        artifact_root = Path(self.tmp.name) / "artifacts"
+        target = replace(
+            ResearchRun.create("Delete me"),
+            status=RunStatus.COMPLETED,
+        )
+        other = replace(
+            ResearchRun.create("Keep me"),
+            status=RunStatus.COMPLETED,
+        )
+        self.store.create_run(target)
+        self.store.create_run(other)
+        target_dir = artifact_root / "runs" / target.run_id
+        other_dir = artifact_root / "runs" / other.run_id
+        cache_dir = artifact_root / "provider-cache"
+        for directory, content in (
+            (target_dir, "target"),
+            (other_dir, "other"),
+            (cache_dir, "cache"),
+        ):
+            directory.mkdir(parents=True)
+            (directory / "data.txt").write_text(content, encoding="utf-8")
+
+        result = WorkbenchService(
+            self.store,
+            artifact_root=artifact_root,
+        ).delete_run(target.run_id)
+
+        self.assertEqual(
+            result,
+            {
+                "run_id": target.run_id,
+                "status": "deleted",
+                "artifacts_removed": True,
+                "cleanup_pending": False,
+                "equivalent_command": shlex.join(
+                    [
+                        "python3",
+                        "-m",
+                        "src.memory_review_pipeline",
+                        f"--db={self.store.path.resolve()}",
+                        f"--artifacts={artifact_root.resolve()}",
+                        "delete",
+                        target.run_id,
+                    ]
+                ),
+            },
+        )
+        with self.assertRaises(RunNotFoundError):
+            self.store.get_run(target.run_id)
+        self.assertEqual(self.store.get_run(other.run_id), other)
+        self.assertEqual(
+            (other_dir / "data.txt").read_text(encoding="utf-8"),
+            "other",
+        )
+        self.assertEqual(
+            (cache_dir / "data.txt").read_text(encoding="utf-8"),
+            "cache",
+        )
+        json.dumps(result)
+
+    def test_delete_run_succeeds_when_artifacts_are_missing(self) -> None:
+        run = replace(
+            ResearchRun.create("No artifacts"),
+            status=RunStatus.FAILED,
+        )
+        self.store.create_run(run)
+
+        result = WorkbenchService(
+            self.store,
+            artifact_root=Path(self.tmp.name) / "missing-artifacts",
+        ).delete_run(run.run_id)
+
+        self.assertFalse(result["artifacts_removed"])
+        self.assertFalse(result["cleanup_pending"])
+        with self.assertRaises(RunNotFoundError):
+            self.store.get_run(run.run_id)
+
+    def test_delete_run_restores_quarantine_when_db_delete_fails(self) -> None:
+        artifact_root = Path(self.tmp.name) / "rollback-artifacts"
+        run = replace(
+            ResearchRun.create("Rollback"),
+            status=RunStatus.CANCELLED,
+        )
+        self.store.create_run(run)
+        run_dir = artifact_root / "runs" / run.run_id
+        run_dir.mkdir(parents=True)
+        artifact = run_dir / "result.txt"
+        artifact.write_text("restore", encoding="utf-8")
+        service = WorkbenchService(self.store, artifact_root=artifact_root)
+
+        with patch.object(
+            self.store,
+            "delete_run",
+            side_effect=RuntimeError("database unavailable"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "database unavailable"):
+                service.delete_run(run.run_id)
+
+        self.assertEqual(self.store.get_run(run.run_id), run)
+        self.assertEqual(artifact.read_text(encoding="utf-8"), "restore")
+
+    def test_delete_run_reports_pending_cleanup_after_os_purge_failure(
+        self,
+    ) -> None:
+        class FailingPurgeHandle:
+            def purge(self) -> None:
+                raise PermissionError("cannot remove quarantine")
+
+            def restore(self) -> None:
+                raise AssertionError("restore must not follow committed deletion")
+
+        class DeletionManager:
+            def __init__(self, artifact_root: Path) -> None:
+                self.artifact_root = artifact_root.resolve()
+                self.handle = FailingPurgeHandle()
+                self.quarantined: list[str] = []
+
+            def quarantine(self, run_id: str) -> FailingPurgeHandle:
+                self.quarantined.append(run_id)
+                return self.handle
+
+        run = replace(
+            ResearchRun.create("Pending cleanup"),
+            status=RunStatus.COMPLETED,
+        )
+        self.store.create_run(run)
+        artifact_root = Path(self.tmp.name) / "injected-artifacts"
+        manager = DeletionManager(artifact_root)
+        service = WorkbenchService(
+            self.store,
+            artifact_root=artifact_root,
+            deletion_manager=manager,
+        )
+
+        result = service.delete_run(run.run_id)
+
+        self.assertEqual(manager.quarantined, [run.run_id])
+        self.assertTrue(result["artifacts_removed"])
+        self.assertTrue(result["cleanup_pending"])
+        with self.assertRaises(RunNotFoundError):
+            self.store.get_run(run.run_id)
+
+    def test_delete_run_reports_pending_cleanup_for_non_os_purge_error(
+        self,
+    ) -> None:
+        class FailingPurgeHandle:
+            def purge(self) -> None:
+                raise ValueError("invalid quarantine metadata")
+
+            def restore(self) -> None:
+                raise AssertionError("restore must not follow committed deletion")
+
+        class DeletionManager:
+            def __init__(self, artifact_root: Path) -> None:
+                self.artifact_root = artifact_root.resolve()
+
+            def quarantine(self, run_id: str) -> FailingPurgeHandle:
+                return FailingPurgeHandle()
+
+        run = replace(
+            ResearchRun.create("Pending non-OS cleanup"),
+            status=RunStatus.COMPLETED,
+        )
+        self.store.create_run(run)
+        artifact_root = Path(self.tmp.name) / "value-error-artifacts"
+
+        result = WorkbenchService(
+            self.store,
+            deletion_manager=DeletionManager(artifact_root),
+        ).delete_run(run.run_id)
+
+        self.assertTrue(result["artifacts_removed"])
+        self.assertTrue(result["cleanup_pending"])
+        with self.assertRaises(RunNotFoundError):
+            self.store.get_run(run.run_id)
+
+    def test_delete_run_restores_artifacts_when_status_changes_after_load(
+        self,
+    ) -> None:
+        artifact_root = Path(self.tmp.name) / "race-artifacts"
+        run = replace(
+            ResearchRun.create("Race"),
+            status=RunStatus.COMPLETED,
+        )
+        self.store.create_run(run)
+        run_dir = artifact_root / "runs" / run.run_id
+        run_dir.mkdir(parents=True)
+        artifact = run_dir / "result.txt"
+        artifact.write_text("restore after race", encoding="utf-8")
+        original_delete = self.store.delete_run
+
+        def change_status_then_delete(
+            run_id: str,
+            *,
+            expected_status: RunStatus | None = None,
+        ) -> None:
+            self.store.update_run(replace(run, status=RunStatus.ACTIVE))
+            original_delete(run_id, expected_status=expected_status)
+
+        with patch.object(
+            self.store,
+            "delete_run",
+            side_effect=change_status_then_delete,
+        ):
+            with self.assertRaises(RunNotDeletableError) as raised:
+                WorkbenchService(
+                    self.store,
+                    artifact_root=artifact_root,
+                ).delete_run(run.run_id)
+
+        self.assertEqual(raised.exception.status, RunStatus.ACTIVE)
+        self.assertEqual(
+            self.store.get_run(run.run_id).status,
+            RunStatus.ACTIVE,
+        )
+        self.assertEqual(
+            artifact.read_text(encoding="utf-8"),
+            "restore after race",
+        )
+
+    def test_delete_run_treats_concurrent_missing_row_as_success(self) -> None:
+        artifact_root = Path(self.tmp.name) / "duplicate-delete-artifacts"
+        run = replace(
+            ResearchRun.create("Duplicate delete"),
+            status=RunStatus.COMPLETED,
+        )
+        self.store.create_run(run)
+        run_dir = artifact_root / "runs" / run.run_id
+        run_dir.mkdir(parents=True)
+        (run_dir / "result.txt").write_text("delete once", encoding="utf-8")
+        original_delete = self.store.delete_run
+
+        def concurrent_delete(
+            run_id: str,
+            *,
+            expected_status: RunStatus | None = None,
+        ) -> None:
+            original_delete(run_id)
+            original_delete(run_id, expected_status=expected_status)
+
+        with patch.object(
+            self.store,
+            "delete_run",
+            side_effect=concurrent_delete,
+        ):
+            result = WorkbenchService(
+                self.store,
+                artifact_root=artifact_root,
+            ).delete_run(run.run_id)
+
+        self.assertEqual(result["status"], "deleted")
+        self.assertTrue(result["artifacts_removed"])
+        self.assertFalse(result["cleanup_pending"])
+        with self.assertRaises(RunNotFoundError):
+            self.store.get_run(run.run_id)
+        self.assertFalse(run_dir.exists())
+        self.assertEqual(
+            list((artifact_root / ".delete-pending").glob("*")),
+            [],
+        )
+
+    def test_concurrent_delete_purge_error_reports_cleanup_pending(self) -> None:
+        artifact_root = Path(self.tmp.name) / "duplicate-purge-artifacts"
+        run = replace(
+            ResearchRun.create("Duplicate purge"),
+            status=RunStatus.FAILED,
+        )
+        self.store.create_run(run)
+        run_dir = artifact_root / "runs" / run.run_id
+        run_dir.mkdir(parents=True)
+        (run_dir / "result.txt").write_text("pending", encoding="utf-8")
+        original_delete = self.store.delete_run
+
+        def concurrent_delete(
+            run_id: str,
+            *,
+            expected_status: RunStatus | None = None,
+        ) -> None:
+            original_delete(run_id)
+            original_delete(run_id, expected_status=expected_status)
+
+        with (
+            patch.object(
+                self.store,
+                "delete_run",
+                side_effect=concurrent_delete,
+            ),
+            patch(
+                "src.literature_review.workbench.deletion."
+                "ArtifactDeletionHandle.purge",
+                side_effect=ValueError("purge failed"),
+            ),
+        ):
+            result = WorkbenchService(
+                self.store,
+                artifact_root=artifact_root,
+            ).delete_run(run.run_id)
+
+        self.assertTrue(result["cleanup_pending"])
+        self.assertFalse(run_dir.exists())
+        self.assertEqual(
+            len(list((artifact_root / ".delete-pending").glob("*"))),
+            1,
+        )
+
+    def test_delete_run_uses_conflict_for_deletable_status_mismatch(self) -> None:
+        artifact_root = Path(self.tmp.name) / "terminal-conflict-artifacts"
+        run = replace(
+            ResearchRun.create("Terminal conflict"),
+            status=RunStatus.COMPLETED,
+        )
+        self.store.create_run(run)
+        run_dir = artifact_root / "runs" / run.run_id
+        run_dir.mkdir(parents=True)
+        artifact = run_dir / "result.txt"
+        artifact.write_text("restore conflict", encoding="utf-8")
+        original_delete = self.store.delete_run
+
+        def change_status_then_delete(
+            run_id: str,
+            *,
+            expected_status: RunStatus | None = None,
+        ) -> None:
+            self.store.update_run(replace(run, status=RunStatus.FAILED))
+            original_delete(run_id, expected_status=expected_status)
+
+        with patch.object(
+            self.store,
+            "delete_run",
+            side_effect=change_status_then_delete,
+        ):
+            with self.assertRaises(RunDeletionConflictError) as raised:
+                WorkbenchService(
+                    self.store,
+                    artifact_root=artifact_root,
+                ).delete_run(run.run_id)
+
+        self.assertEqual(raised.exception.run_id, run.run_id)
+        self.assertEqual(
+            raised.exception.expected_status,
+            RunStatus.COMPLETED,
+        )
+        self.assertEqual(raised.exception.actual_status, RunStatus.FAILED)
+        self.assertEqual(
+            artifact.read_text(encoding="utf-8"),
+            "restore conflict",
+        )
+        self.assertEqual(
+            self.store.get_run(run.run_id).status,
+            RunStatus.FAILED,
+        )
+
+    def test_delete_run_preserves_delete_and_restore_errors(self) -> None:
+        run = replace(
+            ResearchRun.create("Rollback failure"),
+            status=RunStatus.FAILED,
+        )
+        self.store.create_run(run)
+        delete_error = RuntimeError("database failed")
+        artifact_root = Path(self.tmp.name) / "rollback-failure-artifacts"
+        manager = ArtifactDeletionManager(artifact_root)
+        run_dir = artifact_root / "runs" / run.run_id
+        run_dir.mkdir(parents=True)
+        (run_dir / "result.txt").write_text("quarantine", encoding="utf-8")
+        service = WorkbenchService(
+            self.store,
+            deletion_manager=manager,
+        )
+
+        def fail_delete(
+            run_id: str,
+            *,
+            expected_status: RunStatus | None = None,
+        ) -> None:
+            run_dir.mkdir(parents=True)
+            raise delete_error
+
+        with patch.object(
+            self.store,
+            "delete_run",
+            side_effect=fail_delete,
+        ):
+            with self.assertRaises(RunDeletionRollbackError) as raised:
+                service.delete_run(run.run_id)
+
+        self.assertIs(raised.exception.delete_error, delete_error)
+        self.assertIsInstance(raised.exception.restore_error, FileExistsError)
+        self.assertIs(raised.exception.__cause__, delete_error)
+        self.assertEqual(self.store.get_run(run.run_id), run)
+        quarantines = list(
+            (artifact_root / ".delete-pending").glob(
+                f"{run.run_id}--delete-*"
+            )
+        )
+        self.assertEqual(len(quarantines), 1)
+        self.assertEqual(
+            (quarantines[0] / "result.txt").read_text(encoding="utf-8"),
+            "quarantine",
+        )
+
+    def test_injected_deletion_manager_is_artifact_root_source_of_truth(
+        self,
+    ) -> None:
+        manager_root = Path(self.tmp.name) / "manager root"
+        manager = ArtifactDeletionManager(manager_root)
+        run = replace(
+            ResearchRun.create("Manager root"),
+            status=RunStatus.CANCELLED,
+        )
+        self.store.create_run(run)
+        run_dir = manager_root / "runs" / run.run_id
+        run_dir.mkdir(parents=True)
+        (run_dir / "result.txt").write_text("delete", encoding="utf-8")
+
+        result = WorkbenchService(
+            self.store,
+            deletion_manager=manager,
+        ).delete_run(run.run_id)
+
+        self.assertFalse(run_dir.exists())
+        self.assertEqual(
+            shlex.split(result["equivalent_command"])[4],
+            f"--artifacts={manager_root.resolve()}",
+        )
+
+        with self.assertRaisesRegex(ValueError, "artifact root"):
+            WorkbenchService(
+                self.store,
+                artifact_root=Path(self.tmp.name) / "different-root",
+                deletion_manager=manager,
+            )
+
+    def test_delete_run_command_resolves_and_quotes_custom_paths(self) -> None:
+        root = Path(self.tmp.name) / "path with spaces"
+        store = SQLiteWorkflowStore(root / "custom workflow.db")
+        store.initialize()
+        run = replace(
+            ResearchRun.create("Quoted command"),
+            status=RunStatus.COMPLETED,
+        )
+        store.create_run(run)
+        artifact_root = root / "custom artifacts"
+
+        result = WorkbenchService(
+            store,
+            artifact_root=artifact_root,
+        ).delete_run(run.run_id)
+
+        self.assertEqual(
+            result["equivalent_command"],
+            shlex.join(
+                [
+                    "python3",
+                    "-m",
+                    "src.memory_review_pipeline",
+                    f"--db={store.path.resolve()}",
+                    f"--artifacts={artifact_root.resolve()}",
+                    "delete",
+                    run.run_id,
+                ]
+            ),
+        )
 
 
 if __name__ == "__main__":

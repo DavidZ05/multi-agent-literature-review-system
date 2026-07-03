@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from pathlib import Path
 import shlex
 
 from src.literature_review.discovery import ApprovalService
@@ -9,8 +10,14 @@ from src.literature_review.models import (
     CandidateStatus,
     CorpusDecision,
     ResearchRun,
+    RunStatus,
 )
-from src.literature_review.storage import SQLiteWorkflowStore
+from src.literature_review.storage import (
+    RunNotFoundError,
+    RunStatusMismatchError,
+    SQLiteWorkflowStore,
+)
+from src.literature_review.workbench.deletion import ArtifactDeletionManager
 
 
 class PendingCandidatesError(RuntimeError):
@@ -22,18 +29,84 @@ class PendingCandidatesError(RuntimeError):
         )
 
 
+class RunNotDeletableError(RuntimeError):
+    def __init__(self, run_id: str, status: RunStatus) -> None:
+        self.run_id = run_id
+        self.status = status
+        super().__init__(f"run {run_id} cannot be deleted while {status.value}")
+
+
+class RunDeletionRollbackError(RuntimeError):
+    def __init__(
+        self,
+        run_id: str,
+        delete_error: Exception,
+        restore_error: Exception,
+    ) -> None:
+        self.run_id = run_id
+        self.delete_error = delete_error
+        self.restore_error = restore_error
+        super().__init__(
+            f"failed to delete run {run_id} and restore its artifacts"
+        )
+
+
+class RunDeletionConflictError(RuntimeError):
+    def __init__(
+        self,
+        run_id: str,
+        expected_status: RunStatus,
+        actual_status: RunStatus,
+    ) -> None:
+        self.run_id = run_id
+        self.expected_status = expected_status
+        self.actual_status = actual_status
+        super().__init__(
+            f"run {run_id} changed from {expected_status.value} "
+            f"to {actual_status.value} during deletion"
+        )
+
+
 class WorkbenchService:
     _COMMAND_PREFIX = ("python3", "-m", "src.memory_review_pipeline")
+    _DELETABLE_STATUSES = frozenset(
+        {
+            RunStatus.CANCELLED,
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+        }
+    )
 
     def __init__(
         self,
         store: SQLiteWorkflowStore,
         *,
         cancel: Callable[[str], ResearchRun] | None = None,
+        artifact_root: Path | None = None,
+        deletion_manager: ArtifactDeletionManager | None = None,
     ) -> None:
         self.store = store
         self.approval_service = ApprovalService(store)
         self._cancel = cancel
+        if deletion_manager is not None:
+            manager_root = Path(deletion_manager.artifact_root).expanduser().resolve()
+            if (
+                artifact_root is not None
+                and Path(artifact_root).expanduser().resolve() != manager_root
+            ):
+                raise ValueError(
+                    "artifact root must match the deletion manager artifact root"
+                )
+            self.artifact_root = manager_root
+            self._deletion_manager = deletion_manager
+        else:
+            configured_root = (
+                Path(".review-workflow/artifacts")
+                if artifact_root is None
+                else Path(artifact_root)
+            )
+            self.artifact_root = configured_root.expanduser().resolve()
+            self._deletion_manager = ArtifactDeletionManager(self.artifact_root)
 
     def list_runs(self) -> list[dict[str, object]]:
         candidate_counts = self.store.list_candidate_counts_by_run()
@@ -172,6 +245,54 @@ class WorkbenchService:
             "equivalent_command": self._equivalent_command("cancel", run_id),
         }
 
+    def delete_run(self, run_id: str) -> dict[str, object]:
+        run = self.store.get_run(run_id)
+        if run.status not in self._DELETABLE_STATUSES:
+            raise RunNotDeletableError(run_id, run.status)
+
+        handle = self._deletion_manager.quarantine(run_id)
+        try:
+            self.store.delete_run(run_id, expected_status=run.status)
+        except RunNotFoundError:
+            pass
+        except Exception as delete_error:
+            if handle is not None:
+                try:
+                    handle.restore()
+                except Exception as restore_error:
+                    raise RunDeletionRollbackError(
+                        run_id,
+                        delete_error,
+                        restore_error,
+                    ) from delete_error
+            if isinstance(delete_error, RunStatusMismatchError):
+                if delete_error.actual_status in self._DELETABLE_STATUSES:
+                    raise RunDeletionConflictError(
+                        run_id,
+                        delete_error.expected_status,
+                        delete_error.actual_status,
+                    ) from delete_error
+                raise RunNotDeletableError(
+                    run_id,
+                    delete_error.actual_status,
+                ) from delete_error
+            raise
+
+        cleanup_pending = False
+        if handle is not None:
+            try:
+                handle.purge()
+            except Exception:
+                cleanup_pending = True
+
+        return {
+            "run_id": run_id,
+            "status": "deleted",
+            "artifacts_removed": handle is not None,
+            "cleanup_pending": cleanup_pending,
+            "equivalent_command": self._equivalent_delete_command(run_id),
+        }
+
     def _decision_payload(
         self,
         run_id: str,
@@ -189,6 +310,14 @@ class WorkbenchService:
     def _equivalent_command(cls, *arguments: str) -> str:
         return shlex.join([*cls._COMMAND_PREFIX, *arguments])
 
+    def _equivalent_delete_command(self, run_id: str) -> str:
+        return self._equivalent_command(
+            f"--db={self.store.path.expanduser().resolve()}",
+            f"--artifacts={self.artifact_root}",
+            "delete",
+            run_id,
+        )
+
     @staticmethod
     def _candidate_counts(
         candidates: Iterable[CandidatePaper],
@@ -205,4 +334,10 @@ class WorkbenchService:
         return {status.value: counts.get(status, 0) for status in CandidateStatus}
 
 
-__all__ = ["PendingCandidatesError", "WorkbenchService"]
+__all__ = [
+    "PendingCandidatesError",
+    "RunDeletionConflictError",
+    "RunDeletionRollbackError",
+    "RunNotDeletableError",
+    "WorkbenchService",
+]

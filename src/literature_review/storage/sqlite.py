@@ -13,6 +13,7 @@ from src.literature_review.models import (
     CandidateStatus,
     CorpusDecision,
     ResearchRun,
+    RunStatus,
     ScreeningRecommendation,
     SearchQuery,
     StageCheckpoint,
@@ -32,6 +33,22 @@ class RunAlreadyExistsError(WorkflowStoreError):
 
 class RunNotFoundError(WorkflowStoreError):
     pass
+
+
+class RunStatusMismatchError(WorkflowStoreError):
+    def __init__(
+        self,
+        run_id: str,
+        expected_status: RunStatus,
+        actual_status: RunStatus,
+    ) -> None:
+        self.run_id = run_id
+        self.expected_status = expected_status
+        self.actual_status = actual_status
+        super().__init__(
+            f"run {run_id} has status {actual_status.value}, "
+            f"expected {expected_status.value}"
+        )
 
 
 class UnsupportedSchemaVersionError(WorkflowStoreError):
@@ -221,14 +238,36 @@ class SQLiteWorkflowStore:
         if cursor.rowcount == 0:
             raise RunNotFoundError(run.run_id)
 
-    def delete_run(self, run_id: str) -> None:
+    def delete_run(
+        self,
+        run_id: str,
+        *,
+        expected_status: RunStatus | None = None,
+    ) -> None:
         with self._connection() as connection, connection:
-            cursor = connection.execute(
-                "DELETE FROM runs WHERE run_id = ?",
-                (run_id,),
-            )
+            if expected_status is None:
+                cursor = connection.execute(
+                    "DELETE FROM runs WHERE run_id = ?",
+                    (run_id,),
+                )
+            else:
+                cursor = connection.execute(
+                    "DELETE FROM runs WHERE run_id = ? AND status = ?",
+                    (run_id, expected_status.value),
+                )
             if cursor.rowcount == 0:
-                raise RunNotFoundError(run_id)
+                row = connection.execute(
+                    "SELECT status FROM runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                if row is None:
+                    raise RunNotFoundError(run_id)
+                assert expected_status is not None
+                raise RunStatusMismatchError(
+                    run_id,
+                    expected_status,
+                    RunStatus(row["status"]),
+                )
 
     def _require_run(self, run_id: str) -> None:
         self.get_run(run_id)
