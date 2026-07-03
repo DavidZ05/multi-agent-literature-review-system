@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -122,6 +123,106 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             [run.run_id for run in self.store.list_runs()],
             [newer.run_id, older.run_id],
         )
+
+    def test_delete_run_cascades_run_data_and_preserves_other_data(self) -> None:
+        other_run = ResearchRun.create("Other run")
+        self.store.create_run(self.run)
+        self.store.create_run(other_run)
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            for run in (self.run, other_run):
+                connection.execute(
+                    """INSERT INTO workflow_events
+                    (run_id,event_type,stage,payload_json,created_at)
+                    VALUES (?,?,?,?,?)""",
+                    (run.run_id, "created", None, "{}", utc_now_iso()),
+                )
+                connection.execute(
+                    """INSERT INTO checkpoints
+                    (run_id,stage,input_fingerprint,output_hashes_json,status,
+                     created_at,next_stage)
+                    VALUES (?,?,?,?,?,?,?)""",
+                    (
+                        run.run_id,
+                        WorkflowStage.PLANNING.value,
+                        "a" * 64,
+                        "{}",
+                        "completed",
+                        utc_now_iso(),
+                        WorkflowStage.DRAFTING.value,
+                    ),
+                )
+                connection.execute(
+                    """INSERT INTO search_queries
+                    (run_id,query_id,payload_json) VALUES (?,?,?)""",
+                    (run.run_id, f"query-{run.run_id}", "{}"),
+                )
+                connection.execute(
+                    """INSERT INTO candidate_papers
+                    (run_id,candidate_id,status,recommendation,payload_json)
+                    VALUES (?,?,?,?,?)""",
+                    (
+                        run.run_id,
+                        f"candidate-{run.run_id}",
+                        "included",
+                        "include",
+                        "{}",
+                    ),
+                )
+                connection.execute(
+                    """INSERT INTO corpus_decisions
+                    (decision_id,run_id,candidate_id,status,reason,actor,
+                     created_at,details_json)
+                    VALUES (?,?,?,?,?,?,?,?)""",
+                    (
+                        f"decision-{run.run_id}",
+                        run.run_id,
+                        f"candidate-{run.run_id}",
+                        "included",
+                        "relevant",
+                        "reviewer",
+                        utc_now_iso(),
+                        "{}",
+                    ),
+                )
+            connection.execute(
+                """INSERT INTO provider_response_cache
+                (cache_key,value,expires_at) VALUES (?,?,?)""",
+                ("shared-cache", b"response", 1_000_000_000_000),
+            )
+
+        self.store.delete_run(self.run.run_id)
+
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT run_id FROM runs ORDER BY run_id"
+                ).fetchall(),
+                [(other_run.run_id,)],
+            )
+            for table in (
+                "workflow_events",
+                "checkpoints",
+                "search_queries",
+                "candidate_papers",
+                "corpus_decisions",
+            ):
+                with self.subTest(table=table):
+                    self.assertEqual(
+                        connection.execute(
+                            f"SELECT run_id FROM {table} ORDER BY run_id"
+                        ).fetchall(),
+                        [(other_run.run_id,)],
+                    )
+            self.assertEqual(
+                connection.execute(
+                    """SELECT cache_key,value FROM provider_response_cache"""
+                ).fetchall(),
+                [("shared-cache", b"response")],
+            )
+
+    def test_delete_unknown_run_raises_domain_error(self) -> None:
+        with self.assertRaises(RunNotFoundError):
+            self.store.delete_run("missing-run")
 
     def test_duplicate_and_unknown_runs_raise_domain_errors(self) -> None:
         self.store.create_run(self.run)

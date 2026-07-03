@@ -221,6 +221,15 @@ class SQLiteWorkflowStore:
         if cursor.rowcount == 0:
             raise RunNotFoundError(run.run_id)
 
+    def delete_run(self, run_id: str) -> None:
+        with self._connection() as connection, connection:
+            cursor = connection.execute(
+                "DELETE FROM runs WHERE run_id = ?",
+                (run_id,),
+            )
+            if cursor.rowcount == 0:
+                raise RunNotFoundError(run_id)
+
     def _require_run(self, run_id: str) -> None:
         self.get_run(run_id)
 
