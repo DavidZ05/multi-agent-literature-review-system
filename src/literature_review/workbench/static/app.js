@@ -641,6 +641,9 @@
     byId("resume-run-button").disabled = !hasRun || state.pending || ["active", "completed", "cancelled"].includes(run && run.status);
     byId("close-discovery-button").disabled = !hasRun || state.pending || run.current_stage !== "awaiting_corpus_approval";
     byId("new-run-button").disabled = state.pending;
+    document.querySelectorAll(".run-button").forEach((button) => {
+      button.disabled = state.pending;
+    });
     document.querySelectorAll("[data-filter]").forEach((button) => {
       button.disabled = !hasRun || state.pending;
     });

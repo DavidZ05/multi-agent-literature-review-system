@@ -912,6 +912,15 @@ class WorkbenchStaticContractTests(unittest.TestCase):
         self.assertNotIn("showFeedback", reset_body)
         self.assertNotIn("clearFeedback", reset_body)
 
+    def test_pending_state_reenables_run_buttons_after_mutation(self) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        update_start = script.index("function updateActions(")
+        update_end = script.index("\n  async function selectRun(", update_start)
+        update_body = script[update_start:update_end]
+
+        self.assertIn('document.querySelectorAll(".run-button")', update_body)
+        self.assertIn("button.disabled = state.pending", update_body)
+
     def test_styles_define_approved_responsive_layout(self) -> None:
         styles = (self.static_root / "styles.css").read_text(encoding="utf-8")
         required_fragments = (
