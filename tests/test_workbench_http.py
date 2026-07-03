@@ -12,11 +12,14 @@ from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
     ResearchRun,
+    RunStatus,
     ScreeningRecommendation,
     WorkflowStage,
 )
 from src.literature_review.storage import SQLiteWorkflowStore
 from src.literature_review.workbench import (
+    RunDeletionConflictError,
+    RunNotDeletableError,
     WorkbenchService,
     WorkflowJobManager,
     create_workbench_server,
@@ -84,6 +87,7 @@ class WorkbenchHTTPTests(unittest.TestCase):
         self.service = WorkbenchService(
             self.store,
             cancel=lambda run_id: self.store.get_run(run_id),
+            artifact_root=self.manager.artifact_root,
         )
         self.token = "test-mutation-token"
         self.server = create_workbench_server(
@@ -172,6 +176,38 @@ class WorkbenchHTTPTests(unittest.TestCase):
                 f"Host: 127.0.0.1:{self.port}\r\n"
                 f"X-Workbench-Token: {self.token}\r\n"
                 "Content-Type: application/json\r\n"
+                + "".join(f"{header}\r\n" for header in framing_headers)
+                + "Connection: close\r\n\r\n"
+            ).encode("ascii")
+            + body
+        )
+        with socket.create_connection(("127.0.0.1", self.port), timeout=3) as client:
+            client.sendall(request)
+            client.shutdown(socket.SHUT_WR)
+            chunks = []
+            while chunk := client.recv(65536):
+                chunks.append(chunk)
+
+        header_block, response_body = b"".join(chunks).split(b"\r\n\r\n", 1)
+        lines = header_block.decode("ascii").split("\r\n")
+        status = int(lines[0].split(" ", 2)[1])
+        headers = {
+            name.lower(): value.strip()
+            for name, value in (line.split(":", 1) for line in lines[1:])
+        }
+        return status, headers, json.loads(response_body)
+
+    def raw_delete(
+        self,
+        run_id: str,
+        framing_headers: tuple[str, ...],
+        body: bytes = b"",
+    ) -> tuple[int, dict[str, str], object]:
+        request = (
+            (
+                f"DELETE /api/runs/{run_id} HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{self.port}\r\n"
+                f"X-Workbench-Token: {self.token}\r\n"
                 + "".join(f"{header}\r\n" for header in framing_headers)
                 + "Connection: close\r\n\r\n"
             ).encode("ascii")
@@ -323,6 +359,179 @@ class WorkbenchHTTPTests(unittest.TestCase):
         self.assertEqual(cancel_status, 200)
         self.assertEqual(cancel, self.service.cancel_run(self.run.run_id))
 
+    def test_delete_exact_run_route_requires_no_body_and_returns_service_payload(
+        self,
+    ) -> None:
+        completed = ResearchRun.create("Delete over HTTP")
+        completed = completed.__class__.from_dict(
+            {**completed.to_dict(), "status": RunStatus.COMPLETED.value}
+        )
+        self.store.create_run(completed)
+        artifact = (
+            self.manager.artifact_root
+            / "runs"
+            / completed.run_id
+            / "result.txt"
+        )
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("delete", encoding="utf-8")
+
+        status, headers, payload = self.request(
+            "DELETE",
+            f"/api/runs/{completed.run_id}",
+            headers=self.mutation_headers(),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["run_id"], completed.run_id)
+        self.assertEqual(payload["status"], "deleted")
+        self.assertFalse(artifact.exists())
+        self.assert_json_headers(headers)
+
+    def test_delete_rejects_request_body_without_deleting_run(self) -> None:
+        completed = ResearchRun.create("Reject DELETE body")
+        completed = completed.__class__.from_dict(
+            {**completed.to_dict(), "status": RunStatus.COMPLETED.value}
+        )
+        self.store.create_run(completed)
+
+        status, _, payload = self.request(
+            "DELETE",
+            f"/api/runs/{completed.run_id}",
+            {"unexpected": True},
+            headers=self.mutation_headers(),
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], "invalid_request")
+        self.assertEqual(self.store.get_run(completed.run_id), completed)
+
+    def test_delete_rejects_ambiguous_or_transfer_encoded_framing(self) -> None:
+        completed = ResearchRun.create("Reject DELETE framing")
+        completed = completed.__class__.from_dict(
+            {**completed.to_dict(), "status": RunStatus.COMPLETED.value}
+        )
+        self.store.create_run(completed)
+        cases = (
+            ("duplicate", ("Content-Length: 0", "Content-Length: 0")),
+            ("comma_joined", ("Content-Length: 0, 0",)),
+            ("transfer_encoding", ("Transfer-Encoding: chunked",)),
+        )
+
+        for name, framing_headers in cases:
+            with self.subTest(name=name):
+                status, headers, payload = self.raw_delete(
+                    completed.run_id,
+                    framing_headers,
+                )
+                self.assertEqual(status, 400)
+                self.assertEqual(payload["error"]["code"], "invalid_request")
+                self.assert_json_headers(headers)
+
+        self.assertEqual(self.store.get_run(completed.run_id), completed)
+
+    def test_delete_requires_exact_token_and_allows_only_bound_origin(self) -> None:
+        path = f"/api/runs/{self.run.run_id}"
+        cases = (
+            ({}, 403),
+            ({"X-Workbench-Token": f"{self.token}x"}, 403),
+            (
+                self.mutation_headers(
+                    Origin=f"http://localhost:{self.port + 1}"
+                ),
+                403,
+            ),
+            (
+                self.mutation_headers(
+                    Origin=f"http://localhost:{self.port}"
+                ),
+                409,
+            ),
+        )
+
+        for headers, expected_status in cases:
+            with self.subTest(headers=headers):
+                status, _, payload = self.request(
+                    "DELETE",
+                    path,
+                    headers=headers,
+                )
+                self.assertEqual(status, expected_status)
+                self.assertEqual(
+                    payload["error"]["code"],
+                    "forbidden" if expected_status == 403 else "run_not_deletable",
+                )
+
+    def test_delete_maps_domain_conflicts_to_stable_http_errors(self) -> None:
+        cases = (
+            (
+                RunNotDeletableError(self.run.run_id, RunStatus.ACTIVE),
+                "run_not_deletable",
+            ),
+            (
+                RunDeletionConflictError(
+                    self.run.run_id,
+                    RunStatus.COMPLETED,
+                    RunStatus.FAILED,
+                ),
+                "run_deletion_conflict",
+            ),
+        )
+        original_delete = self.service.delete_run
+        try:
+            for error, expected_code in cases:
+                with self.subTest(code=expected_code):
+                    def raise_error(run_id: str, error: Exception = error) -> object:
+                        raise error
+
+                    self.service.delete_run = raise_error  # type: ignore[method-assign]
+                    status, _, payload = self.request(
+                        "DELETE",
+                        f"/api/runs/{self.run.run_id}",
+                        headers=self.mutation_headers(),
+                    )
+                    self.assertEqual(status, 409)
+                    self.assertEqual(payload["error"]["code"], expected_code)
+                    if expected_code == "run_not_deletable":
+                        self.assertEqual(
+                            payload["error"]["run_status"],
+                            RunStatus.ACTIVE.value,
+                        )
+        finally:
+            self.service.delete_run = original_delete  # type: ignore[method-assign]
+
+    def test_delete_unknown_and_nonexact_routes_return_not_found(self) -> None:
+        unknown = "run_0123456789abcdef0123456789abcdef"
+        paths = (
+            f"/api/runs/{unknown}",
+            f"/api/runs/{self.run.run_id}/",
+            f"/api/runs/{self.run.run_id}/extra",
+            "/api/runs",
+            "/api/other/value",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                status, headers, payload = self.request(
+                    "DELETE",
+                    path,
+                    headers=self.mutation_headers(),
+                )
+                self.assertEqual(status, 404)
+                self.assertEqual(payload["error"]["code"], "not_found")
+                self.assert_json_headers(headers)
+
+    def test_unknown_delete_route_returns_not_found_before_authentication(
+        self,
+    ) -> None:
+        status, headers, payload = self.request(
+            "DELETE",
+            "/api/unknown",
+        )
+
+        self.assertEqual(status, 404)
+        self.assertEqual(payload["error"]["code"], "not_found")
+        self.assert_json_headers(headers)
+
     def test_close_discovery_returns_pending_conflict_then_service_payload(self) -> None:
         status, _, payload = self.request(
             "POST",
@@ -444,6 +653,21 @@ class WorkbenchHTTPTests(unittest.TestCase):
         finally:
             if rejected_server is not None:
                 rejected_server.server_close()
+
+    def test_server_rejects_mismatched_artifact_roots(self) -> None:
+        other_service = WorkbenchService(
+            self.store,
+            artifact_root=Path(self.tmp.name) / "other-artifacts",
+        )
+
+        with self.assertRaises(ValueError):
+            create_workbench_server(
+                other_service,
+                self.manager,
+                host="127.0.0.1",
+                port=0,
+                mutation_token=self.token,
+            )
 
     def test_server_accepts_supported_hosts_and_fixed_ports(self) -> None:
         probe = socket.socket()

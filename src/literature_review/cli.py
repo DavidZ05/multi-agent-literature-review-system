@@ -18,9 +18,14 @@ from src.literature_review.storage import (
     SQLiteWorkflowStore,
 )
 from src.literature_review.workflow import StageExecutionError
+from src.literature_review.workbench.deletion import ArtifactDeletionManager
 from src.literature_review.workbench.jobs import WorkflowJobManager
 from src.literature_review.workbench.server import create_workbench_server
-from src.literature_review.workbench.service import WorkbenchService
+from src.literature_review.workbench.service import (
+    RunDeletionConflictError,
+    RunNotDeletableError,
+    WorkbenchService,
+)
 
 
 class _ExtendTupleAction(argparse.Action):
@@ -86,6 +91,9 @@ def _parser() -> argparse.ArgumentParser:
 
     cancel = commands.add_parser("cancel", help="cancel a stored run")
     cancel.add_argument("run_id")
+
+    delete = commands.add_parser("delete", help="delete a terminal stored run")
+    delete.add_argument("run_id")
 
     candidates = commands.add_parser("candidates", help="list discovered papers")
     candidates.add_argument("run_id")
@@ -158,13 +166,24 @@ def run_workbench(
     manager = WorkflowJobManager(store, artifact_root)
     server = None
     try:
+        deletion_manager = ArtifactDeletionManager(artifact_root)
         service = WorkbenchService(
             store,
             cancel=lambda run_id: build_engine(
                 store,
                 artifact_root,
             ).cancel(run_id),
+            deletion_manager=deletion_manager,
         )
+        try:
+            deletion_manager.cleanup_pending(
+                exclude_run_ids={run.run_id for run in store.list_runs()},
+            )
+        except Exception:
+            print(
+                "Warning: artifact cleanup failed; continuing.",
+                file=sys.stderr,
+            )
         server = create_workbench_server(
             service,
             manager,
@@ -218,6 +237,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "events":
             _print_json([event.to_dict() for event in store.list_events(args.run_id)])
+            return 0
+        if args.command == "delete":
+            service = WorkbenchService(store, artifact_root=args.artifacts)
+            _print_json(service.delete_run(args.run_id))
             return 0
         if args.command == "candidates":
             status = None if args.status is None else CandidateStatus(args.status)
@@ -311,6 +334,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise AssertionError(f"unhandled command: {args.command}")
         _print_json(run.to_dict())
         return 0
+    except RunNotDeletableError as exc:
+        _print_json(
+            {
+                "error": "run_not_deletable",
+                "run_id": exc.run_id,
+                "status": exc.status.value,
+            },
+            stream=sys.stderr,
+        )
+        return 3
+    except RunDeletionConflictError as exc:
+        _print_json(
+            {
+                "error": "run_deletion_conflict",
+                "run_id": exc.run_id,
+                "expected_status": exc.expected_status.value,
+                "actual_status": exc.actual_status.value,
+            },
+            stream=sys.stderr,
+        )
+        return 3
     except (RunNotFoundError, CandidateNotFoundError) as exc:
         _print_json(
             {"error": "run_not_found", "run_id": str(exc)},

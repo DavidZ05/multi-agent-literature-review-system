@@ -22,6 +22,8 @@ from src.literature_review.workbench.jobs import (
 )
 from src.literature_review.workbench.service import (
     PendingCandidatesError,
+    RunDeletionConflictError,
+    RunNotDeletableError,
     WorkbenchService,
 )
 
@@ -85,6 +87,12 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
         }:
             raise ValueError("host must be a loopback hostname or address")
         host = host.lower()
+        service_artifact_root = Path(service.artifact_root).expanduser().resolve()
+        manager_artifact_root = Path(job_manager.artifact_root).expanduser().resolve()
+        if service_artifact_root != manager_artifact_root:
+            raise ValueError(
+                "workbench service and job manager artifact roots must match"
+            )
         self.workbench_service = service
         self.job_manager = job_manager
         self.mutation_token = (
@@ -101,7 +109,7 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
             else str(Path(default_corpus_path))
         )
         self.database_path = str(service.store.path.expanduser().resolve())
-        self.artifact_root = str(job_manager.artifact_root)
+        self.artifact_root = str(manager_artifact_root)
         super().__init__((host, port), WorkbenchRequestHandler)
 
     @property
@@ -128,7 +136,7 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         self._handle(self._dispatch_post)
 
     def do_DELETE(self) -> None:
-        self._send_not_found()
+        self._handle(self._dispatch_delete)
 
     def do_HEAD(self) -> None:
         self._send_not_found(include_body=False)
@@ -183,6 +191,23 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 "pending_candidates",
                 "Pending candidates must be resolved first.",
                 pending_count=exc.pending_count,
+            )
+        except RunNotDeletableError as exc:
+            self._send_error(
+                409,
+                "run_not_deletable",
+                "The run cannot be deleted in its current state.",
+                run_id=exc.run_id,
+                run_status=exc.status.value,
+            )
+        except RunDeletionConflictError as exc:
+            self._send_error(
+                409,
+                "run_deletion_conflict",
+                "The run changed state during deletion.",
+                run_id=exc.run_id,
+                expected_status=exc.expected_status.value,
+                actual_status=exc.actual_status.value,
             )
         except DuplicateResumeJobError as exc:
             self._send_error(
@@ -262,6 +287,21 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 segments[5],
                 body,
             )
+        raise _APIError(404, "not_found", "The requested resource was not found.")
+
+    def _dispatch_delete(self) -> tuple[int, object]:
+        segments, query = self._request_target()
+        parsed = urlsplit(self.path)
+        if (
+            len(segments) == 3
+            and segments[:2] == ["api", "runs"]
+            and not query
+            and not parsed.fragment
+            and parsed.path == f"/api/runs/{segments[2]}"
+        ):
+            self._require_mutation_access()
+            self._require_empty_body()
+            return 200, self.server.workbench_service.delete_run(segments[2])
         raise _APIError(404, "not_found", "The requested resource was not found.")
 
     def _start_run(self, body: Mapping[str, object]) -> dict[str, object]:
@@ -412,6 +452,15 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 "Request body must be a JSON object.",
             )
         return value
+
+    def _require_empty_body(self) -> None:
+        if self.headers.get_all("Transfer-Encoding", []):
+            raise _APIError(400, "invalid_request", "Request body is invalid.")
+        content_lengths = self.headers.get_all("Content-Length", [])
+        if not content_lengths:
+            return
+        if len(content_lengths) != 1 or content_lengths[0] != "0":
+            raise _APIError(400, "invalid_request", "Request body is invalid.")
 
     def _request_target(self) -> tuple[list[str], dict[str, list[str]]]:
         parsed = urlsplit(self.path)
