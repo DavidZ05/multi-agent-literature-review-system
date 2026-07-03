@@ -272,12 +272,11 @@
     if (name === "error") byId("app-error-message").textContent = message;
   }
 
-  function resetCandidateForm(clearFeedback = true) {
+  function resetCandidateForm() {
     byId("candidate-category").value = "";
     byId("candidate-contribution").value = "";
     byId("candidate-tags").value = "";
     byId("candidate-reason").value = "";
-    if (clearFeedback) showFeedback("");
   }
 
   function beginRunSelection(runId) {
@@ -365,7 +364,7 @@
       state.selectedCandidateId = null;
       state.detailState = "error";
       state.detailError = errorMessage(error);
-      resetCandidateForm(false);
+      resetCandidateForm();
       renderAll();
       if (!quiet) showFeedback(state.detailError, true);
     } finally {
@@ -402,7 +401,7 @@
       if (!isCurrentCandidateRequest(runId, filter, runGeneration, candidateGeneration)) return;
       state.candidates = [];
       state.selectedCandidateId = null;
-      resetCandidateForm(false);
+      resetCandidateForm();
       renderCandidates();
       renderCandidateDetail();
       showFeedback(errorMessage(error), true);

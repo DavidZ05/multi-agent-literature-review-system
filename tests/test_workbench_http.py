@@ -903,6 +903,15 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, script)
 
+    def test_background_form_refresh_does_not_clear_job_feedback(self) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        reset_start = script.index("function resetCandidateForm(")
+        reset_end = script.index("\n  function beginRunSelection(", reset_start)
+        reset_body = script[reset_start:reset_end]
+
+        self.assertNotIn("showFeedback", reset_body)
+        self.assertNotIn("clearFeedback", reset_body)
+
     def test_styles_define_approved_responsive_layout(self) -> None:
         styles = (self.static_root / "styles.css").read_text(encoding="utf-8")
         required_fragments = (
