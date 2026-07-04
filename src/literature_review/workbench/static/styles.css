@@ -88,6 +88,12 @@ html[lang="zh-CN"] .lang-zh, html[lang="en"] .lang-en { color: var(--accent); fo
   line-height: 18px;
   text-transform: uppercase;
 }
+.runs-list {
+  max-height: min(50vh, 520px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
 .storage-label { margin-top: 18px; }
 .run-button, .storage-card {
   width: 100%;
@@ -273,7 +279,15 @@ dialog::backdrop { background: rgba(23, 32, 51, .42); }
     gap: 6px;
   }
   .wb-side-label, .runs-list, .storage-label, .storage-card { grid-column: 1 / -1; }
-  .runs-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .runs-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    max-height: none;
+    overflow: visible;
+    scrollbar-gutter: auto;
+    overscroll-behavior: auto;
+  }
   .run-button { min-height: 88px; margin: 0; }
   .storage-label { margin-top: 8px; }
   .storage-card { min-height: 40px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; }

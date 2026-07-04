@@ -1366,6 +1366,35 @@ class WorkbenchStaticContractTests(unittest.TestCase):
                 self.assertIn(fragment, styles)
         self.assertNotIn("gradient(", styles)
 
+    def test_runs_list_scrolls_on_larger_viewports_and_flows_on_mobile(
+        self,
+    ) -> None:
+        styles = (self.static_root / "styles.css").read_text(encoding="utf-8")
+        desktop_rule = (
+            ".runs-list {\n"
+            "  max-height: min(50vh, 520px);\n"
+            "  overflow-y: auto;\n"
+            "  scrollbar-gutter: stable;\n"
+            "  overscroll-behavior: contain;\n"
+            "}"
+        )
+        mobile_rule = (
+            ".runs-list {\n"
+            "    display: grid;\n"
+            "    grid-template-columns: repeat(3, minmax(0, 1fr));\n"
+            "    gap: 6px;\n"
+            "    max-height: none;\n"
+            "    overflow: visible;\n"
+            "    scrollbar-gutter: auto;\n"
+            "    overscroll-behavior: auto;\n"
+            "  }"
+        )
+
+        self.assertIn(desktop_rule, styles)
+        mobile_start = styles.index("@media (max-width: 720px)")
+        mobile_end = styles.index("@media (max-width: 480px)", mobile_start)
+        self.assertIn(mobile_rule, styles[mobile_start:mobile_end])
+
 
 if __name__ == "__main__":
     unittest.main()
