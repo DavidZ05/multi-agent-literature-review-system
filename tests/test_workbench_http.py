@@ -1145,6 +1145,209 @@ class WorkbenchStaticContractTests(unittest.TestCase):
         self.assertIn('document.querySelectorAll(".run-button")', update_body)
         self.assertIn("button.disabled = state.pending", update_body)
 
+    def test_index_contains_accessible_run_deletion_controls(self) -> None:
+        index = (self.static_root / "index.html").read_text(encoding="utf-8")
+        required_fragments = (
+            'id="delete-run-button"',
+            'id="delete-run-dialog"',
+            'aria-labelledby="delete-run-heading"',
+            'aria-describedby="delete-run-description"',
+            'id="delete-run-topic"',
+            'id="delete-run-id"',
+            'id="delete-run-status"',
+            'id="delete-run-description"',
+            'id="delete-run-unaffected"',
+            'id="delete-run-close-button"',
+            'id="confirm-delete-run-button"',
+        )
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, index)
+        self.assertLess(
+            index.index('id="cancel-run-button"'),
+            index.index('id="delete-run-button"'),
+        )
+
+    def test_client_deletion_flow_is_terminal_only_bodyless_and_focus_safe(
+        self,
+    ) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        update_start = script.index("function updateActions(")
+        update_end = script.index("\n  async function selectRun(", update_start)
+        update_body = script[update_start:update_end]
+        open_start = script.index("function openDeleteRunDialog(")
+        open_end = script.index("\n  function dismissDeleteRunDialog(", open_start)
+        open_body = script[open_start:open_end]
+        delete_start = script.index("async function deleteRun(")
+        delete_end = script.index("\n  function scheduleJobPoll(", delete_start)
+        delete_body = script[delete_start:delete_end]
+        required_global_fragments = (
+            'const deletableRunStatuses = new Set(["cancelled", "completed", "failed"])',
+            "function openDeleteRunDialog(",
+            "function dismissDeleteRunDialog(",
+            "async function deleteRun(",
+        )
+        for fragment in required_global_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, script)
+        self.assertIn('byId("delete-run-button").disabled =', update_body)
+        self.assertIn("!deletableRunStatuses.has(run && run.status)", update_body)
+        self.assertIn('byId("delete-run-close-button").focus()', open_body)
+        self.assertIn("encodeURIComponent(runId)", delete_body)
+        self.assertIn('{ method: "DELETE" }', delete_body)
+        self.assertIn('byId("confirm-delete-run-button").disabled = true', delete_body)
+        self.assertIn("showCommand(payload)", delete_body)
+        self.assertIn("payload.cleanup_pending", delete_body)
+        self.assertIn(
+            'await loadRuns({ preserveSelection: false, force: true })',
+            delete_body,
+        )
+        self.assertNotIn('{ method: "DELETE", body:', script)
+
+    def test_client_deletion_copy_covers_scope_warnings_and_conflicts_in_both_locales(
+        self,
+    ) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        required_fragments = (
+            "Delete run",
+            "Delete permanently",
+            "SQLite history and run artifacts will be removed.",
+            "The seed corpus and shared provider cache are unaffected.",
+            "Run deleted permanently.",
+            "Run deleted, but artifact cleanup is still pending.",
+            "删除运行",
+            "永久删除",
+            "SQLite 历史记录和运行产物将被删除。",
+            "种子语料库和共享检索平台缓存不受影响。",
+            "运行已永久删除。",
+            "运行已删除，但产物清理仍在等待完成。",
+            "run_not_deletable:",
+            "run_deletion_conflict:",
+        )
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, script)
+
+    def test_run_deletion_does_not_clear_background_job_feedback(self) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        delete_start = script.index("async function deleteRun(")
+        delete_end = script.index("\n  function scheduleJobPoll(", delete_start)
+        delete_body = script[delete_start:delete_end]
+
+        self.assertNotIn('showFeedback("")', delete_body)
+        self.assertNotIn("withPending(", delete_body)
+
+    def test_persistent_feedback_suppresses_chatter_but_yields_to_background_errors(
+        self,
+    ) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        feedback_start = script.index("function showFeedback(")
+        feedback_end = script.index("\n  function errorMessage(", feedback_start)
+        feedback_body = script[feedback_start:feedback_end]
+
+        chatter_guard = (
+            "if (options.background && state.stableFeedback && !isError) return;"
+        )
+        self.assertIn(chatter_guard, feedback_body)
+        self.assertIn("if (!options.background || isError)", feedback_body)
+        self.assertLess(
+            feedback_body.index(chatter_guard),
+            feedback_body.index("state.stableFeedback ="),
+        )
+
+    def test_post_delete_reload_is_forced_queued_and_stale_safe(self) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        required_fragments = (
+            "runReloadPromise: null",
+            "queuedRunReload: null",
+            "runReloadGeneration: 0",
+            "async function performRunLoad(",
+            "if (state.runReloadPromise)",
+            "if (force)",
+            "state.queuedRunReload =",
+            "return state.runReloadPromise",
+            "generation !== state.runReloadGeneration",
+            "while (request && !state.stopped)",
+            'await loadRuns({ preserveSelection: false, force: true })',
+        )
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, script)
+
+    def test_normal_delete_success_is_persistent_and_keeps_equivalent_cli(
+        self,
+    ) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        delete_start = script.index("async function deleteRun(")
+        delete_end = script.index("\n  function scheduleJobPoll(", delete_start)
+        delete_body = script[delete_start:delete_end]
+
+        self.assertIn("showCommand(payload)", delete_body)
+        self.assertIn('payload.cleanup_pending ? "deleteCleanupPending" : "runDeleted"', delete_body)
+        self.assertIn("persistent: true", delete_body)
+
+    def test_delete_dialog_focus_is_deferred_until_actions_are_enabled(self) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function focusPostDeleteTarget(", script)
+        self.assertIn("function isDeleteConflict(", script)
+        dismiss_start = script.index("function dismissDeleteRunDialog(")
+        dismiss_end = script.index("\n  function focusPostDeleteTarget(", dismiss_start)
+        dismiss_body = script[dismiss_start:dismiss_end]
+        focus_start = dismiss_end + 3
+        focus_end = script.index("\n  function isDeleteConflict(", focus_start)
+        focus_body = script[focus_start:focus_end]
+        delete_start = script.index("async function deleteRun(")
+        delete_end = script.index("\n  function scheduleJobPoll(", delete_start)
+        delete_body = script[delete_start:delete_end]
+
+        self.assertIn("restoreFocus = true", dismiss_body)
+        self.assertIn("if (restoreFocus)", dismiss_body)
+        self.assertIn('byId("delete-run-button").focus()', dismiss_body)
+        self.assertIn('byId("delete-run-button")', focus_body)
+        self.assertIn('document.querySelector(".run-button.selected:not(:disabled)")', focus_body)
+        self.assertIn('byId("empty-new-run-button")', focus_body)
+        self.assertIn('byId("new-run-button")', focus_body)
+        self.assertIn("dismissDeleteRunDialog({ restoreFocus: false })", delete_body)
+        final_start = delete_body.index("finally")
+        self.assertLess(
+            delete_body.index("state.deletingRun = false", final_start),
+            delete_body.index("updateActions()", final_start),
+        )
+        self.assertLess(
+            delete_body.index("updateActions()", final_start),
+            delete_body.index("focusPostDeleteTarget()", final_start),
+        )
+
+    def test_delete_conflicts_dismiss_refresh_then_focus_after_finalization(
+        self,
+    ) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function isDeleteConflict(", script)
+        conflict_start = script.index("function isDeleteConflict(")
+        conflict_end = script.index("\n  async function deleteRun(", conflict_start)
+        conflict_body = script[conflict_start:conflict_end]
+        delete_start = conflict_end + 3
+        delete_end = script.index("\n  function scheduleJobPoll(", delete_start)
+        delete_body = script[delete_start:delete_end]
+        catch_start = delete_body.index("catch (error)")
+        finally_start = delete_body.index("finally", catch_start)
+        catch_body = delete_body[catch_start:finally_start]
+
+        self.assertIn("error instanceof APIError", conflict_body)
+        self.assertIn('"run_not_deletable"', conflict_body)
+        self.assertIn('"run_deletion_conflict"', conflict_body)
+        self.assertIn("if (isDeleteConflict(error))", catch_body)
+        self.assertIn("dismissDeleteRunDialog({ restoreFocus: false })", catch_body)
+        self.assertIn(
+            "await loadRuns({ preserveSelection: true, force: true })",
+            catch_body,
+        )
+        self.assertLess(
+            catch_body.index("await loadRuns("),
+            catch_body.index("showFeedback(errorMessage(error), true)"),
+        )
+        self.assertNotIn('byId("delete-run-button").focus()', catch_body)
+
     def test_styles_define_approved_responsive_layout(self) -> None:
         styles = (self.static_root / "styles.css").read_text(encoding="utf-8")
         required_fragments = (
