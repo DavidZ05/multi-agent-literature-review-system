@@ -151,12 +151,15 @@ python3 -m src.memory_review_pipeline events RUN_ID
 python3 -m src.memory_review_pipeline list
 python3 -m src.memory_review_pipeline resume RUN_ID
 python3 -m src.memory_review_pipeline cancel RUN_ID
+python3 -m src.memory_review_pipeline delete RUN_ID
 ```
 
 Pressing `Ctrl+C` during an executable stage marks the run `paused` and exits
 with status 130. `resume` continues from the last valid checkpoint. A checkpoint
 is reused only when its input fingerprint matches and every recorded output
-artifact still has the expected SHA-256 hash.
+artifact still has the expected SHA-256 hash. Cancellation preserves the run
+and its event history for audit; deletion is permanent and is allowed only for
+`cancelled`, `completed`, or `failed` runs.
 
 Custom runtime locations must appear before the subcommand:
 
@@ -164,8 +167,14 @@ Custom runtime locations must appear before the subcommand:
 python3 -m src.memory_review_pipeline \
   --db /path/to/workflow.db \
   --artifacts /path/to/artifacts \
-  status RUN_ID
+  delete RUN_ID
 ```
+
+Deleting a run cascades through its run-owned SQLite records and removes its
+run-scoped artifact directory. The seed corpus, other runs, `.env`, and the
+shared provider cache are preserved. If the response reports
+`"cleanup_pending": true`, the database deletion has succeeded but artifact
+purging must be retried; the workbench retries pending cleanup on startup.
 
 ### Local Workbench
 
@@ -182,10 +191,14 @@ persistent CLI. Existing runs therefore appear immediately, and decisions made
 in the browser can be inspected or replayed through the Bash commands below.
 
 The workbench supports run creation, status and event inspection, candidate
-filtering, approve/reject/defer decisions, discovery closure, resume, and
-cancellation. Every mutation displays its equivalent CLI command. The
-interface follows the browser language on first use, offers a Chinese/English
-toggle, and remembers the last manual choice.
+filtering, approve/reject/defer decisions, discovery closure, resume,
+cancellation, and permanent deletion. Delete is available only for cancelled,
+completed, or failed runs and opens a contextual confirmation showing the
+run's topic, ID, and status before removal. Every mutation displays its
+equivalent CLI command. The interface follows the browser language on first
+use, offers a Chinese/English toggle, and remembers the last manual choice.
+On desktop, the run list scrolls independently; on mobile, it returns to the
+normal page flow.
 
 Runtime locations still precede the subcommand; workbench-only options follow
 it:

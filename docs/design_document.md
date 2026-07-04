@@ -75,6 +75,13 @@ input fingerprint and every output artifact hash still match. Each checkpoint
 also stores the next stage, so interruption between checkpoint creation and
 state transition does not cause an agent to run twice.
 
+Retention is explicit: cancellation preserves the audit trail, while permanent
+deletion is limited to cancelled, completed, or failed runs. SQLite cascades
+the selected run's owned records and the artifact store removes its run-scoped
+directory, without affecting the seed corpus, other runs, `.env`, or the shared
+provider cache. If artifact purging remains pending after database deletion,
+the workbench reports that state and retries cleanup at startup.
+
 Discovery uses provider adapters behind an injectable HTTP transport. arXiv is
 the primary structured source for this computer-science topic; Semantic Scholar
 adds cross-index metadata and acts as a secondary source. Raw responses,
