@@ -45,6 +45,8 @@
       invalid_json: "The server returned invalid data.", not_found: "The requested item was not found.",
       pending_candidates: "Resolve all pending candidates before closing discovery.",
       duplicate_resume_job: "A resume job is already active for this run.",
+      run_busy: "This run is still executing. Wait for it to stop before deleting it.",
+      run_deletion_busy: "This run is being deleted. Reload the run list and try again.",
       run_not_deletable: "This run can only be deleted after it is cancelled, completed, or failed.",
       run_deletion_conflict: "The run changed status during deletion. Review its current status and try again.",
       runDeleted: "Run deleted permanently.",
@@ -95,6 +97,8 @@
       invalid_json: "服务器返回了无效数据。", not_found: "找不到所请求的项目。",
       pending_candidates: "关闭检索前，请处理全部待审批论文。",
       duplicate_resume_job: "此运行已有继续任务正在执行。",
+      run_busy: "此运行仍在执行。请等待执行停止后再删除。",
+      run_deletion_busy: "此运行正在删除。请刷新运行列表后重试。",
       run_not_deletable: "仅可删除已取消、已完成或失败的运行。",
       run_deletion_conflict: "删除期间运行状态发生变化，请检查当前状态后重试。",
       runDeleted: "运行已永久删除。",
@@ -878,7 +882,13 @@
 
   function isDeleteConflict(error) {
     return error instanceof APIError
-      && ["run_not_deletable", "run_deletion_conflict"].includes(error.code);
+      && [
+        "run_not_deletable",
+        "run_deletion_conflict",
+        "run_busy",
+        "run_deletion_busy",
+        "not_found"
+      ].includes(error.code);
   }
 
   async function deleteRun() {

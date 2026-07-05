@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 import threading
 import unittest
 
+from src.literature_review.activity import RunBusy, RunDeletionBusy
 from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
@@ -476,6 +477,8 @@ class WorkbenchHTTPTests(unittest.TestCase):
                 ),
                 "run_deletion_conflict",
             ),
+            (RunBusy(self.run.run_id), "run_busy"),
+            (RunDeletionBusy(self.run.run_id), "run_deletion_busy"),
         )
         original_delete = self.service.delete_run
         try:
@@ -1223,6 +1226,8 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             "运行已删除，但产物清理仍在等待完成。",
             "run_not_deletable:",
             "run_deletion_conflict:",
+            "run_busy:",
+            "run_deletion_busy:",
         )
         for fragment in required_fragments:
             with self.subTest(fragment=fragment):
@@ -1336,6 +1341,9 @@ class WorkbenchStaticContractTests(unittest.TestCase):
         self.assertIn("error instanceof APIError", conflict_body)
         self.assertIn('"run_not_deletable"', conflict_body)
         self.assertIn('"run_deletion_conflict"', conflict_body)
+        self.assertIn('"run_busy"', conflict_body)
+        self.assertIn('"run_deletion_busy"', conflict_body)
+        self.assertIn('"not_found"', conflict_body)
         self.assertIn("if (isDeleteConflict(error))", catch_body)
         self.assertIn("dismissDeleteRunDialog({ restoreFocus: false })", catch_body)
         self.assertIn(
@@ -1347,6 +1355,42 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             catch_body.index("showFeedback(errorMessage(error), true)"),
         )
         self.assertNotIn('byId("delete-run-button").focus()', catch_body)
+
+    def test_delete_not_found_reloads_and_preserves_selection_only_if_present(
+        self,
+    ) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        load_start = script.index("async function performRunLoad(")
+        load_end = script.index("\n  async function loadRuns(", load_start)
+        load_body = script[load_start:load_end]
+        conflict_start = script.index("function isDeleteConflict(")
+        conflict_end = script.index("\n  async function deleteRun(", conflict_start)
+        conflict_body = script[conflict_start:conflict_end]
+        delete_start = conflict_end + 3
+        delete_end = script.index("\n  function scheduleJobPoll(", delete_start)
+        delete_body = script[delete_start:delete_end]
+        catch_start = delete_body.index("catch (error)")
+        finally_start = delete_body.index("finally", catch_start)
+        catch_body = delete_body[catch_start:finally_start]
+
+        self.assertIn('"not_found"', conflict_body)
+        self.assertIn(
+            "const selectedExists = state.runs.some(",
+            load_body,
+        )
+        self.assertIn(
+            "if (!preserveSelection || !selectedExists)",
+            load_body,
+        )
+        self.assertIn(
+            "await loadRuns({ preserveSelection: true, force: true })",
+            catch_body,
+        )
+        self.assertLess(
+            catch_body.index("await loadRuns("),
+            catch_body.index("showFeedback(errorMessage(error), true)"),
+        )
+        self.assertIn("focusAfterFinalization = true", catch_body)
 
     def test_styles_define_approved_responsive_layout(self) -> None:
         styles = (self.static_root / "styles.css").read_text(encoding="utf-8")

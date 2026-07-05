@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
 import shutil
 from uuid import uuid4
+
+from src.literature_review.activity import (
+    ActivityCoordinator,
+    RunBusy,
+    RunDeletionBusy,
+)
 
 
 _RUN_ID_PATTERN = re.compile(r"run_[0-9a-f]{32}")
@@ -26,6 +32,13 @@ class ArtifactDeletionHandle:
 
     def purge(self) -> None:
         self._manager._purge(self)
+
+
+@dataclass(frozen=True)
+class ArtifactReconciliationReport:
+    purged: int = 0
+    restored: int = 0
+    unresolved: int = 0
 
 
 class ArtifactDeletionManager:
@@ -73,7 +86,12 @@ class ArtifactDeletionManager:
         self._resolve_parent_directory(self._pending_path, "delete-pending path")
         self._resolve_under_root(source, "run artifact path")
         self._resolve_under_root(quarantine, "quarantine path")
-        source.replace(quarantine)
+        try:
+            source.replace(quarantine)
+        except FileNotFoundError:
+            if not source.exists() and not source.is_symlink():
+                return None
+            raise
         return ArtifactDeletionHandle(
             run_id=run_id,
             source_path=source,
@@ -108,6 +126,96 @@ class ArtifactDeletionManager:
             shutil.rmtree(candidate)
             removed += 1
         return removed
+
+    def reconcile_pending(
+        self,
+        run_exists: Callable[[str], bool],
+        *,
+        activity: ActivityCoordinator | None = None,
+    ) -> ArtifactReconciliationReport:
+        if not callable(run_exists):
+            raise TypeError("run_exists must be callable")
+        coordinator = (
+            ActivityCoordinator.for_artifact_root(self.artifact_root)
+            if activity is None
+            else activity
+        )
+        if coordinator.artifact_root != self.artifact_root:
+            raise ValueError(
+                "activity coordinator must match the configured artifact root"
+            )
+
+        pending = self._resolve_parent_directory(
+            self._pending_path,
+            "delete-pending path",
+        )
+        if not pending.exists():
+            return ArtifactReconciliationReport()
+
+        grouped: dict[str, list[Path]] = {}
+        for candidate in pending.iterdir():
+            match = _QUARANTINE_NAME_PATTERN.fullmatch(candidate.name)
+            if match is not None:
+                grouped.setdefault(match.group(1), []).append(candidate)
+
+        purged = 0
+        restored = 0
+        unresolved = 0
+        for run_id, candidates in grouped.items():
+            try:
+                reservation = coordinator.reserve_deletion(run_id)
+            except (RunBusy, RunDeletionBusy):
+                unresolved += len(candidates)
+                continue
+
+            try:
+                exists = run_exists(run_id)
+                if not isinstance(exists, bool):
+                    raise TypeError("run_exists must return a boolean")
+                if not exists:
+                    for candidate in candidates:
+                        if candidate.is_symlink() or not candidate.is_dir():
+                            unresolved += 1
+                            continue
+                        self._resolve_under_root(candidate, "quarantine path")
+                        shutil.rmtree(candidate)
+                        purged += 1
+                    continue
+
+                source = self._runs_path / run_id
+                if (
+                    source.exists()
+                    or source.is_symlink()
+                    or len(candidates) != 1
+                ):
+                    unresolved += len(candidates)
+                    continue
+
+                quarantine = candidates[0]
+                if quarantine.is_symlink() or not quarantine.is_dir():
+                    unresolved += 1
+                    continue
+                runs = self._resolve_parent_directory(
+                    self._runs_path,
+                    "run artifacts parent",
+                )
+                runs.mkdir(parents=True, exist_ok=True)
+                handle = ArtifactDeletionHandle(
+                    run_id=run_id,
+                    source_path=source,
+                    quarantine_path=quarantine,
+                    _manager=self,
+                )
+                handle.restore()
+                restored += 1
+            finally:
+                reservation.release()
+
+        return ArtifactReconciliationReport(
+            purged=purged,
+            restored=restored,
+            unresolved=unresolved,
+        )
 
     def _restore(self, handle: ArtifactDeletionHandle) -> None:
         source, quarantine = self._validated_handle_paths(handle)
@@ -209,4 +317,8 @@ class ArtifactDeletionManager:
             raise ValueError("invalid run_id")
 
 
-__all__ = ["ArtifactDeletionHandle", "ArtifactDeletionManager"]
+__all__ = [
+    "ArtifactDeletionHandle",
+    "ArtifactDeletionManager",
+    "ArtifactReconciliationReport",
+]

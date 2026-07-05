@@ -7,6 +7,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Protocol
 
+from src.literature_review.activity import ActivityCoordinator
 from src.literature_review.models import (
     ResearchRun,
     RunStatus,
@@ -28,6 +29,14 @@ class WorkflowStore(Protocol):
     def get_run(self, run_id: str) -> ResearchRun: ...
 
     def update_run(self, run: ResearchRun) -> None: ...
+
+    def compare_and_update_run(
+        self,
+        run: ResearchRun,
+        *,
+        expected_status: RunStatus,
+        expected_stage: WorkflowStage,
+    ) -> bool: ...
 
     def append_event(
         self,
@@ -102,6 +111,9 @@ class PersistentWorkflowEngine:
         self.artifact_store = artifact_store
         self.handlers = MappingProxyType(dict(handlers))
         self.runtime_config = MappingProxyType(dict(runtime_config or {}))
+        self.activity = ActivityCoordinator.for_artifact_root(
+            self.artifact_store.root
+        )
         self.workflow_store.initialize()
 
     def start(self, topic: str, corpus_path: Path) -> ResearchRun:
@@ -109,6 +121,11 @@ class PersistentWorkflowEngine:
         if not resolved_corpus.is_file():
             raise FileNotFoundError(resolved_corpus)
         run = ResearchRun.create(topic)
+        with self.activity.start_execution():
+            with self.activity.resume_execution(run.run_id):
+                return self._start(run, resolved_corpus)
+
+    def _start(self, run: ResearchRun, resolved_corpus: Path) -> ResearchRun:
         self.workflow_store.create_run(run)
         request = {
             "topic": run.topic,
@@ -130,9 +147,13 @@ class PersistentWorkflowEngine:
             },
             WorkflowStage.CREATED,
         )
-        return self.resume(run.run_id)
+        return self._resume(run.run_id)
 
     def resume(self, run_id: str) -> ResearchRun:
+        with self.activity.resume_execution(run_id):
+            return self._resume(run_id)
+
+    def _resume(self, run_id: str) -> ResearchRun:
         run = self.workflow_store.get_run(run_id)
         if run.status in self._TERMINAL_STATUSES:
             return run
@@ -142,12 +163,18 @@ class PersistentWorkflowEngine:
             RunStatus.FAILED,
             RunStatus.RETRY_WAIT,
         }:
+            previous = run
             run = replace(
                 run,
                 status=RunStatus.ACTIVE,
                 updated_at=utc_now_iso(),
             )
-            self.workflow_store.update_run(run)
+            if not self.workflow_store.compare_and_update_run(
+                run,
+                expected_status=previous.status,
+                expected_stage=previous.current_stage,
+            ):
+                return self.workflow_store.get_run(run_id)
             self.workflow_store.append_event(
                 run_id,
                 "run_resumed",
@@ -205,6 +232,8 @@ class PersistentWorkflowEngine:
                 if self._is_cancelled(run_id):
                     return self.workflow_store.get_run(run_id)
                 records = self._write_outputs(run_id, result.output_artifacts)
+                if self._is_cancelled(run_id):
+                    return self.workflow_store.get_run(run_id)
                 checkpoint = StageCheckpoint(
                     run_id=run_id,
                     stage=stage,
@@ -217,16 +246,23 @@ class PersistentWorkflowEngine:
                     next_stage=result.next_stage,
                 )
                 self.workflow_store.put_checkpoint(checkpoint)
+                if self._is_cancelled(run_id):
+                    return self.workflow_store.get_run(run_id)
             except KeyboardInterrupt:
                 self.pause(run_id)
                 raise
             except RetryableStageError as exc:
                 retrying = replace(
-                    self.workflow_store.get_run(run_id),
+                    run,
                     status=RunStatus.RETRY_WAIT,
                     updated_at=utc_now_iso(),
                 )
-                self.workflow_store.update_run(retrying)
+                if not self.workflow_store.compare_and_update_run(
+                    retrying,
+                    expected_status=run.status,
+                    expected_stage=run.current_stage,
+                ):
+                    return self.workflow_store.get_run(run_id)
                 self.workflow_store.append_event(
                     run_id,
                     "stage_retry_wait",
@@ -251,58 +287,82 @@ class PersistentWorkflowEngine:
                 stage,
             )
             run = self._advance(run, result.next_stage)
+            if run.status != RunStatus.ACTIVE:
+                return run
             if result.waiting_reason is not None:
-                run = replace(
+                waiting = replace(
                     run,
                     status=RunStatus.WAITING,
                     updated_at=utc_now_iso(),
                 )
-                self.workflow_store.update_run(run)
+                if not self.workflow_store.compare_and_update_run(
+                    waiting,
+                    expected_status=run.status,
+                    expected_stage=run.current_stage,
+                ):
+                    return self.workflow_store.get_run(run_id)
                 self.workflow_store.append_event(
                     run_id,
                     "run_waiting",
                     {"reason": result.waiting_reason},
-                    run.current_stage,
+                    waiting.current_stage,
                 )
-                return run
+                return waiting
 
         return run
 
     def pause(self, run_id: str) -> ResearchRun:
-        run = self.workflow_store.get_run(run_id)
-        if run.status in self._TERMINAL_STATUSES:
-            return run
-        paused = replace(
-            run,
-            status=RunStatus.PAUSED,
-            updated_at=utc_now_iso(),
-        )
-        self.workflow_store.update_run(paused)
-        self.workflow_store.append_event(
-            run_id,
-            "run_paused",
-            {"stage": paused.current_stage.value},
-            paused.current_stage,
-        )
-        return paused
+        with self.activity.resume_execution(run_id):
+            return self._pause(run_id)
+
+    def _pause(self, run_id: str) -> ResearchRun:
+        while True:
+            run = self.workflow_store.get_run(run_id)
+            if run.status in self._TERMINAL_STATUSES:
+                return run
+            paused = replace(
+                run,
+                status=RunStatus.PAUSED,
+                updated_at=utc_now_iso(),
+            )
+            if self.workflow_store.compare_and_update_run(
+                paused,
+                expected_status=run.status,
+                expected_stage=run.current_stage,
+            ):
+                self.workflow_store.append_event(
+                    run_id,
+                    "run_paused",
+                    {"stage": paused.current_stage.value},
+                    paused.current_stage,
+                )
+                return paused
 
     def cancel(self, run_id: str) -> ResearchRun:
-        run = self.workflow_store.get_run(run_id)
-        if run.status in self._TERMINAL_STATUSES:
-            return run
-        cancelled = replace(
-            run,
-            status=RunStatus.CANCELLED,
-            updated_at=utc_now_iso(),
-        )
-        self.workflow_store.update_run(cancelled)
-        self.workflow_store.append_event(
-            run_id,
-            "run_cancelled",
-            {"stage": cancelled.current_stage.value},
-            cancelled.current_stage,
-        )
-        return cancelled
+        return self._cancel(run_id)
+
+    def _cancel(self, run_id: str) -> ResearchRun:
+        while True:
+            run = self.workflow_store.get_run(run_id)
+            if run.status in self._TERMINAL_STATUSES:
+                return run
+            cancelled = replace(
+                run,
+                status=RunStatus.CANCELLED,
+                updated_at=utc_now_iso(),
+            )
+            if self.workflow_store.compare_and_update_run(
+                cancelled,
+                expected_status=run.status,
+                expected_stage=run.current_stage,
+            ):
+                self.workflow_store.append_event(
+                    run_id,
+                    "run_cancelled",
+                    {"stage": cancelled.current_stage.value},
+                    cancelled.current_stage,
+                )
+                return cancelled
 
     def _advance(
         self,
@@ -315,7 +375,12 @@ class PersistentWorkflowEngine:
             current_stage=next_stage,
             updated_at=utc_now_iso(),
         )
-        self.workflow_store.update_run(advanced)
+        if not self.workflow_store.compare_and_update_run(
+            advanced,
+            expected_status=run.status,
+            expected_stage=run.current_stage,
+        ):
+            return self.workflow_store.get_run(run.run_id)
         self.workflow_store.append_event(
             run.run_id,
             "stage_transition",
@@ -338,7 +403,12 @@ class PersistentWorkflowEngine:
             current_stage=WorkflowStage.COMPLETED,
             updated_at=utc_now_iso(),
         )
-        self.workflow_store.update_run(completed)
+        if not self.workflow_store.compare_and_update_run(
+            completed,
+            expected_status=run.status,
+            expected_stage=run.current_stage,
+        ):
+            return self.workflow_store.get_run(run.run_id)
         self.workflow_store.append_event(
             run.run_id,
             "run_completed",
@@ -348,25 +418,30 @@ class PersistentWorkflowEngine:
         return completed
 
     def _fail(self, run: ResearchRun, error: BaseException) -> ResearchRun:
-        latest = self.workflow_store.get_run(run.run_id)
-        if latest.status == RunStatus.CANCELLED:
-            return latest
-        failed = replace(
-            latest,
-            status=RunStatus.FAILED,
-            updated_at=utc_now_iso(),
-        )
-        self.workflow_store.update_run(failed)
-        self.workflow_store.append_event(
-            run.run_id,
-            "stage_failed",
-            {
-                "error_type": type(error).__name__,
-                "message": str(error),
-            },
-            latest.current_stage,
-        )
-        return failed
+        while True:
+            latest = self.workflow_store.get_run(run.run_id)
+            if latest.status == RunStatus.CANCELLED:
+                return latest
+            failed = replace(
+                latest,
+                status=RunStatus.FAILED,
+                updated_at=utc_now_iso(),
+            )
+            if self.workflow_store.compare_and_update_run(
+                failed,
+                expected_status=latest.status,
+                expected_stage=latest.current_stage,
+            ):
+                self.workflow_store.append_event(
+                    run.run_id,
+                    "stage_failed",
+                    {
+                        "error_type": type(error).__name__,
+                        "message": str(error),
+                    },
+                    latest.current_stage,
+                )
+                return failed
 
     def _request(self, run_id: str) -> dict[str, Any]:
         request = self.artifact_store.read_json(run_id, "inputs/research_request.json")

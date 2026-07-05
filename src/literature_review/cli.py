@@ -7,6 +7,11 @@ import sys
 from typing import Any, Sequence
 import webbrowser
 
+from src.literature_review.activity import (
+    ActivityCoordinator,
+    RunBusy,
+    RunDeletionBusy,
+)
 from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import CandidateStatus, WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
@@ -163,6 +168,7 @@ def run_workbench(
     default_corpus_path: Path,
 ) -> int:
     artifact_root = Path(artifact_root).expanduser().resolve()
+    activity = ActivityCoordinator.for_artifact_root(artifact_root)
     manager = WorkflowJobManager(store, artifact_root)
     server = None
     try:
@@ -176,12 +182,27 @@ def run_workbench(
             deletion_manager=deletion_manager,
         )
         try:
-            deletion_manager.cleanup_pending(
-                exclude_run_ids={run.run_id for run in store.list_runs()},
+            def run_exists(run_id: str) -> bool:
+                try:
+                    store.get_run(run_id)
+                except RunNotFoundError:
+                    return False
+                return True
+
+            reconciliation = deletion_manager.reconcile_pending(
+                run_exists,
+                activity=activity,
             )
+            if reconciliation.unresolved:
+                print(
+                    "Warning: "
+                    f"{reconciliation.unresolved} artifact quarantines "
+                    "need manual recovery.",
+                    file=sys.stderr,
+                )
         except Exception:
             print(
-                "Warning: artifact cleanup failed; continuing.",
+                "Warning: artifact reconciliation failed; continuing.",
                 file=sys.stderr,
             )
         server = create_workbench_server(
@@ -286,34 +307,50 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_json({"run_id": args.run_id, "status": "ready_to_resume"})
             return 0
 
-        artifact_store = LocalArtifactStore(args.artifacts)
         if args.command == "resume":
-            stored_run = store.get_run(args.run_id)
-            if stored_run.current_stage == WorkflowStage.AWAITING_CORPUS_APPROVAL:
-                pending = store.list_candidates(
-                    args.run_id, status=CandidateStatus.PENDING
-                )
-                if pending:
-                    _print_json(
-                        {
-                            "error": "approval_required",
-                            "run_id": args.run_id,
-                            "pending_candidate_count": len(pending),
-                        },
-                        stream=sys.stderr,
+            reservation = ActivityCoordinator.for_artifact_root(
+                args.artifacts
+            ).reserve_resume(args.run_id)
+            try:
+                with reservation.activate():
+                    stored_run = store.get_run(args.run_id)
+                    if (
+                        stored_run.current_stage
+                        == WorkflowStage.AWAITING_CORPUS_APPROVAL
+                    ):
+                        pending = store.list_candidates(
+                            args.run_id,
+                            status=CandidateStatus.PENDING,
+                        )
+                        if pending:
+                            _print_json(
+                                {
+                                    "error": "approval_required",
+                                    "run_id": args.run_id,
+                                    "pending_candidate_count": len(pending),
+                                },
+                                stream=sys.stderr,
+                            )
+                            return 3
+                    artifact_store = LocalArtifactStore(args.artifacts)
+                    enabled, providers, max_results = load_resume_settings(
+                        artifact_store,
+                        args.run_id,
                     )
-                    return 3
-            enabled, providers, max_results = load_resume_settings(
-                artifact_store, args.run_id
-            )
-            engine = build_engine(
-                store,
-                args.artifacts,
-                discovery_enabled=enabled,
-                providers=providers,
-                max_results=max_results,
-            )
-        elif args.command == "start":
+                    engine = build_engine(
+                        store,
+                        args.artifacts,
+                        discovery_enabled=enabled,
+                        providers=providers,
+                        max_results=max_results,
+                    )
+                    run = engine.resume(args.run_id)
+            finally:
+                reservation.release()
+            _print_json(run.to_dict())
+            return 0
+
+        if args.command == "start":
             engine = build_engine(
                 store,
                 args.artifacts,
@@ -321,14 +358,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 providers=tuple(args.providers),
                 max_results=args.max_results,
             )
-        else:
-            engine = build_engine(store, args.artifacts)
-
-        if args.command == "start":
             run = engine.start(args.topic, args.corpus)
-        elif args.command == "resume":
-            run = engine.resume(args.run_id)
         elif args.command == "cancel":
+            engine = build_engine(store, args.artifacts)
             run = engine.cancel(args.run_id)
         else:
             raise AssertionError(f"unhandled command: {args.command}")
@@ -354,6 +386,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             },
             stream=sys.stderr,
         )
+        return 3
+    except (RunBusy, RunDeletionBusy) as exc:
+        payload = {
+            "error": (
+                "run_busy" if isinstance(exc, RunBusy) else "run_deletion_busy"
+            )
+        }
+        if exc.run_id is not None:
+            payload["run_id"] = exc.run_id
+        _print_json(payload, stream=sys.stderr)
         return 3
     except (RunNotFoundError, CandidateNotFoundError) as exc:
         _print_json(

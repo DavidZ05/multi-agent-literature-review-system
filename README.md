@@ -159,7 +159,9 @@ with status 130. `resume` continues from the last valid checkpoint. A checkpoint
 is reused only when its input fingerprint matches and every recorded output
 artifact still has the expected SHA-256 hash. Cancellation preserves the run
 and its event history for audit; deletion is permanent and is allowed only for
-`cancelled`, `completed`, or `failed` runs.
+`cancelled`, `completed`, or `failed` runs. If a cancelled or failed run still
+has a worker exiting in the background, deletion returns a busy response until
+that worker releases the run.
 
 Custom runtime locations must appear before the subcommand:
 
@@ -174,7 +176,9 @@ Deleting a run cascades through its run-owned SQLite records and removes its
 run-scoped artifact directory. The seed corpus, other runs, `.env`, and the
 shared provider cache are preserved. If the response reports
 `"cleanup_pending": true`, the database deletion has succeeded but artifact
-purging must be retried; the workbench retries pending cleanup on startup.
+purging must be retried. At startup, the workbench purges quarantines for runs
+that no longer exist and restores an unambiguous quarantine when its database
+run still exists.
 
 ### Local Workbench
 

@@ -238,6 +238,38 @@ class SQLiteWorkflowStore:
         if cursor.rowcount == 0:
             raise RunNotFoundError(run.run_id)
 
+    def compare_and_update_run(
+        self,
+        run: ResearchRun,
+        *,
+        expected_status: RunStatus,
+        expected_stage: WorkflowStage,
+    ) -> bool:
+        values = {
+            **run.to_dict(),
+            "expected_status": expected_status.value,
+            "expected_stage": expected_stage.value,
+        }
+        with self._connection() as connection, connection:
+            cursor = connection.execute(
+                """UPDATE runs SET topic=:topic,status=:status,
+                current_stage=:current_stage,created_at=:created_at,
+                updated_at=:updated_at,corpus_version=:corpus_version,
+                revision_count=:revision_count
+                WHERE run_id=:run_id AND status=:expected_status
+                AND current_stage=:expected_stage""",
+                values,
+            )
+            if cursor.rowcount:
+                return True
+            row = connection.execute(
+                "SELECT 1 FROM runs WHERE run_id = ?",
+                (run.run_id,),
+            ).fetchone()
+            if row is None:
+                raise RunNotFoundError(run.run_id)
+            return False
+
     def delete_run(
         self,
         run_id: str,

@@ -9,6 +9,7 @@ import secrets
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from src.literature_review.activity import RunBusy, RunDeletionBusy
 from src.literature_review.models import CandidateStatus
 from src.literature_review.storage import (
     CandidateNotFoundError,
@@ -208,6 +209,20 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 run_id=exc.run_id,
                 expected_status=exc.expected_status.value,
                 actual_status=exc.actual_status.value,
+            )
+        except RunBusy as exc:
+            self._send_error(
+                409,
+                "run_busy",
+                "The run has workflow activity in progress.",
+                run_id=exc.run_id,
+            )
+        except RunDeletionBusy as exc:
+            self._send_error(
+                409,
+                "run_deletion_busy",
+                "Artifact deletion is in progress.",
+                run_id=exc.run_id,
             )
         except DuplicateResumeJobError as exc:
             self._send_error(

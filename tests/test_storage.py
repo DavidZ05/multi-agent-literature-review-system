@@ -111,6 +111,34 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         self.assertEqual(self.store.get_run(self.run.run_id), updated)
         self.assertEqual(self.store.list_runs(), [updated])
 
+    def test_compare_and_update_run_requires_matching_status_and_stage(
+        self,
+    ) -> None:
+        self.store.create_run(self.run)
+        advanced = replace(
+            self.run,
+            current_stage=WorkflowStage.PLANNING,
+            updated_at=utc_now_iso(),
+        )
+
+        lost = self.store.compare_and_update_run(
+            advanced,
+            expected_status=RunStatus.PAUSED,
+            expected_stage=WorkflowStage.CREATED,
+        )
+
+        self.assertFalse(lost)
+        self.assertEqual(self.store.get_run(self.run.run_id), self.run)
+
+        updated = self.store.compare_and_update_run(
+            advanced,
+            expected_status=RunStatus.ACTIVE,
+            expected_stage=WorkflowStage.CREATED,
+        )
+
+        self.assertTrue(updated)
+        self.assertEqual(self.store.get_run(self.run.run_id), advanced)
+
     def test_list_runs_orders_newest_first(self) -> None:
         older = self.run
         newer = replace(

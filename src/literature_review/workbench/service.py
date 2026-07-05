@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 import shlex
 
+from src.literature_review.activity import ActivityCoordinator
 from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import (
     CandidatePaper,
@@ -107,6 +108,7 @@ class WorkbenchService:
             )
             self.artifact_root = configured_root.expanduser().resolve()
             self._deletion_manager = ArtifactDeletionManager(self.artifact_root)
+        self._activity = ActivityCoordinator.for_artifact_root(self.artifact_root)
 
     def list_runs(self) -> list[dict[str, object]]:
         candidate_counts = self.store.list_candidate_counts_by_run()
@@ -246,6 +248,10 @@ class WorkbenchService:
         }
 
     def delete_run(self, run_id: str) -> dict[str, object]:
+        with self._activity.reserve_deletion(run_id):
+            return self._delete_run(run_id)
+
+    def _delete_run(self, run_id: str) -> dict[str, object]:
         run = self.store.get_run(run_id)
         if run.status not in self._DELETABLE_STATUSES:
             raise RunNotDeletableError(run_id, run.status)

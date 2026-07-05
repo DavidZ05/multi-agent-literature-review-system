@@ -3,10 +3,14 @@ from dataclasses import replace
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import threading
+from unittest.mock import patch
 
+from src.literature_review.activity import RunBusy
 from src.literature_review.config import AgentRuntimeConfig
 from src.literature_review.models import (
     CandidateStatus,
+    ResearchRun,
     RunStatus,
     WorkflowStage,
     utc_now_iso,
@@ -34,6 +38,7 @@ from src.literature_review.workflow.state import (
     can_transition,
     require_transition,
 )
+from src.literature_review.workbench.service import WorkbenchService
 
 
 class WorkflowStateTests(unittest.TestCase):
@@ -110,6 +115,24 @@ class RecordingHandler:
         )
 
 
+class BlockingHandler(RecordingHandler):
+    def __init__(
+        self,
+        next_stage: WorkflowStage,
+        output_path: str,
+        entered: threading.Event,
+        release: threading.Event,
+    ) -> None:
+        super().__init__(next_stage, output_path)
+        self.entered = entered
+        self.release = release
+
+    def __call__(self, context: StageContext) -> StageResult:
+        self.entered.set()
+        self.release.wait()
+        return super().__call__(context)
+
+
 class PersistentWorkflowEngineTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
@@ -163,6 +186,302 @@ class PersistentWorkflowEngineTests(unittest.TestCase):
                 "run_completed",
             ],
         )
+
+    def test_start_reserves_generated_run_before_making_it_visible(self) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+        captured_run_ids: list[str] = []
+        worker_errors: list[BaseException] = []
+        original_create_run = self.store.create_run
+        engine = self._engine(
+            RecordingHandler(
+                WorkflowStage.DRAFTING,
+                "checkpoints/plan.json",
+            ),
+            RecordingHandler(WorkflowStage.COMPLETED, "final/survey.json"),
+        )
+
+        def blocking_create_run(run: ResearchRun) -> None:
+            captured_run_ids.append(run.run_id)
+            entered.set()
+            release.wait()
+            original_create_run(run)
+
+        def start() -> None:
+            try:
+                engine.start("Memory agents", self.corpus_path)
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        with patch.object(self.store, "create_run", side_effect=blocking_create_run):
+            worker = threading.Thread(target=start)
+            worker.start()
+            self.assertTrue(entered.wait(timeout=2))
+            try:
+                with self.assertRaises(RunBusy):
+                    engine.resume(captured_run_ids[0])
+            finally:
+                release.set()
+                worker.join(timeout=2)
+
+        self.assertFalse(worker.is_alive())
+        if worker_errors:
+            raise worker_errors[0]
+
+    def test_cancelled_start_cannot_be_deleted_until_worker_exits(self) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+        worker_errors: list[BaseException] = []
+        engine = self._engine(
+            BlockingHandler(
+                WorkflowStage.DRAFTING,
+                "checkpoints/plan.json",
+                entered,
+                release,
+            ),
+            RecordingHandler(WorkflowStage.COMPLETED, "final/survey.json"),
+        )
+
+        def start() -> None:
+            try:
+                engine.start("Memory agents", self.corpus_path)
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        worker = threading.Thread(target=start)
+        worker.start()
+        self.assertTrue(entered.wait(timeout=2))
+        run = self.store.list_runs()[0]
+        engine.cancel(run.run_id)
+
+        try:
+            with self.assertRaises(RunBusy):
+                WorkbenchService(
+                    self.store,
+                    artifact_root=self.artifacts.root,
+                ).delete_run(run.run_id)
+        finally:
+            release.set()
+            worker.join(timeout=2)
+        self.assertFalse(worker.is_alive())
+        if worker_errors:
+            raise worker_errors[0]
+
+    def test_failed_run_resume_cannot_be_deleted_while_worker_executes(self) -> None:
+        self.store.initialize()
+        run = replace(
+            ResearchRun.create("Retry failed run"),
+            status=RunStatus.FAILED,
+        )
+        self.store.create_run(run)
+        self.artifacts.write_json(
+            run.run_id,
+            "inputs/research_request.json",
+            {
+                "topic": run.topic,
+                "corpus_path": str(self.corpus_path),
+                "runtime_config": {},
+            },
+        )
+        entered = threading.Event()
+        release = threading.Event()
+        worker_errors: list[BaseException] = []
+        engine = self._engine(
+            BlockingHandler(
+                WorkflowStage.DRAFTING,
+                "checkpoints/plan.json",
+                entered,
+                release,
+            ),
+            RecordingHandler(WorkflowStage.COMPLETED, "final/survey.json"),
+        )
+
+        def resume() -> None:
+            try:
+                engine.resume(run.run_id)
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        worker = threading.Thread(target=resume)
+        worker.start()
+        self.assertTrue(entered.wait(timeout=2))
+        engine.cancel(run.run_id)
+
+        try:
+            with self.assertRaises(RunBusy):
+                WorkbenchService(
+                    self.store,
+                    artifact_root=self.artifacts.root,
+                ).delete_run(run.run_id)
+        finally:
+            release.set()
+            worker.join(timeout=2)
+        self.assertFalse(worker.is_alive())
+        if worker_errors:
+            raise worker_errors[0]
+
+    def test_second_same_run_engine_resume_is_busy_while_worker_executes(
+        self,
+    ) -> None:
+        self.store.initialize()
+        run = replace(
+            ResearchRun.create("Exclusive resume"),
+            status=RunStatus.FAILED,
+        )
+        self.store.create_run(run)
+        self.artifacts.write_json(
+            run.run_id,
+            "inputs/research_request.json",
+            {
+                "topic": run.topic,
+                "corpus_path": str(self.corpus_path),
+                "runtime_config": {},
+            },
+        )
+        entered = threading.Event()
+        release = threading.Event()
+        worker_errors: list[BaseException] = []
+        engine = self._engine(
+            BlockingHandler(
+                WorkflowStage.DRAFTING,
+                "checkpoints/plan.json",
+                entered,
+                release,
+            ),
+            RecordingHandler(WorkflowStage.COMPLETED, "final/survey.json"),
+        )
+
+        def resume() -> None:
+            try:
+                engine.resume(run.run_id)
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        worker = threading.Thread(target=resume)
+        worker.start()
+        self.assertTrue(entered.wait(timeout=2))
+        try:
+            with self.assertRaises(RunBusy):
+                engine.resume(run.run_id)
+        finally:
+            release.set()
+            worker.join(timeout=2)
+
+        self.assertFalse(worker.is_alive())
+        if worker_errors:
+            raise worker_errors[0]
+
+    def test_cancel_after_worker_check_prevents_checkpoint_and_resurrection(
+        self,
+    ) -> None:
+        entered_outputs = threading.Event()
+        release_outputs = threading.Event()
+        worker_errors: list[BaseException] = []
+        engine = self._engine(
+            RecordingHandler(
+                WorkflowStage.DRAFTING,
+                "checkpoints/plan.json",
+            ),
+            RecordingHandler(WorkflowStage.COMPLETED, "final/survey.json"),
+        )
+        original_write_outputs = engine._write_outputs
+
+        def blocking_write_outputs(
+            run_id: str,
+            outputs: dict[str, object],
+        ):
+            entered_outputs.set()
+            release_outputs.wait()
+            return original_write_outputs(run_id, outputs)
+
+        def start() -> None:
+            try:
+                engine.start("Memory agents", self.corpus_path)
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        with patch.object(engine, "_write_outputs", side_effect=blocking_write_outputs):
+            worker = threading.Thread(target=start)
+            worker.start()
+            self.assertTrue(entered_outputs.wait(timeout=2))
+            run_id = self.store.list_runs()[0].run_id
+            try:
+                cancelled = engine.cancel(run_id)
+            finally:
+                release_outputs.set()
+                worker.join(timeout=2)
+
+        self.assertFalse(worker.is_alive())
+        if worker_errors:
+            raise worker_errors[0]
+        self.assertEqual(cancelled.status, RunStatus.CANCELLED)
+        final = self.store.get_run(run_id)
+        self.assertEqual(final.status, RunStatus.CANCELLED)
+        self.assertEqual(final.current_stage, WorkflowStage.PLANNING)
+        self.assertIsNone(
+            self.store.get_checkpoint(run_id, WorkflowStage.PLANNING)
+        )
+        events = self.store.list_events(run_id)
+        cancelled_index = next(
+            index
+            for index, event in enumerate(events)
+            if event.event_type == "run_cancelled"
+        )
+        self.assertNotIn(
+            "stage_transition",
+            [event.event_type for event in events[cancelled_index + 1 :]],
+        )
+
+    def test_cancel_retries_stage_race_and_preserves_latest_stage(self) -> None:
+        self.store.initialize()
+        run = replace(
+            ResearchRun.create("Stage race"),
+            current_stage=WorkflowStage.PLANNING,
+        )
+        self.store.create_run(run)
+        engine = self._engine(
+            RecordingHandler(
+                WorkflowStage.DRAFTING,
+                "checkpoints/plan.json",
+            ),
+            RecordingHandler(WorkflowStage.COMPLETED, "final/survey.json"),
+        )
+        original_compare = self.store.compare_and_update_run
+        attempts = 0
+
+        def racing_compare(
+            candidate: ResearchRun,
+            *,
+            expected_status: RunStatus,
+            expected_stage: WorkflowStage,
+        ) -> bool:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                moved = replace(
+                    self.store.get_run(run.run_id),
+                    current_stage=WorkflowStage.DRAFTING,
+                    updated_at=utc_now_iso(),
+                )
+                self.store.update_run(moved)
+                return False
+            return original_compare(
+                candidate,
+                expected_status=expected_status,
+                expected_stage=expected_stage,
+            )
+
+        with patch.object(
+            self.store,
+            "compare_and_update_run",
+            side_effect=racing_compare,
+        ):
+            cancelled = engine.cancel(run.run_id)
+
+        self.assertEqual(attempts, 2)
+        self.assertEqual(cancelled.status, RunStatus.CANCELLED)
+        self.assertEqual(cancelled.current_stage, WorkflowStage.DRAFTING)
+        self.assertEqual(self.store.get_run(run.run_id), cancelled)
 
     def test_matching_checkpoints_resume_without_reinvoking_handlers(self) -> None:
         first_planning = RecordingHandler(

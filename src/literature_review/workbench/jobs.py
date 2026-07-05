@@ -10,6 +10,10 @@ import threading
 from typing import Any, Protocol
 from uuid import uuid4
 
+from src.literature_review.activity import (
+    ActivityCoordinator,
+    ActivityReservation,
+)
 from src.literature_review.models import CandidateStatus, ResearchRun, WorkflowStage
 from src.literature_review.runtime import build_engine, load_resume_settings
 from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
@@ -107,6 +111,7 @@ class _JobRecord:
     run_id: str | None = None
     result: dict[str, Any] | None = None
     error: dict[str, str] | None = None
+    reservation: ActivityReservation | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -135,6 +140,7 @@ class WorkflowJobManager:
         self.artifact_root = Path(artifact_root).expanduser().resolve()
         self._engine_builder = engine_builder
         self._resume_settings_loader = resume_settings_loader
+        self._activity = ActivityCoordinator.for_artifact_root(self.artifact_root)
         self._executor = (
             executor
             if executor is not None
@@ -158,32 +164,54 @@ class WorkflowJobManager:
             providers=request.providers,
             max_results=request.max_results,
         )
-        command = self._start_command(request)
-        job = self._new_job("start", command)
-        self._schedule(
-            job,
-            lambda: self._engine_builder(
-                self.store,
-                self.artifact_root,
-                discovery_enabled=request.discovery_enabled,
-                providers=request.providers,
-                max_results=request.max_results,
-            ).start(request.topic, request.corpus_path),
-        )
+        reservation = self._activity.reserve_start()
+        try:
+            command = self._start_command(request)
+            job = self._new_job("start", command, reservation=reservation)
+            self._schedule(
+                job,
+                lambda: self._engine_builder(
+                    self.store,
+                    self.artifact_root,
+                    discovery_enabled=request.discovery_enabled,
+                    providers=request.providers,
+                    max_results=request.max_results,
+                ).start(request.topic, request.corpus_path),
+            )
+        except BaseException:
+            reservation.release()
+            raise
         return self._accepted_payload(job)
 
     def submit_resume(self, run_id: str) -> dict[str, object]:
-        run = self.store.get_run(run_id)
-        if run.current_stage == WorkflowStage.AWAITING_CORPUS_APPROVAL:
-            pending_count = len(
-                self.store.list_candidates(run_id, status=CandidateStatus.PENDING)
-            )
-            if pending_count:
-                raise PendingCandidatesError(run_id, pending_count)
+        with self._lock:
+            existing_job_id = self._active_resume_jobs.get(run_id)
+        if existing_job_id is not None:
+            raise DuplicateResumeJobError(run_id, existing_job_id)
 
-        command = self._equivalent_command("resume", run_id)
-        job = self._new_job("resume", command, run_id=run_id)
-        self._schedule(job, lambda: self._resume(run_id))
+        reservation = self._activity.reserve_resume(run_id)
+        try:
+            run = self.store.get_run(run_id)
+            if run.current_stage == WorkflowStage.AWAITING_CORPUS_APPROVAL:
+                pending_count = len(
+                    self.store.list_candidates(
+                        run_id,
+                        status=CandidateStatus.PENDING,
+                    )
+                )
+                if pending_count:
+                    raise PendingCandidatesError(run_id, pending_count)
+            command = self._equivalent_command("resume", run_id)
+            job = self._new_job(
+                "resume",
+                command,
+                run_id=run_id,
+                reservation=reservation,
+            )
+            self._schedule(job, lambda: self._resume(run_id))
+        except BaseException:
+            reservation.release()
+            raise
         return self._accepted_payload(job)
 
     def get_job(self, job_id: str) -> dict[str, object]:
@@ -217,6 +245,7 @@ class WorkflowJobManager:
         equivalent_command: str,
         *,
         run_id: str | None = None,
+        reservation: ActivityReservation | None = None,
     ) -> _JobRecord:
         with self._lock:
             if run_id is not None:
@@ -229,6 +258,7 @@ class WorkflowJobManager:
                 status="queued",
                 equivalent_command=equivalent_command,
                 run_id=run_id,
+                reservation=reservation,
             )
             self._jobs[job.job_id] = job
             if run_id is not None:
@@ -247,6 +277,8 @@ class WorkflowJobManager:
                 self._jobs.pop(job.job_id, None)
                 if job.run_id is not None:
                     self._active_resume_jobs.pop(job.run_id, None)
+                if job.reservation is not None:
+                    job.reservation.release()
             raise
         with self._lock:
             self._futures.add(future)
@@ -263,7 +295,11 @@ class WorkflowJobManager:
             job = self._jobs[job_id]
             job.status = "running"
         try:
-            result = operation().to_dict()
+            if job.reservation is None:
+                result = operation().to_dict()
+            else:
+                with job.reservation.activate():
+                    result = operation().to_dict()
         except BaseException as exc:
             with self._lock:
                 job.status = "failed"
@@ -277,7 +313,7 @@ class WorkflowJobManager:
                 job.result = result
         finally:
             with self._lock:
-                self._release_resume(job)
+                self._release_job(job)
 
     def _observe_future(
         self,
@@ -302,13 +338,16 @@ class WorkflowJobManager:
         with self._lock:
             job = self._jobs.get(job_id)
             if job is not None and job.status in {"queued", "running"}:
-                job.status = "failed"
-                job.error = self._public_error(failure)
-                self._release_resume(job)
+                if job.status == "queued":
+                    job.status = "failed"
+                    job.error = self._public_error(failure)
+                    self._release_job(job)
 
-    def _release_resume(self, job: _JobRecord) -> None:
+    def _release_job(self, job: _JobRecord) -> None:
         if job.run_id is not None:
             self._active_resume_jobs.pop(job.run_id, None)
+        if job.reservation is not None:
+            job.reservation.release()
 
     @staticmethod
     def _public_error(exc: BaseException) -> dict[str, str]:

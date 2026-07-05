@@ -5,8 +5,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
+from src.literature_review.activity import (
+    ActivityCoordinator,
+    RunBusy,
+    RunDeletionBusy,
+)
 from src.literature_review.cli import main
 from src.literature_review.models import (
     CandidatePaper,
@@ -22,6 +27,7 @@ from src.literature_review.workbench.service import (
     RunDeletionConflictError,
     WorkbenchService,
 )
+from src.literature_review.workbench.deletion import ArtifactReconciliationReport
 
 
 class PersistentCLITests(unittest.TestCase):
@@ -201,6 +207,60 @@ class PersistentCLITests(unittest.TestCase):
             },
         )
 
+    def test_activity_conflicts_are_stable_json_errors(self) -> None:
+        run_id = "run_0123456789abcdef0123456789abcdef"
+        cases = (
+            (RunBusy(run_id), "run_busy"),
+            (RunDeletionBusy(run_id), "run_deletion_busy"),
+        )
+
+        for error, expected_code in cases:
+            with self.subTest(error=expected_code):
+                with patch.object(
+                    WorkbenchService,
+                    "delete_run",
+                    side_effect=error,
+                ):
+                    code, output, stderr = self._run("delete", run_id)
+
+                self.assertEqual(code, 3)
+                self.assertIsNone(output)
+                self.assertEqual(
+                    json.loads(stderr),
+                    {"error": expected_code, "run_id": run_id},
+                )
+
+    def test_resume_reserves_before_store_and_artifact_preflight(self) -> None:
+        run_id = "run_0123456789abcdef0123456789abcdef"
+        deletion = ActivityCoordinator.for_artifact_root(
+            self.artifact_path
+        ).reserve_deletion(run_id)
+
+        try:
+            with (
+                patch.object(
+                    SQLiteWorkflowStore,
+                    "get_run",
+                    side_effect=AssertionError("store preflight must not run"),
+                ) as get_run,
+                patch(
+                    "src.literature_review.storage.LocalArtifactStore.read_json",
+                    side_effect=AssertionError("artifact preflight must not run"),
+                ) as read_json,
+            ):
+                code, output, stderr = self._run("resume", run_id)
+        finally:
+            deletion.release()
+
+        self.assertEqual(code, 3)
+        self.assertIsNone(output)
+        self.assertEqual(
+            json.loads(stderr),
+            {"error": "run_deletion_busy", "run_id": run_id},
+        )
+        get_run.assert_not_called()
+        read_json.assert_not_called()
+
     def test_delete_unknown_run_retains_not_found_behavior(self) -> None:
         run_id = "run_0123456789abcdef0123456789abcdef"
 
@@ -302,6 +362,33 @@ class PersistentCLITests(unittest.TestCase):
             store.get_run(waiting.run_id).status,
             RunStatus.WAITING,
         )
+        deletion = ActivityCoordinator.for_artifact_root(
+            self.artifact_path
+        ).reserve_deletion(waiting.run_id)
+        deletion.release()
+
+    def test_resume_preflight_errors_release_activity_reservation(self) -> None:
+        missing_run_id = ResearchRun.create("Missing").run_id
+
+        code, output, stderr = self._run("resume", missing_run_id)
+
+        self.assertEqual(code, 2)
+        self.assertIsNone(output)
+        self.assertIn("run_not_found", stderr)
+        missing_deletion = ActivityCoordinator.for_artifact_root(
+            self.artifact_path
+        ).reserve_deletion(missing_run_id)
+        missing_deletion.release()
+
+        store = SQLiteWorkflowStore(self.db_path)
+        run = ResearchRun.create("Missing settings")
+        store.create_run(run)
+        with self.assertRaises(FileNotFoundError):
+            self._run("resume", run.run_id)
+        artifact_deletion = ActivityCoordinator.for_artifact_root(
+            self.artifact_path
+        ).reserve_deletion(run.run_id)
+        artifact_deletion.release()
 
     def test_no_arguments_preserve_legacy_one_shot_command(self) -> None:
         fake_result = {"status": "accepted", "survey": "outputs/survey.md"}
@@ -383,7 +470,7 @@ class PersistentCLITests(unittest.TestCase):
         manager.shutdown.assert_called_once_with(wait=True)
         server.server_close.assert_called_once_with()
 
-    def test_run_workbench_cleans_stale_quarantines_but_preserves_stored_runs(
+    def test_run_workbench_reconciles_stale_and_interrupted_quarantines(
         self,
     ) -> None:
         from src.literature_review.cli import run_workbench
@@ -397,9 +484,10 @@ class PersistentCLITests(unittest.TestCase):
         store.create_run(current)
         stale_run_id = "run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         pending = self.artifact_path / ".delete-pending"
-        preserved = pending / f"{current.run_id}--delete-{'b' * 32}"
+        interrupted = pending / f"{current.run_id}--delete-{'b' * 32}"
         stale = pending / f"{stale_run_id}--delete-{'c' * 32}"
-        preserved.mkdir(parents=True)
+        interrupted.mkdir(parents=True)
+        (interrupted / "result.txt").write_text("restore", encoding="utf-8")
         stale.mkdir()
         manager = MagicMock()
         server = MagicMock()
@@ -427,8 +515,17 @@ class PersistentCLITests(unittest.TestCase):
             )
 
         self.assertEqual(code, 0)
-        self.assertTrue(preserved.is_dir())
+        self.assertFalse(interrupted.exists())
         self.assertFalse(stale.exists())
+        self.assertEqual(
+            (
+                self.artifact_path
+                / "runs"
+                / current.run_id
+                / "result.txt"
+            ).read_text(encoding="utf-8"),
+            "restore",
+        )
         service = create_server.call_args.args[0]
         self.assertEqual(service.artifact_root, self.artifact_path.resolve())
 
@@ -456,7 +553,7 @@ class PersistentCLITests(unittest.TestCase):
             ),
             patch(
                 "src.literature_review.workbench.deletion."
-                "ArtifactDeletionManager.cleanup_pending",
+                "ArtifactDeletionManager.reconcile_pending",
                 side_effect=OSError(secret),
             ) as cleanup,
             redirect_stdout(io.StringIO()),
@@ -472,12 +569,119 @@ class PersistentCLITests(unittest.TestCase):
             )
 
         self.assertEqual(code, 0)
-        cleanup.assert_called_once_with(exclude_run_ids=set())
+        cleanup.assert_called_once_with(ANY, activity=ANY)
+        self.assertTrue(callable(cleanup.call_args.args[0]))
         self.assertEqual(
             stderr.getvalue(),
-            "Warning: artifact cleanup failed; continuing.\n",
+            "Warning: artifact reconciliation failed; continuing.\n",
         )
         self.assertNotIn(secret, stderr.getvalue())
+
+    def test_run_workbench_warns_with_only_unresolved_count(self) -> None:
+        from src.literature_review.cli import run_workbench
+
+        store = SQLiteWorkflowStore(self.db_path)
+        store.initialize()
+        manager = MagicMock()
+        server = MagicMock()
+        server.server_address = ("127.0.0.1", 8765)
+        server.serve_forever.side_effect = KeyboardInterrupt
+
+        with (
+            patch(
+                "src.literature_review.cli.WorkflowJobManager",
+                return_value=manager,
+            ),
+            patch(
+                "src.literature_review.cli.create_workbench_server",
+                return_value=server,
+            ),
+            patch(
+                "src.literature_review.workbench.deletion."
+                "ArtifactDeletionManager.reconcile_pending",
+                return_value=ArtifactReconciliationReport(unresolved=2),
+            ),
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = run_workbench(
+                store,
+                self.artifact_path,
+                host="127.0.0.1",
+                port=8765,
+                open_browser=False,
+                default_corpus_path=self.corpus_path,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            stderr.getvalue(),
+            "Warning: 2 artifact quarantines need manual recovery.\n",
+        )
+
+    def test_run_workbench_passes_same_root_coordinator_to_reconciliation(
+        self,
+    ) -> None:
+        from src.literature_review.cli import run_workbench
+
+        store = SQLiteWorkflowStore(self.db_path)
+        store.initialize()
+        manager = MagicMock()
+        server = MagicMock()
+        server.server_address = ("127.0.0.1", 8765)
+        server.serve_forever.side_effect = KeyboardInterrupt
+        coordinator = MagicMock()
+        coordinator.artifact_root = self.artifact_path.resolve()
+
+        with (
+            patch(
+                "src.literature_review.cli.WorkflowJobManager",
+                return_value=manager,
+            ),
+            patch(
+                "src.literature_review.cli.create_workbench_server",
+                return_value=server,
+            ),
+            patch(
+                "src.literature_review.cli.ActivityCoordinator."
+                "for_artifact_root",
+                return_value=coordinator,
+            ),
+            patch(
+                "src.literature_review.workbench.deletion."
+                "ArtifactDeletionManager.reconcile_pending",
+                return_value=ArtifactReconciliationReport(),
+            ) as reconcile,
+            redirect_stdout(io.StringIO()),
+        ):
+            code = run_workbench(
+                store,
+                self.artifact_path,
+                host="127.0.0.1",
+                port=8765,
+                open_browser=False,
+                default_corpus_path=self.corpus_path,
+            )
+
+        self.assertEqual(code, 0)
+        reconcile.assert_called_once()
+        call = reconcile.call_args
+        self.assertEqual(call.kwargs, {"activity": coordinator})
+        self.assertEqual(len(call.args), 1)
+        run_exists = call.args[0]
+        self.assertTrue(callable(run_exists))
+
+        live = ResearchRun.create("Live")
+        store.create_run(live)
+        self.assertTrue(run_exists(live.run_id))
+        self.assertFalse(run_exists(ResearchRun.create("Missing").run_id))
+        with patch.object(
+            store,
+            "get_run",
+            side_effect=RuntimeError("database unavailable"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "database unavailable"):
+                run_exists(live.run_id)
 
     def test_ui_rejects_out_of_range_port_before_launch(self) -> None:
         with (

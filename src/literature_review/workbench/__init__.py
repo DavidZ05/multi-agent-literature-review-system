@@ -1,6 +1,7 @@
 from src.literature_review.workbench.deletion import (
     ArtifactDeletionHandle,
     ArtifactDeletionManager,
+    ArtifactReconciliationReport,
 )
 from src.literature_review.workbench.jobs import (
     DuplicateResumeJobError,
@@ -25,6 +26,7 @@ from src.literature_review.workbench.server import (
 __all__ = [
     "ArtifactDeletionHandle",
     "ArtifactDeletionManager",
+    "ArtifactReconciliationReport",
     "DuplicateResumeJobError",
     "JobNotFoundError",
     "MAX_JSON_BODY_BYTES",
