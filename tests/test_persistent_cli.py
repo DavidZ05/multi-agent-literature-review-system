@@ -430,7 +430,14 @@ class PersistentCLITests(unittest.TestCase):
         self.assertEqual(call.kwargs["host"], "localhost")
         self.assertEqual(call.kwargs["port"], 8123)
         self.assertFalse(call.kwargs["open_browser"])
-        self.assertEqual(call.kwargs["default_corpus_path"], self.corpus_path)
+        self.assertEqual(
+            call.kwargs["default_corpus_path"],
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "literature_review"
+            / "resources"
+            / "papers.json",
+        )
 
     def test_run_workbench_opens_browser_and_closes_runtime_on_interrupt(self) -> None:
         from src.literature_review.cli import run_workbench

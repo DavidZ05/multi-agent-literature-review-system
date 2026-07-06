@@ -55,7 +55,7 @@ def _port_number(value: str) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python3 -m src.memory_review_pipeline")
+    parser = argparse.ArgumentParser(prog="literature-review")
     parser.add_argument(
         "--db",
         type=Path,
@@ -149,13 +149,16 @@ def _print_json(value: Any, *, stream: Any | None = None) -> None:
 
 
 def _legacy_main() -> int:
-    root = Path(__file__).resolve().parents[2]
     result = Orchestrator(
-        corpus_path=root / "data" / "papers.json",
-        output_dir=root / "outputs",
+        corpus_path=_default_corpus_path(),
+        output_dir=Path.cwd() / "outputs",
     ).run()
     _print_json(result)
     return 0
+
+
+def _default_corpus_path() -> Path:
+    return Path(__file__).with_name("resources") / "papers.json"
 
 
 def run_workbench(
@@ -246,9 +249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 host=args.host,
                 port=args.port,
                 open_browser=not args.no_browser,
-                default_corpus_path=(
-                    Path(__file__).resolve().parents[2] / "data" / "papers.json"
-                ),
+                default_corpus_path=_default_corpus_path(),
             )
         if args.command == "status":
             _print_json(store.get_run(args.run_id).to_dict())
