@@ -2,14 +2,28 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+import ssl
 import time
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, build_opener
+from urllib.request import HTTPSHandler, Request, build_opener
+
+import certifi
 
 
 class ProviderRequestError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "provider_request_failed",
+        retryable: bool = False,
+        status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+        self.status = status
 
 
 class ProviderResponseTooLargeError(ProviderRequestError):
@@ -43,7 +57,10 @@ class UrllibHttpTransport:
         max_attempts: int = 3,
         max_response_bytes: int = 10 * 1024 * 1024,
     ) -> None:
-        self.opener = opener or build_opener()
+        if opener is None:
+            context = ssl.create_default_context(cafile=certifi.where())
+            opener = build_opener(HTTPSHandler(context=context))
+        self.opener = opener
         self.sleeper = sleeper
         self.timeout_seconds = timeout_seconds
         self.max_attempts = max_attempts
@@ -77,13 +94,32 @@ class UrllibHttpTransport:
                     )
             except HTTPError as exc:
                 if exc.code not in {429, 503} or attempt == self.max_attempts:
+                    code = {
+                        429: "rate_limited",
+                        503: "service_unavailable",
+                    }.get(exc.code, "http_error")
                     raise ProviderRequestError(
-                        f"provider request failed with HTTP {exc.code}: {url}"
+                        f"provider request failed with HTTP {exc.code}",
+                        code=code,
+                        retryable=exc.code in {429, 503},
+                        status=exc.code,
                     ) from exc
             except (URLError, TimeoutError) as exc:
                 if attempt == self.max_attempts:
+                    reason = exc.reason if isinstance(exc, URLError) else exc
+                    if isinstance(reason, ssl.SSLCertVerificationError):
+                        raise ProviderRequestError(
+                            "provider TLS certificate verification failed",
+                            code="tls_verification_failed",
+                        ) from exc
                     raise ProviderRequestError(
-                        f"provider request failed: {url}"
+                        "provider request failed because the network was unavailable",
+                        code=(
+                            "timeout"
+                            if isinstance(exc, TimeoutError)
+                            else "network_error"
+                        ),
+                        retryable=True,
                     ) from exc
             self.sleeper(min(2 ** (attempt - 1), 8))
         raise AssertionError("unreachable")

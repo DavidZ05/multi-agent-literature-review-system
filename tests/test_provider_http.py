@@ -1,6 +1,8 @@
 import io
+import ssl
 import unittest
-from urllib.error import HTTPError
+from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError, URLError
 
 from src.literature_review.providers.http import (
     ProviderRequestError,
@@ -49,6 +51,45 @@ def http_error(status: int) -> HTTPError:
 
 
 class UrllibHttpTransportTests(unittest.TestCase):
+    def test_default_opener_uses_certifi_ca_bundle(self) -> None:
+        context = MagicMock()
+        handler = MagicMock()
+        opener = MagicMock()
+        with (
+            patch(
+                "src.literature_review.providers.http.certifi.where",
+                return_value="/trusted/cacert.pem",
+            ),
+            patch(
+                "src.literature_review.providers.http.ssl.create_default_context",
+                return_value=context,
+            ) as create_context,
+            patch(
+                "src.literature_review.providers.http.HTTPSHandler",
+                return_value=handler,
+            ) as https_handler,
+            patch(
+                "src.literature_review.providers.http.build_opener",
+                return_value=opener,
+            ) as build,
+        ):
+            transport = UrllibHttpTransport()
+
+        create_context.assert_called_once_with(cafile="/trusted/cacert.pem")
+        https_handler.assert_called_once_with(context=context)
+        build.assert_called_once_with(handler)
+        self.assertIs(transport.opener, opener)
+
+    def test_injected_opener_does_not_build_ssl_context(self) -> None:
+        opener = FakeOpener([FakeResponse(b"ok")])
+        with patch(
+            "src.literature_review.providers.http.ssl.create_default_context"
+        ) as create_context:
+            transport = UrllibHttpTransport(opener=opener)
+
+        create_context.assert_not_called()
+        self.assertIs(transport.opener, opener)
+
     def test_retries_429_and_503_with_bounded_backoff(self) -> None:
         opener = FakeOpener([http_error(429), http_error(503), FakeResponse(b"ok")])
         delays = []
@@ -70,6 +111,28 @@ class UrllibHttpTransportTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ProviderRequestError, "400"):
             transport.get("https://example.com", {})
+
+    def test_tls_failure_is_sanitized_and_actionable(self) -> None:
+        certificate_error = ssl.SSLCertVerificationError(
+            1,
+            "unable to get local issuer certificate",
+        )
+        transport = UrllibHttpTransport(
+            opener=FakeOpener([URLError(certificate_error)]),
+            sleeper=lambda _delay: None,
+            max_attempts=1,
+        )
+
+        with self.assertRaises(ProviderRequestError) as raised:
+            transport.get(
+                "https://example.com/search?query=private-research-topic",
+                {"Authorization": "Bearer secret-value"},
+            )
+
+        self.assertEqual(raised.exception.code, "tls_verification_failed")
+        self.assertFalse(raised.exception.retryable)
+        self.assertNotIn("private-research-topic", str(raised.exception))
+        self.assertNotIn("secret-value", str(raised.exception))
 
     def test_rejects_oversized_response(self) -> None:
         transport = UrllibHttpTransport(
