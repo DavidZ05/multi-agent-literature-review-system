@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from src.literature_review.api.prompts import PromptNotFoundError, load_prompt
 from src.literature_review.api import APIResponseError
 from src.literature_review.base import AgentBackendError
 from src.literature_review.config import AgentRuntimeConfig
 from src.literature_review.evaluation import EvaluationReflectionAgent
+from src.literature_review.orchestrator import Orchestrator
 from src.literature_review.review import (
     DomainExpertAgent,
     ReviewSynthesizerAgent,
     StructureMentorAgent,
 )
 from src.literature_review.writing import PolishAgent, WriterAgent
+from tests.test_pipeline import write_sample_corpus
 
 
 class FakeClient:
@@ -326,6 +330,92 @@ class APIReflectionAgentTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.code, "invalid_agent_output")
+
+
+class APIOrchestratorTests(unittest.TestCase):
+    def test_orchestrator_executes_six_model_backed_agents_with_shared_client(self) -> None:
+        markdown = (
+            "# Memory-Augmented LLM Agents: Mechanisms, Evaluation, and Reliability in Multi-Agent Systems\n\n"
+            "## Abstract\n"
+            "MemGPT introduces virtual context management for long-running LLM agents [packer2023memgpt].\n"
+            "Reflexion stores verbal reflections in episodic memory for later trials [shinn2023reflexion].\n\n"
+            "## 1. Introduction\n"
+            "Memory-augmented LLM agents use verified source traces for continuity.\n\n"
+            "## 2. Methodology\n"
+            "The corpus contains screened memory papers.\n\n"
+            "## 3. Taxonomy of Agent Memory\n"
+            "Memory mechanisms include hierarchical memory and reflective memory.\n\n"
+            "## 5. Evaluation\n"
+            "Evaluation remains linked to screened source records.\n\n"
+            "## 6. Reliability Risks\n"
+            "Citation hallucination is controlled through deterministic gates.\n\n"
+            "## 7. Implications for Multi-Agent Literature Review Systems\n"
+            "Teams should share only approved evidence.\n\n"
+            "## References\n"
+            "- [packer2023memgpt] Charles Packer and Sarah Wooders (2023). MemGPT.\n"
+            "- [shinn2023reflexion] Noah Shinn and Federico Cassano (2023). Reflexion.\n"
+        )
+        client = FakeClient(
+            [
+                {"markdown": markdown, "change_summary": "Drafted from allowlisted sources."},
+                {
+                    "status": "accepted",
+                    "coverage": {"memory mechanisms": True},
+                    "missing_or_weak_areas": [],
+                    "recommendations": ["Coverage is suitable."],
+                },
+                {
+                    "status": "accepted",
+                    "word_count": 320,
+                    "missing_headings": [],
+                    "recommendations": ["Structure is suitable."],
+                },
+                {
+                    "status": "accepted",
+                    "blocking_agents": [],
+                    "must_fix": [],
+                    "should_fix": ["Proceed to polish."],
+                    "iteration_stop_rule": "Stop when no blocking reviewer remains.",
+                },
+                {"markdown": markdown, "change_summary": "Polished without citation changes."},
+                {
+                    "scores": {
+                        "citation_integrity": 5.0,
+                        "claim_source_alignment": 5.0,
+                        "process_control": 5.0,
+                        "literature_coverage": 4.0,
+                        "overall": 4.75,
+                    },
+                    "reflections": ["Deterministic gates protected citation integrity."],
+                    "next_run_improvements": ["Add full-text checking for high-risk claims."],
+                },
+            ]
+        )
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "papers.json"
+            output_dir = root / "outputs"
+            write_sample_corpus(corpus)
+
+            result = Orchestrator(
+                corpus_path=corpus,
+                output_dir=output_dir,
+                runtime_config=api_runtime(),
+                api_client=client,
+            ).run()
+
+        self.assertEqual(result["status"], "accepted")
+        self.assertEqual(
+            [settings.agent_id for settings, _prompt, _payload in client.calls],
+            [
+                "writer",
+                "domain_expert",
+                "structure_mentor",
+                "review_synthesizer",
+                "polish",
+                "evaluation_reflection",
+            ],
+        )
 
 
 if __name__ == "__main__":

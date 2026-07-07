@@ -7,6 +7,7 @@ import threading
 from unittest.mock import patch
 
 from src.literature_review.activity import RunBusy
+from src.literature_review.api import APIRequestError
 from src.literature_review.config import AgentRuntimeConfig
 from src.literature_review.models import (
     CandidateStatus,
@@ -33,6 +34,7 @@ from src.literature_review.discovery.approval import ApprovalService
 from src.literature_review.discovery.planner import QueryPlanner
 from src.literature_review.discovery.service import DiscoveryService
 from tests.test_discovery import FixtureProvider, provider_paper
+from tests.test_pipeline import write_sample_corpus
 from src.literature_review.workflow.state import (
     InvalidTransitionError,
     can_transition,
@@ -113,6 +115,28 @@ class RecordingHandler:
                 self.output_path: {"stage": context.run.current_stage.value}
             },
         )
+
+
+class FailingAPIClient:
+    def __init__(self, failure: APIRequestError) -> None:
+        self.failure = failure
+        self.calls = []
+
+    def complete_json(self, settings, *, system_prompt, user_payload):
+        self.calls.append((settings, system_prompt, user_payload))
+        raise self.failure
+
+
+def api_runtime_config() -> AgentRuntimeConfig:
+    return AgentRuntimeConfig.from_env(
+        {
+            "AGENT_BACKEND": "api",
+            "AGENT_API_MODE": "single",
+            "AGENT_API_BASE_URL": "https://api.example.com/v1",
+            "AGENT_API_KEY": "secret-key",
+            "AGENT_MODEL": "shared-model",
+        }
+    )
 
 
 class BlockingHandler(RecordingHandler):
@@ -778,6 +802,88 @@ class DurableHandlerTests(unittest.TestCase):
                 self.artifacts.exists(completed.run_id, relative_path),
                 relative_path,
             )
+
+    def test_retryable_api_failure_enters_retry_wait_without_secret_leak(self) -> None:
+        write_sample_corpus(self.corpus_path)
+        runtime_config = api_runtime_config()
+        client = FailingAPIClient(
+            APIRequestError(
+                "secret-key timeout talking to provider",
+                code="timeout",
+                retryable=True,
+            )
+        )
+        engine = PersistentWorkflowEngine(
+            self.store,
+            self.artifacts,
+            {
+                WorkflowStage.PLANNING: PlanningHandler(),
+                WorkflowStage.DRAFTING: DraftingHandler(
+                    runtime_config,
+                    api_client=client,
+                ),
+            },
+            runtime_config=runtime_config.public_dict(),
+        )
+
+        run = engine.start("Memory agents", self.corpus_path)
+
+        self.assertEqual(run.status, RunStatus.RETRY_WAIT)
+        self.assertEqual(run.current_stage, WorkflowStage.DRAFTING)
+        retry_events = [
+            event
+            for event in self.store.list_events(run.run_id)
+            if event.event_type == "stage_retry_wait"
+        ]
+        self.assertEqual(len(retry_events), 1)
+        self.assertEqual(
+            retry_events[0].payload["message"],
+            "API provider retryable failure (timeout)",
+        )
+        self.assertNotIn("secret-key", json.dumps(dict(retry_events[0].payload)))
+        self.assertEqual(client.calls[0][0].agent_id, "writer")
+
+    def test_permanent_api_failure_is_failed_and_sanitized(self) -> None:
+        write_sample_corpus(self.corpus_path)
+        runtime_config = api_runtime_config()
+        client = FailingAPIClient(
+            APIRequestError(
+                "secret-key rejected by provider",
+                code="auth_failed",
+                retryable=False,
+                status=401,
+            )
+        )
+        engine = PersistentWorkflowEngine(
+            self.store,
+            self.artifacts,
+            {
+                WorkflowStage.PLANNING: PlanningHandler(),
+                WorkflowStage.DRAFTING: DraftingHandler(
+                    runtime_config,
+                    api_client=client,
+                ),
+            },
+            runtime_config=runtime_config.public_dict(),
+        )
+
+        with self.assertRaisesRegex(StageExecutionError, "drafting stage failed"):
+            engine.start("Memory agents", self.corpus_path)
+
+        failed = self.store.list_runs()[0]
+        self.assertEqual(failed.status, RunStatus.FAILED)
+        self.assertEqual(failed.current_stage, WorkflowStage.DRAFTING)
+        failure_events = [
+            event
+            for event in self.store.list_events(failed.run_id)
+            if event.event_type == "stage_failed"
+        ]
+        self.assertEqual(len(failure_events), 1)
+        self.assertEqual(
+            failure_events[0].payload["message"],
+            "API provider permanent failure (auth_failed, status=401)",
+        )
+        self.assertNotIn("secret-key", json.dumps(dict(failure_events[0].payload)))
 
     def test_discovery_path_waits_before_drafting(self) -> None:
         paper = provider_paper("arxiv", "2304.03442", arxiv_id="2304.03442")

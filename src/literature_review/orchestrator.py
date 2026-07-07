@@ -28,23 +28,35 @@ class Orchestrator:
         output_dir: Path,
         runtime_config: AgentRuntimeConfig | None = None,
         run_id: str | None = None,
+        api_client: Any | None = None,
     ) -> None:
         self.corpus_path = corpus_path
         self.output_dir = output_dir
         self.runtime_config = runtime_config or AgentRuntimeConfig.from_env()
         self.run_id = run_id
+        self.api_client = api_client
         self.search_agent = SearchAgent(self.runtime_config)
-        self.writer_agent = WriterAgent(self.runtime_config)
+        self.writer_agent = WriterAgent(self.runtime_config, api_client=api_client)
         self.reviewer_agent = ReviewerAgent(self.runtime_config)
-        self.domain_expert_agent = DomainExpertAgent(self.runtime_config)
-        self.structure_mentor_agent = StructureMentorAgent(self.runtime_config)
-        self.review_synthesizer_agent = ReviewSynthesizerAgent(self.runtime_config)
-        self.polish_agent = PolishAgent(self.runtime_config)
+        self.domain_expert_agent = DomainExpertAgent(
+            self.runtime_config,
+            api_client=api_client,
+        )
+        self.structure_mentor_agent = StructureMentorAgent(
+            self.runtime_config,
+            api_client=api_client,
+        )
+        self.review_synthesizer_agent = ReviewSynthesizerAgent(
+            self.runtime_config,
+            api_client=api_client,
+        )
+        self.polish_agent = PolishAgent(self.runtime_config, api_client=api_client)
         self.final_verification_reviewer = FinalVerificationReviewer(
             self.runtime_config
         )
         self.evaluation_reflection_agent = EvaluationReflectionAgent(
-            self.runtime_config
+            self.runtime_config,
+            api_client=api_client,
         )
 
     def run(self, max_revision_loops: int = 2) -> dict[str, Any]:

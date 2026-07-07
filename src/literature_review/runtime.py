@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
+from src.literature_review.api import OpenAIChatClient
 from src.literature_review.config import AgentRuntimeConfig
 from src.literature_review.discovery import (
     ApprovalService,
@@ -39,11 +41,17 @@ def build_engine(
     discovery_enabled: bool = False,
     providers: tuple[str, ...] = ("arxiv", "semantic_scholar"),
     max_results: int = 10,
+    api_client: Any | None = None,
 ) -> PersistentWorkflowEngine:
     runtime_config = AgentRuntimeConfig.from_env()
+    if runtime_config.active_backend == "api" and api_client is None:
+        api_client = OpenAIChatClient()
     handlers = {
         WorkflowStage.PLANNING: PlanningHandler(discovery_enabled=discovery_enabled),
-        WorkflowStage.DRAFTING: DraftingHandler(runtime_config),
+        WorkflowStage.DRAFTING: DraftingHandler(
+            runtime_config,
+            api_client=api_client,
+        ),
     }
     workflow_config = runtime_config.public_dict()
     workflow_config.update(

@@ -161,6 +161,9 @@ class PersistentCLITests(unittest.TestCase):
         self.assertEqual(payload["error"], "configuration_error")
         self.assertIn("AGENT_MODEL", payload["message"])
         self.assertNotIn("secret-key", stderr)
+        store = SQLiteWorkflowStore(self.db_path)
+        store.initialize()
+        self.assertEqual(store.list_runs(), [])
 
     def test_delete_uses_custom_storage_and_prints_success_json(self) -> None:
         store = SQLiteWorkflowStore(self.db_path)

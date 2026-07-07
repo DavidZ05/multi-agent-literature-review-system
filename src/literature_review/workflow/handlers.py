@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Protocol
 
+from src.literature_review.api import APIClientError
 from src.literature_review.config import AgentRuntimeConfig
 from src.literature_review.discovery.approval import ApprovalService
 from src.literature_review.discovery.service import (
@@ -131,9 +132,11 @@ class DraftingHandler:
         self,
         runtime_config: AgentRuntimeConfig | None = None,
         *,
+        api_client: Any | None = None,
         orchestrator_factory: OrchestratorFactory = Orchestrator,
     ) -> None:
         self.runtime_config = runtime_config or AgentRuntimeConfig.from_env()
+        self.api_client = api_client
         self.orchestrator_factory = orchestrator_factory
 
     def __call__(self, context: StageContext) -> StageResult:
@@ -147,13 +150,23 @@ class DraftingHandler:
                     context.artifact_store.read_text(context.run.run_id, approved_path),
                     encoding="utf-8",
                 )
-            orchestrator = self.orchestrator_factory(
-                corpus_path=corpus_path,
-                output_dir=output_dir,
-                runtime_config=self.runtime_config,
-                run_id=context.run.run_id,
-            )
-            orchestrator.run()
+            kwargs: dict[str, Any] = {
+                "corpus_path": corpus_path,
+                "output_dir": output_dir,
+                "runtime_config": self.runtime_config,
+                "run_id": context.run.run_id,
+            }
+            if self.api_client is not None:
+                kwargs["api_client"] = self.api_client
+            orchestrator = self.orchestrator_factory(**kwargs)
+            try:
+                orchestrator.run()
+            except APIClientError as exc:
+                if exc.retryable:
+                    raise RetryableStageError(
+                        _api_error_message(exc, retryable=True)
+                    ) from exc
+                raise RuntimeError(_api_error_message(exc, retryable=False)) from exc
             artifacts: dict[str, Any] = {}
             for filename in self._JSON_ARTIFACTS:
                 artifacts[f"final/{filename}"] = json.loads(
@@ -168,6 +181,12 @@ class DraftingHandler:
             next_stage=WorkflowStage.COMPLETED,
             output_artifacts=artifacts,
         )
+
+
+def _api_error_message(exc: APIClientError, *, retryable: bool) -> str:
+    label = "retryable" if retryable else "permanent"
+    status = f", status={exc.status}" if exc.status is not None else ""
+    return f"API provider {label} failure ({exc.code}{status})"
 
 
 __all__ = [
