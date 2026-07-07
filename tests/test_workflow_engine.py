@@ -911,6 +911,52 @@ class DurableHandlerTests(unittest.TestCase):
         self.assertEqual(drafting.calls, [])
         self.assertFalse(self.artifacts.exists(run.run_id, "final/survey.json"))
 
+    def test_zero_candidate_discovery_waits_for_human_review(self) -> None:
+        service = DiscoveryService(
+            QueryPlanner(max_results=1),
+            {"arxiv": FixtureProvider("arxiv", ())},
+        )
+        drafting = RecordingHandler(WorkflowStage.COMPLETED, "final/survey.json")
+        engine = PersistentWorkflowEngine(
+            self.store,
+            self.artifacts,
+            {
+                WorkflowStage.PLANNING: PlanningHandler(discovery_enabled=True),
+                WorkflowStage.DISCOVERING: DiscoveryHandler(service),
+                WorkflowStage.SCREENING: ScreeningHandler(),
+                WorkflowStage.DRAFTING: drafting,
+            },
+            runtime_config={"discovery_enabled": True},
+        )
+
+        run = engine.start("Football", self.corpus_path)
+
+        self.assertEqual(run.status, RunStatus.WAITING)
+        self.assertEqual(run.current_stage, WorkflowStage.AWAITING_CORPUS_APPROVAL)
+        self.assertEqual(drafting.calls, [])
+        self.assertEqual(self.store.list_candidates(run.run_id), [])
+        self.assertEqual(
+            self.artifacts.read_json(
+                run.run_id,
+                "discovery/screening_summary.json",
+            ),
+            {
+                "pending_candidate_count": 0,
+                "candidate_ids": [],
+                "review_required": True,
+                "reason": "zero_candidate_discovery",
+            },
+        )
+        waiting_events = [
+            event
+            for event in self.store.list_events(run.run_id)
+            if event.event_type == "run_waiting"
+        ]
+        self.assertEqual(
+            waiting_events[-1].payload["reason"],
+            "discovery produced no candidate papers",
+        )
+
     def test_all_provider_failures_enter_retry_wait(self) -> None:
         service = DiscoveryService(
             QueryPlanner(max_results=1),

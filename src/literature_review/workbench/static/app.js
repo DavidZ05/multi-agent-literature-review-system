@@ -30,7 +30,35 @@
       candidateTable: "Discovered literature candidates", paper: "Paper", year: "Year",
       source: "Source", score: "Score", status: "Status", noCandidates: "No candidates match this filter.",
       discoveryEmptyTitle: "Discovery completed with no approval candidates.",
-      discoveryEmptyHint: "The providers returned no new papers after deduplication and screening. Try a broader topic, a higher maximum result count, or another provider.",
+      discoveryEmptyHint: "No papers are ready for approval. Review the discovery summary, then retry discovery or continue with the seed corpus.",
+      discoverySummaryTitle: "Discovery summary", discoveryReview: "Discovery needs review",
+      continueSeedCorpus: "Continue with seed corpus",
+      discoveryIssue_ok: "Discovery ready",
+      discoveryIssue_not_run: "Discovery not run",
+      discoveryIssue_zero_candidates: "No approval candidates",
+      discoveryIssue_partial_provider_failure: "Provider warning",
+      discoveryMessage_ok: "Discovery found candidate papers for human screening.",
+      discoveryMessage_not_run: "This run did not use automatic literature discovery.",
+      discoveryMessage_zero_candidates: "Automatic discovery ran, but no provider result survived deduplication and screening. The workflow is paused so you can review the cause before drafting.",
+      discoveryMessage_zero_candidates_completed: "Automatic discovery ran, but no provider result survived deduplication and screening. This older run already completed; new zero-candidate runs pause for review before drafting.",
+      discoveryMessage_partial_provider_failure: "Discovery found candidates, but at least one provider failed or was rate limited. Review the provider details before continuing.",
+      providerSummary: "{provider}: {queries} queries, {results} results, {failures} failures",
+      providerError_rate_limited: "Latest error: rate limited. Add an API key or retry later.",
+      providerError_network_unavailable: "Latest error: network unavailable. Retry later.",
+      providerError_timeout: "Latest error: timeout. Retry later.",
+      providerError_provider_error: "Latest error: provider request failed.",
+      providerErrors: "Observed errors: {errors}",
+      providerErrorLabel_rate_limited: "rate limited",
+      providerErrorLabel_network_unavailable: "network unavailable",
+      providerErrorLabel_timeout: "timeout",
+      providerErrorLabel_provider_error: "provider request failed",
+      recommendation_broaden_topic: "Use a more specific scholarly query or broaden the topic wording.",
+      recommendation_increase_max_results: "Increase the maximum results per query.",
+      recommendation_try_arxiv_only: "Try arXiv only if Semantic Scholar is rate limited.",
+      recommendation_review_seed_corpus: "Review the seed corpus; it may not match the research topic.",
+      recommendation_configure_semantic_scholar_key: "Configure SEMANTIC_SCHOLAR_API_KEY for a higher Semantic Scholar quota.",
+      recommendation_retry_discovery_later: "Retry discovery after the provider or network recovers.",
+      recommendation_continue_with_seed_corpus: "Continue only if drafting from the current seed corpus is intentional.",
       selectCandidate: "Select a candidate", selectCandidateHint: "Candidate metadata and decisions appear here.",
       detailLoadFailed: "Run details unavailable",
       abstractEvidence: "Abstract evidence", screeningRecommendation: "Screening recommendation",
@@ -100,7 +128,35 @@
       candidateTable: "检索到的候选文献", paper: "论文", year: "年份",
       source: "来源", score: "评分", status: "状态", noCandidates: "当前筛选条件下没有候选论文。",
       discoveryEmptyTitle: "检索已完成，但没有需要审批的候选论文。",
-      discoveryEmptyHint: "检索结果在去重和筛选后没有留下新论文。可以尝试放宽主题、调高最大结果数，或启用其他检索平台。",
+      discoveryEmptyHint: "当前没有可审批论文。请先查看上方检索摘要，再选择重新检索或用种子语料继续。",
+      discoverySummaryTitle: "检索摘要", discoveryReview: "检索需要确认",
+      continueSeedCorpus: "使用种子语料继续",
+      discoveryIssue_ok: "检索可用",
+      discoveryIssue_not_run: "未运行检索",
+      discoveryIssue_zero_candidates: "没有可审批候选",
+      discoveryIssue_partial_provider_failure: "检索平台警告",
+      discoveryMessage_ok: "自动检索找到了候选论文，可以进入人工筛选。",
+      discoveryMessage_not_run: "此任务没有启用自动文献检索。",
+      discoveryMessage_zero_candidates: "自动检索已经运行，但没有文献通过去重和筛选。工作流已暂停，方便你先确认原因再生成综述。",
+      discoveryMessage_zero_candidates_completed: "自动检索已经运行，但没有文献通过去重和筛选。这个旧任务已经完成；新的 0 候选任务会在生成综述前暂停等待确认。",
+      discoveryMessage_partial_provider_failure: "检索找到了候选论文，但至少一个平台失败或被限流。继续前建议查看平台细节。",
+      providerSummary: "{provider}：{queries} 次查询，{results} 条结果，{failures} 次失败",
+      providerError_rate_limited: "最近错误：请求被限流。可以配置 API key 或稍后重试。",
+      providerError_network_unavailable: "最近错误：网络不可用。可以稍后重试。",
+      providerError_timeout: "最近错误：请求超时。可以稍后重试。",
+      providerError_provider_error: "最近错误：检索平台请求失败。",
+      providerErrors: "出现过的错误：{errors}",
+      providerErrorLabel_rate_limited: "请求限流",
+      providerErrorLabel_network_unavailable: "网络不可用",
+      providerErrorLabel_timeout: "请求超时",
+      providerErrorLabel_provider_error: "平台请求失败",
+      recommendation_broaden_topic: "调整为更学术的查询词，或适当放宽主题表述。",
+      recommendation_increase_max_results: "调高每条查询的最大结果数。",
+      recommendation_try_arxiv_only: "如果 Semantic Scholar 被限流，可以先只用 arXiv。",
+      recommendation_review_seed_corpus: "检查种子语料；它可能和当前研究主题不匹配。",
+      recommendation_configure_semantic_scholar_key: "配置 SEMANTIC_SCHOLAR_API_KEY，提高 Semantic Scholar 配额。",
+      recommendation_retry_discovery_later: "等待平台或网络恢复后重新检索。",
+      recommendation_continue_with_seed_corpus: "只有在确认当前种子语料适合主题时，才继续生成综述。",
       selectCandidate: "请选择候选论文", selectCandidateHint: "此处显示论文元数据与审批操作。",
       detailLoadFailed: "无法加载运行详情",
       abstractEvidence: "摘要证据", screeningRecommendation: "筛选建议",
@@ -517,6 +573,7 @@
   function renderAll() {
     renderRuns();
     renderRunDetail();
+    renderDiscoverySummary();
     renderCandidates();
     renderCandidateDetail();
     updateActions();
@@ -545,6 +602,13 @@
   }
 
   function runStatusLabel(run) {
+    const counts = run.candidate_counts || (
+      state.detail && state.detail.run && state.detail.run.run_id === run.run_id
+        ? state.detail.candidate_counts || {}
+        : {}
+    );
+    const count = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+    if (run.current_stage === "awaiting_corpus_approval" && count === 0) return t("discoveryReview");
     if (run.current_stage === "awaiting_corpus_approval") return t("waitingApproval");
     return t(run.status || "unknown");
   }
@@ -580,6 +644,7 @@
         step.classList.remove("done", "current");
       });
       renderRuntime(null);
+      byId("discovery-panel").hidden = true;
       return;
     }
     byId("run-topic").textContent = run.topic;
@@ -602,6 +667,80 @@
     renderRuntime(state.detail.runtime);
   }
 
+  function discoverySummary() {
+    return state.detail && state.detail.discovery_summary
+      ? state.detail.discovery_summary
+      : { enabled: false, issue: "not_run", providers: [], recommendations: [] };
+  }
+
+  function isZeroCandidateDiscovery() {
+    const summary = discoverySummary();
+    return summary.enabled && summary.issue === "zero_candidates";
+  }
+
+  function isZeroCandidateDiscoveryGate() {
+    const run = state.detail && state.detail.run;
+    return isZeroCandidateDiscovery()
+      && run
+      && run.status === "waiting"
+      && run.current_stage === "awaiting_corpus_approval";
+  }
+
+  function renderDiscoverySummary() {
+    const summary = discoverySummary();
+    const panel = byId("discovery-panel");
+    const shouldShow = Boolean(summary.enabled);
+    panel.hidden = !shouldShow;
+    if (!shouldShow) return;
+    panel.classList.toggle("warning", summary.issue !== "ok");
+    byId("discovery-summary-status").textContent = t(`discoveryIssue_${summary.issue || "not_run"}`);
+    const run = state.detail && state.detail.run;
+    const messageKey = summary.issue === "zero_candidates" && run && run.status === "completed"
+      ? "discoveryMessage_zero_candidates_completed"
+      : `discoveryMessage_${summary.issue || "not_run"}`;
+    byId("discovery-summary-message").textContent = t(messageKey);
+
+    const providers = byId("discovery-provider-list");
+    providers.replaceChildren();
+    (summary.providers || []).forEach((provider) => {
+      const item = document.createElement("div");
+      item.className = "discovery-provider";
+      const title = document.createElement("strong");
+      title.textContent = provider.provider || t("unknown");
+      const stats = document.createElement("span");
+      stats.textContent = t("providerSummary", {
+        provider: provider.provider || t("unknown"),
+        queries: provider.queries || 0,
+        results: provider.result_count || 0,
+        failures: provider.failures || 0
+      });
+      item.append(title, stats);
+      const categories = Array.isArray(provider.error_categories) ? provider.error_categories : [];
+      if (categories.length) {
+        const categoryLine = document.createElement("span");
+        categoryLine.textContent = t("providerErrors", {
+          errors: categories.map((category) => t(`providerErrorLabel_${category}`)).join(", ")
+        });
+        item.append(categoryLine);
+      }
+      if (provider.last_error_category) {
+        const error = document.createElement("span");
+        error.textContent = t(`providerError_${provider.last_error_category}`);
+        item.append(error);
+      }
+      providers.append(item);
+    });
+
+    const recommendations = byId("discovery-recommendations");
+    recommendations.replaceChildren();
+    (summary.recommendations || []).forEach((key) => {
+      const item = document.createElement("li");
+      item.textContent = t(`recommendation_${key}`);
+      recommendations.append(item);
+    });
+    recommendations.hidden = recommendations.childElementCount === 0;
+  }
+
   function candidateCounts() {
     const stored = state.detail ? state.detail.candidate_counts || {} : {};
     const all = Object.values(stored).reduce((sum, value) => sum + Number(value || 0), 0);
@@ -618,6 +757,8 @@
   }
 
   function hasDiscoveryActivity() {
+    const summary = discoverySummary();
+    if (summary.enabled) return true;
     const events = state.detail ? state.detail.events || [] : [];
     return events.some((event) => (
       event.stage === "discovering"
@@ -775,6 +916,9 @@
     const run = state.detail && state.detail.run;
     const hasRun = Boolean(run);
     const mutationPending = state.pending || state.deletingRun;
+    byId("close-discovery-button").textContent = isZeroCandidateDiscoveryGate()
+      ? t("continueSeedCorpus")
+      : t("closeDiscovery");
     byId("events-button").disabled = !hasRun || mutationPending;
     byId("cancel-run-button").disabled = !hasRun || mutationPending || terminalRunStatuses.has(run && run.status);
     byId("delete-run-button").disabled =

@@ -158,6 +158,8 @@ literature-review start \
 
 The workflow normalizes, deduplicates, and scores candidates, then waits at `awaiting_corpus_approval`. Candidate papers are not citable until a human approves them.
 
+If discovery runs but produces zero approval candidates, the workflow now pauses instead of silently drafting from the seed corpus. The Workbench shows a discovery summary with provider query counts, result counts, provider failures such as Semantic Scholar rate limits, seed-corpus alignment hints, and suggested next actions. Use `close-discovery` only when continuing with the existing seed corpus is intentional.
+
 ```bash
 literature-review candidates RUN_ID
 literature-review candidates RUN_ID --status pending
@@ -184,7 +186,7 @@ arXiv does not need a key. Semantic Scholar works with limited anonymous quota; 
 SEMANTIC_SCHOLAR_API_KEY=
 ```
 
-Provider responses are cached in SQLite for 24 hours. arXiv calls are spaced by at least three seconds, and Semantic Scholar calls use conservative throttling. If every provider fails, the run enters `retry_wait` and can be resumed later.
+Provider responses are cached in SQLite for 24 hours. arXiv calls are spaced by at least three seconds, and Semantic Scholar calls use conservative throttling. If every provider fails, the run enters `retry_wait` and can be resumed later. If some providers succeed and others fail, the run remains inspectable: the Workbench reports partial failures and lets the user decide whether to retry discovery, adjust the topic, configure `SEMANTIC_SCHOLAR_API_KEY`, or continue with approved/seed material.
 
 ## Project Structure
 

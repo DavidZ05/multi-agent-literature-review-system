@@ -153,9 +153,140 @@ class WorkbenchServiceTests(unittest.TestCase):
                     "current_executor": "workflow_planner",
                     "safe_error_category": None,
                 },
+                "discovery_summary": {
+                    "enabled": False,
+                    "issue": "not_run",
+                    "candidate_count": 2,
+                    "pending_count": 1,
+                    "total_queries": 0,
+                    "total_results": 0,
+                    "total_failures": 0,
+                    "providers": [],
+                    "corpus_alignment": {
+                        "status": "unknown",
+                        "overlap_terms": [],
+                    },
+                    "recommendations": [],
+                },
             },
         )
         json.dumps(detail)
+
+    def test_get_run_detail_summarizes_zero_candidate_discovery(self) -> None:
+        run = replace(
+            self.newer_run,
+            topic="Football",
+            status=RunStatus.WAITING,
+            current_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
+        )
+        self.store.update_run(run)
+        corpus_path = Path(self.tmp.name) / "memory_papers.json"
+        corpus_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "citation_key": "park2023generative",
+                        "title": "Generative Agents with Memory",
+                        "authors": ["Ada Researcher"],
+                        "year": 2023,
+                        "venue": "Test",
+                        "url": "https://example.test/paper",
+                        "category": "memory mechanism",
+                        "contribution": "Studies memory retrieval in agents.",
+                        "evidence": "metadata",
+                        "tags": ["memory", "agents"],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        artifact_root = Path(self.tmp.name) / "artifacts"
+        LocalArtifactStore(artifact_root).write_json(
+            run.run_id,
+            "inputs/research_request.json",
+            {
+                "topic": run.topic,
+                "corpus_path": str(corpus_path),
+                "runtime_config": {},
+            },
+        )
+        self.store.append_event(
+            run.run_id,
+            "query_started",
+            {"provider": "arxiv", "query_id": "query_a"},
+            WorkflowStage.DISCOVERING,
+        )
+        self.store.append_event(
+            run.run_id,
+            "query_completed",
+            {"provider": "arxiv", "query_id": "query_a", "result_count": 0},
+            WorkflowStage.DISCOVERING,
+        )
+        self.store.append_event(
+            run.run_id,
+            "provider_failed",
+            {
+                "provider": "semantic_scholar",
+                "query_id": "query_s2",
+                "error_type": "ProviderRequestError",
+                "message": "provider request failed with HTTP 429",
+            },
+            WorkflowStage.DISCOVERING,
+        )
+
+        detail = WorkbenchService(
+            self.store,
+            artifact_root=artifact_root,
+        ).get_run_detail(run.run_id)
+
+        self.assertEqual(
+            detail["discovery_summary"],
+            {
+                "enabled": True,
+                "issue": "zero_candidates",
+                "candidate_count": 0,
+                "pending_count": 0,
+                "total_queries": 1,
+                "total_results": 0,
+                "total_failures": 1,
+                "providers": [
+                    {
+                        "provider": "arxiv",
+                        "queries": 1,
+                        "completed_queries": 1,
+                        "result_count": 0,
+                        "failures": 0,
+                        "error_categories": [],
+                        "last_error_type": None,
+                        "last_error_category": None,
+                        "last_error_message": None,
+                    },
+                    {
+                        "provider": "semantic_scholar",
+                        "queries": 0,
+                        "completed_queries": 0,
+                        "result_count": 0,
+                        "failures": 1,
+                        "error_categories": ["rate_limited"],
+                        "last_error_type": "ProviderRequestError",
+                        "last_error_category": "rate_limited",
+                        "last_error_message": "provider request failed with HTTP 429",
+                    },
+                ],
+                "corpus_alignment": {
+                    "status": "low",
+                    "overlap_terms": [],
+                },
+                "recommendations": [
+                    "broaden_topic",
+                    "increase_max_results",
+                    "try_arxiv_only",
+                    "review_seed_corpus",
+                    "configure_semantic_scholar_key",
+                    "continue_with_seed_corpus",
+                ],
+            },
+        )
 
     def test_get_run_detail_adds_sanitized_api_runtime_state(self) -> None:
         api_run = replace(

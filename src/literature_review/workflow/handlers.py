@@ -76,23 +76,32 @@ class ScreeningHandler:
             context.run.run_id,
             status=CandidateStatus.PENDING,
         )
+        if not candidates:
+            return StageResult(
+                next_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
+                output_artifacts={
+                    "discovery/screening_summary.json": {
+                        "pending_candidate_count": 0,
+                        "candidate_ids": [],
+                        "review_required": True,
+                        "reason": "zero_candidate_discovery",
+                    }
+                },
+                waiting_reason="discovery produced no candidate papers",
+            )
         return StageResult(
-            next_stage=(
-                WorkflowStage.AWAITING_CORPUS_APPROVAL
-                if candidates
-                else WorkflowStage.DRAFTING
-            ),
+            next_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
             output_artifacts={
                 "discovery/screening_summary.json": {
                     "pending_candidate_count": len(candidates),
                     "candidate_ids": [
                         candidate.candidate_id for candidate in candidates
                     ],
+                    "review_required": True,
+                    "reason": "candidate_corpus_approval",
                 }
             },
-            waiting_reason=(
-                "candidate corpus approval required" if candidates else None
-            ),
+            waiting_reason="candidate corpus approval required",
         )
 
 

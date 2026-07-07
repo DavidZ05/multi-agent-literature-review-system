@@ -163,6 +163,77 @@ html[lang="zh-CN"] .lang-zh, html[lang="en"] .lang-en { color: var(--accent); fo
   font-weight: 650;
   line-height: 16px;
 }
+.discovery-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dce5ef;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+.discovery-panel.warning {
+  border-color: #e5c987;
+  background: #fff9e8;
+}
+.discovery-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.discovery-panel h3 {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+}
+#discovery-summary-status {
+  flex: none;
+  color: #76520f;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+#discovery-summary-message {
+  margin: 8px 0 0;
+  color: #4e596b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.discovery-provider-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.discovery-provider {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #e1e6ed;
+  border-radius: 5px;
+  background: var(--surface);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.discovery-provider strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text);
+  font-size: 12px;
+}
+.discovery-provider span {
+  display: block;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.discovery-recommendations {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #4e596b;
+  font-size: 12px;
+  line-height: 1.4;
+}
 
 .candidate-toolbar {
   min-height: 54px;
@@ -351,6 +422,7 @@ dialog::backdrop { background: rgba(23, 32, 51, .42); }
   .run-title { display: grid; grid-template-columns: 1fr; }
   .status-badge { justify-self: start; margin-top: 8px; }
   .runtime-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .discovery-provider-list { grid-template-columns: 1fr; }
   .candidate-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .table-wrap { overflow: visible; background: var(--surface-soft); }
   .candidate-table { min-width: 0; border-collapse: separate; border-spacing: 0; padding: 12px; }
