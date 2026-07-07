@@ -35,6 +35,19 @@ class RunDeletionBusy(RuntimeError):
         )
 
 
+class UnsupportedPlatformError(RuntimeError):
+    """Raised when persistent workflow locking is unavailable."""
+
+
+def require_supported_platform() -> None:
+    if fcntl is None:
+        raise UnsupportedPlatformError(
+            "Persistent workflows and the local workbench require POSIX file "
+            "locks. Supported platforms are macOS and Linux. Windows support "
+            "is planned for a future release."
+        )
+
+
 class _AdvisoryLock:
     def __init__(self, path: Path, *, shared: bool) -> None:
         if fcntl is None:
@@ -259,4 +272,6 @@ __all__ = [
     "ActivityReservation",
     "RunBusy",
     "RunDeletionBusy",
+    "UnsupportedPlatformError",
+    "require_supported_platform",
 ]

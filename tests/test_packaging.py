@@ -9,6 +9,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PackagingTests(unittest.TestCase):
+    def test_public_project_files_are_ready_for_distribution(self) -> None:
+        required_files = {
+            "LICENSE": "MIT License",
+            "CHANGELOG.md": "0.3.0",
+            "CONTRIBUTING.md": "Contributing",
+            "SECURITY.md": "Security",
+        }
+
+        for filename, expected_text in required_files.items():
+            with self.subTest(filename=filename):
+                text = (ROOT / filename).read_text(encoding="utf-8")
+                self.assertIn(expected_text, text)
+                self.assertNotIn("TODO", text)
+                self.assertNotIn("TBD", text)
+
     def test_pyproject_declares_supported_install_and_console_command(self) -> None:
         metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())
 

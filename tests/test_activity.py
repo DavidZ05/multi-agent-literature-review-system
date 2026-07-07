@@ -6,11 +6,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import threading
 import unittest
+from unittest.mock import patch
 
 from src.literature_review.activity import (
     ActivityCoordinator,
     RunBusy,
     RunDeletionBusy,
+    UnsupportedPlatformError,
+    require_supported_platform,
 )
 
 
@@ -45,6 +48,16 @@ class ActivityCoordinatorTests(unittest.TestCase):
             self.coordinator,
             ActivityCoordinator.for_artifact_root(alias),
         )
+
+    def test_supported_platform_guard_explains_windows_limit(self) -> None:
+        with patch("src.literature_review.activity.fcntl", None):
+            with self.assertRaises(UnsupportedPlatformError) as raised:
+                require_supported_platform()
+
+        message = str(raised.exception)
+        self.assertIn("macOS", message)
+        self.assertIn("Linux", message)
+        self.assertIn("Windows", message)
 
     def test_queued_resume_reservation_blocks_deletion_until_released(self) -> None:
         reservation = self.coordinator.reserve_resume(RUN_ID)

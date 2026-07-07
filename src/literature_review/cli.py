@@ -11,6 +11,7 @@ from src.literature_review.activity import (
     ActivityCoordinator,
     RunBusy,
     RunDeletionBusy,
+    require_supported_platform,
 )
 from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import CandidateStatus, WorkflowStage
@@ -238,6 +239,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(arguments)
     if args.command is None:
         return _legacy_main()
+
+    require_supported_platform()
 
     store = SQLiteWorkflowStore(args.db)
     store.initialize()

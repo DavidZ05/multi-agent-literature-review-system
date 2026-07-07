@@ -702,6 +702,16 @@ class PersistentCLITests(unittest.TestCase):
 
         runner.assert_not_called()
 
+    def test_persistent_commands_check_platform_support_first(self) -> None:
+        with patch(
+            "src.literature_review.cli.require_supported_platform",
+        ) as platform_guard:
+            code, output, stderr = self._run("list")
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(output, [])
+        platform_guard.assert_called_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()
