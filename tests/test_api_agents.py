@@ -6,6 +6,7 @@ from src.literature_review.api.prompts import PromptNotFoundError, load_prompt
 from src.literature_review.api import APIResponseError
 from src.literature_review.base import AgentBackendError
 from src.literature_review.config import AgentRuntimeConfig
+from src.literature_review.evaluation import EvaluationReflectionAgent
 from src.literature_review.review import (
     DomainExpertAgent,
     ReviewSynthesizerAgent,
@@ -53,6 +54,7 @@ def search_report() -> dict[str, object]:
     ]
     return {
         "query": "Memory-Augmented LLM Agents",
+        "records_included": 1,
         "grouped_papers": {"memory mechanism": papers},
     }
 
@@ -260,6 +262,70 @@ class APIExpertAgentTests(unittest.TestCase):
             report["must_fix"],
         )
         self.assertIn("Keep the structure.", report["should_fix"])
+
+
+class APIReflectionAgentTests(unittest.TestCase):
+    def test_reflection_api_preserves_advisory_report_contract(self) -> None:
+        client = FakeClient(
+            [
+                {
+                    "scores": {
+                        "citation_integrity": 4.5,
+                        "claim_source_alignment": 4.0,
+                        "process_control": 5.0,
+                        "literature_coverage": 3.5,
+                        "overall": 4.25,
+                    },
+                    "final_status": "accepted",
+                    "reflections": ["Keep citation gates deterministic."],
+                    "next_run_improvements": ["Add more source coverage."],
+                }
+            ]
+        )
+        agent = EvaluationReflectionAgent(api_runtime(), api_client=client)
+        final_verification = {
+            "status": "revise",
+            "unknown_citations": ["fake2026paper"],
+            "unsupported_claims": [],
+        }
+
+        report = agent.evaluate(search_report(), {}, final_verification, [{"iteration": 1}])
+
+        self.assertEqual(report["agent"], "Evaluation / Reflection Agent")
+        self.assertEqual(report["backend"], "api")
+        self.assertEqual(report["final_status"], "revise")
+        self.assertEqual(report["revision_iterations"], 1)
+        self.assertEqual(report["records_included"], 1)
+        self.assertEqual(report["scores"]["overall"], 4.25)
+        self.assertEqual(report["reflections"], ["Keep citation gates deterministic."])
+
+    def test_reflection_api_rejects_out_of_range_scores(self) -> None:
+        client = FakeClient(
+            [
+                {
+                    "scores": {
+                        "citation_integrity": 6.0,
+                        "claim_source_alignment": 4.0,
+                        "process_control": 5.0,
+                        "literature_coverage": 3.5,
+                        "overall": 4.25,
+                    },
+                    "reflections": ["Too generous."],
+                    "next_run_improvements": ["Tighten scoring."],
+                }
+            ]
+        )
+        agent = EvaluationReflectionAgent(api_runtime(), api_client=client)
+
+        with self.assertRaises(APIResponseError) as raised:
+            agent.evaluate(
+                search_report(),
+                {},
+                {"status": "accepted", "unknown_citations": [], "unsupported_claims": []},
+                [],
+            )
+
+        self.assertEqual(raised.exception.code, "invalid_agent_output")
 
 
 if __name__ == "__main__":
