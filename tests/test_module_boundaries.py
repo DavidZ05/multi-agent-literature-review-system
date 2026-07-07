@@ -13,6 +13,7 @@ class ModuleBoundaryTests(unittest.TestCase):
             literature_review.__all__,
             [
                 "main",
+                "AgentBackendError",
                 "AgentAPISettings",
                 "AgentConfigurationError",
                 "AgentRuntimeConfig",
@@ -47,19 +48,21 @@ class ModuleBoundaryTests(unittest.TestCase):
         )
 
     def test_legacy_imports_preserve_object_identity(self) -> None:
-        from src.literature_review.base import RuntimeAwareAgent
+        from src.literature_review.base import AgentBackendError, RuntimeAwareAgent
         from src.literature_review.config import (
             AgentAPISettings,
             AgentConfigurationError,
             AgentRuntimeConfig,
         )
         from src.memory_review_pipeline import (
+            AgentBackendError as LegacyAgentBackendError,
             AgentAPISettings as LegacyAgentAPISettings,
             AgentConfigurationError as LegacyAgentConfigurationError,
             AgentRuntimeConfig as LegacyAgentRuntimeConfig,
             RuntimeAwareAgent as LegacyRuntimeAwareAgent,
         )
 
+        self.assertIs(LegacyAgentBackendError, AgentBackendError)
         self.assertIs(LegacyAgentAPISettings, AgentAPISettings)
         self.assertIs(LegacyAgentConfigurationError, AgentConfigurationError)
         self.assertIs(LegacyAgentRuntimeConfig, AgentRuntimeConfig)
@@ -72,6 +75,7 @@ class CompatibilityTests(unittest.TestCase):
         import src.memory_review_pipeline as legacy
 
         cases = [
+            ("AgentBackendError", literature_review.AgentBackendError),
             ("AgentAPISettings", literature_review.AgentAPISettings),
             ("AgentConfigurationError", literature_review.AgentConfigurationError),
             ("AgentRuntimeConfig", literature_review.AgentRuntimeConfig),
@@ -111,6 +115,7 @@ class OrchestratorModuleTests(unittest.TestCase):
             legacy.__all__,
             [
                 "RuntimeAwareAgent",
+                "AgentBackendError",
                 "AgentAPISettings",
                 "AgentConfigurationError",
                 "AgentRuntimeConfig",

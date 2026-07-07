@@ -55,6 +55,7 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("workbench/static/*.css", package_data["src.literature_review"])
         self.assertIn("workbench/static/*.js", package_data["src.literature_review"])
         self.assertIn("resources/*.json", package_data["src.literature_review"])
+        self.assertIn("prompts/*.txt", package_data["src.literature_review"])
 
     def test_default_corpus_is_available_as_a_package_resource(self) -> None:
         packaged = (

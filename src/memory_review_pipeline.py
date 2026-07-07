@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from src.literature_review import (
+    AgentBackendError,
     AgentAPISettings,
     AgentConfigurationError,
     AgentRuntimeConfig,
@@ -26,6 +27,7 @@ from src.literature_review.base import RuntimeAwareAgent
 
 __all__ = [
     "RuntimeAwareAgent",
+    "AgentBackendError",
     "AgentAPISettings",
     "AgentConfigurationError",
     "AgentRuntimeConfig",

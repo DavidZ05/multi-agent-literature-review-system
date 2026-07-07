@@ -1,21 +1,53 @@
 from __future__ import annotations
 
+from typing import Any
+
 from src.literature_review.config import AgentRuntimeConfig
 
-__all__ = ["RuntimeAwareAgent"]
+__all__ = ["AgentBackendError", "RuntimeAwareAgent"]
+
+
+class AgentBackendError(RuntimeError):
+    """Raised when an agent cannot execute through its configured backend."""
 
 
 class RuntimeAwareAgent:
     """Common base for agents that may later swap deterministic logic for API calls."""
 
-    def __init__(self, runtime_config: AgentRuntimeConfig | None = None) -> None:
+    def __init__(
+        self,
+        runtime_config: AgentRuntimeConfig | None = None,
+        *,
+        api_client: Any | None = None,
+    ) -> None:
         self.runtime_config = runtime_config or AgentRuntimeConfig.from_env()
+        self.api_client = api_client
         self.agent_id = self._agent_id_from_class_name()
 
     def backend_note(self) -> str:
-        if self.runtime_config.for_agent(self.agent_id).api_enabled:
-            return "api"
-        return "deterministic-fallback"
+        return self.runtime_config.for_agent(self.agent_id).active_backend
+
+    def call_api(
+        self,
+        system_prompt: str,
+        user_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not isinstance(user_payload, dict):
+            raise TypeError("API user payload must be a JSON object")
+        settings = self.runtime_config.for_agent(self.agent_id)
+        if settings.active_backend != "api":
+            raise AgentBackendError(
+                f"{self.agent_id} is configured for deterministic execution"
+            )
+        if self.api_client is None:
+            raise AgentBackendError(
+                f"{self.agent_id} requires an API client for API execution"
+            )
+        return self.api_client.complete_json(
+            settings,
+            system_prompt=system_prompt,
+            user_payload=user_payload,
+        )
 
     def _agent_id_from_class_name(self) -> str:
         name = self.__class__.__name__
