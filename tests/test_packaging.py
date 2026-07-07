@@ -76,6 +76,51 @@ class PackagingTests(unittest.TestCase):
         self.assertTrue(entrypoint.is_file())
         self.assertIn("raise SystemExit(main())", entrypoint.read_text())
 
+    def test_readme_is_public_user_first(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        required_sections = [
+            "## Quick Start",
+            "## Workbench",
+            "## Deterministic and API Modes",
+            "## Automatic Literature Discovery",
+            "## Troubleshooting",
+            "## Course Project Archive",
+        ]
+        for section in required_sections:
+            with self.subTest(section=section):
+                self.assertIn(section, readme)
+
+        self.assertLess(readme.index("## Quick Start"), readme.index("## Workbench"))
+        self.assertLess(
+            readme.index("## Workbench"),
+            readme.index("## Deterministic and API Modes"),
+        )
+        self.assertIn("macOS or Linux", readme)
+        self.assertIn("python3 -m pip install -e .", readme)
+        self.assertIn("literature-review --help", readme)
+        self.assertIn("AGENT_BACKEND=deterministic", readme)
+        self.assertIn("AGENT_BACKEND=api", readme)
+        self.assertIn("SEMANTIC_SCHOLAR_API_KEY", readme)
+        self.assertIn("certifi", readme)
+        self.assertIn("SSL_CERT_FILE", readme)
+        self.assertIn("docs/course-project/FINAL_SUBMISSION.md", readme)
+        self.assertNotIn("Final Assignment Deliverables", readme)
+
+    def test_course_project_material_is_archived(self) -> None:
+        archive = ROOT / "docs" / "course-project"
+        expected = [
+            archive / "FINAL_SUBMISSION.md",
+            archive / "design_document.md",
+            archive / "seed_corpus_review.md",
+        ]
+        for path in expected:
+            with self.subTest(path=path):
+                self.assertTrue(path.is_file())
+        self.assertFalse((ROOT / "FINAL_SUBMISSION.md").exists())
+        self.assertFalse((ROOT / "docs" / "design_document.md").exists())
+        self.assertFalse((ROOT / "docs" / "seed_corpus_review.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

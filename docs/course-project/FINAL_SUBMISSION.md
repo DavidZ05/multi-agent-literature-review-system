@@ -11,7 +11,7 @@ This folder contains a runnable multi-agent literature review system and the sur
 Submit the whole `multi-agent-literature-review-system` folder if possible. If the platform asks for selected files, include these:
 
 1. `README.md`
-2. `FINAL_SUBMISSION.md`
+2. `docs/course-project/FINAL_SUBMISSION.md`
 3. `src/memory_review_pipeline.py`
 4. `src/literature_review/`
 5. `.env.example`
@@ -24,8 +24,8 @@ Submit the whole `multi-agent-literature-review-system` folder if possible. If t
 12. `outputs/reflection_log.md`
 13. `outputs/runtime_config.json`
 14. `outputs/revision_log.json`
-15. `docs/design_document.md`
-16. `docs/seed_corpus_review.md`
+15. `docs/course-project/design_document.md`
+16. `docs/course-project/seed_corpus_review.md`
 17. `tests/test_pipeline.py`
 18. `tests/test_module_boundaries.py`
 

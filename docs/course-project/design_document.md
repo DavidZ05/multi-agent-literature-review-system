@@ -310,7 +310,7 @@ Future versions could improve the system in five directions:
 4. Extend the existing workbench with side-by-side PDF evidence and claim-level review tools.
 5. Add richer job recovery and progress telemetry while preserving the CLI, compatibility entrypoint, and current artifact contracts.
 
-A more advanced version could also learn memory write/delete policies, but deterministic verification is safer for this course project. The current seed expansion is documented in `docs/seed_corpus_review.md`.
+A more advanced version could also learn memory write/delete policies, but deterministic verification is safer for this course project. The current seed expansion is documented in `seed_corpus_review.md`.
 
 ## Repository
 
