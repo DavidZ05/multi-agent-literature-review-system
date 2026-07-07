@@ -6,6 +6,11 @@ from src.literature_review.api.prompts import PromptNotFoundError, load_prompt
 from src.literature_review.api import APIResponseError
 from src.literature_review.base import AgentBackendError
 from src.literature_review.config import AgentRuntimeConfig
+from src.literature_review.review import (
+    DomainExpertAgent,
+    ReviewSynthesizerAgent,
+    StructureMentorAgent,
+)
 from src.literature_review.writing import PolishAgent, WriterAgent
 
 
@@ -168,6 +173,93 @@ class APIWritingAgentTests(unittest.TestCase):
             agent.run("# Draft\n\nRaw wording [packer2023memgpt].\n")
 
         self.assertEqual(raised.exception.code, "introduced_citation")
+
+
+class APIExpertAgentTests(unittest.TestCase):
+    def test_domain_expert_api_preserves_report_contract(self) -> None:
+        client = FakeClient(
+            [
+                {
+                    "status": "advisory",
+                    "coverage": {"memory mechanisms": True},
+                    "missing_or_weak_areas": ["evaluation"],
+                    "recommendations": ["Add evaluation benchmarks."],
+                }
+            ]
+        )
+        agent = DomainExpertAgent(api_runtime(), api_client=client)
+
+        report = agent.review("# Draft", [], search_report())
+
+        self.assertEqual(report["agent"], "Domain Expert Agent")
+        self.assertEqual(report["backend"], "api")
+        self.assertEqual(report["status"], "advisory")
+        self.assertEqual(report["paper_count_reviewed"], 0)
+        self.assertEqual(report["categories_reviewed"], ["memory mechanism"])
+        self.assertEqual(report["recommendations"], ["Add evaluation benchmarks."])
+
+    def test_structure_mentor_api_preserves_report_contract(self) -> None:
+        client = FakeClient(
+            [
+                {
+                    "status": "accepted",
+                    "word_count": 1200,
+                    "missing_headings": [],
+                    "recommendations": ["Structure is clear."],
+                }
+            ]
+        )
+        agent = StructureMentorAgent(api_runtime(), api_client=client)
+
+        report = agent.review("# Draft")
+
+        self.assertEqual(report["agent"], "Structure Mentor Agent")
+        self.assertEqual(report["backend"], "api")
+        self.assertEqual(report["status"], "accepted")
+        self.assertEqual(report["word_count"], 1200)
+        self.assertEqual(report["missing_headings"], [])
+
+    def test_expert_api_rejects_invalid_schema(self) -> None:
+        agent = DomainExpertAgent(api_runtime(), api_client=FakeClient([{"status": "ok"}]))
+
+        with self.assertRaises(APIResponseError) as raised:
+            agent.review("# Draft", [], search_report())
+
+        self.assertEqual(raised.exception.code, "invalid_agent_output")
+
+    def test_synthesizer_api_cannot_clear_blocking_citation_findings(self) -> None:
+        client = FakeClient(
+            [
+                {
+                    "status": "accepted",
+                    "blocking_agents": [],
+                    "must_fix": [],
+                    "should_fix": ["Keep the structure."],
+                    "iteration_stop_rule": "model stop rule",
+                }
+            ]
+        )
+        agent = ReviewSynthesizerAgent(api_runtime(), api_client=client)
+        citation_review = {
+            "agent": "Citation Auditor Agent",
+            "status": "revise",
+            "recommendations": ["Remove unknown citations."],
+        }
+        domain_review = {
+            "agent": "Domain Expert Agent",
+            "status": "accepted",
+            "recommendations": ["Coverage is adequate."],
+        }
+
+        report = agent.synthesize([citation_review, domain_review])
+
+        self.assertEqual(report["status"], "revise")
+        self.assertEqual(report["blocking_agents"], ["Citation Auditor Agent"])
+        self.assertIn(
+            "Citation Auditor Agent: Remove unknown citations.",
+            report["must_fix"],
+        )
+        self.assertIn("Keep the structure.", report["should_fix"])
 
 
 if __name__ == "__main__":

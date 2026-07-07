@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from src.literature_review.api import APIResponseError, load_prompt
 from src.literature_review.base import RuntimeAwareAgent
 
 __all__ = [
@@ -189,6 +190,27 @@ class DomainExpertAgent(RuntimeAwareAgent):
         search_report: dict[str, Any],
     ) -> dict[str, Any]:
         categories = sorted(search_report["grouped_papers"].keys())
+        if self.backend_note() == "api":
+            response = self.call_api(
+                load_prompt("domain_expert"),
+                {
+                    "markdown": markdown,
+                    "papers": papers,
+                    "search_report": search_report,
+                    "categories_reviewed": categories,
+                },
+            )
+            return {
+                "agent": "Domain Expert Agent",
+                "backend": self.backend_note(),
+                "status": _status(response),
+                "review_focus": "memory-agent literature coverage and academic framing",
+                "paper_count_reviewed": len(papers),
+                "categories_reviewed": categories,
+                "coverage": _dict_field(response, "coverage"),
+                "missing_or_weak_areas": _string_list(response, "missing_or_weak_areas"),
+                "recommendations": _string_list(response, "recommendations"),
+            }
         expected_terms = {
             "memory mechanisms": ["retrieval", "reflection", "hierarchical", "forgetting"],
             "evaluation": ["evaluation", "benchmark", "longmemeval", "memoryagentbench"],
@@ -238,6 +260,22 @@ class StructureMentorAgent(RuntimeAwareAgent):
     ]
 
     def review(self, markdown: str) -> dict[str, Any]:
+        if self.backend_note() == "api":
+            response = self.call_api(
+                load_prompt("structure_mentor"),
+                {
+                    "markdown": markdown,
+                    "expected_headings": self.expected_headings,
+                },
+            )
+            return {
+                "agent": "Structure Mentor Agent",
+                "backend": self.backend_note(),
+                "status": _status(response),
+                "word_count": _int_field(response, "word_count"),
+                "missing_headings": _string_list(response, "missing_headings"),
+                "recommendations": _string_list(response, "recommendations"),
+            }
         missing = [heading for heading in self.expected_headings if heading not in markdown]
         word_count = len(re.findall(r"\b\w+\b", markdown))
         status = "accepted" if not missing else "advisory"
@@ -267,6 +305,37 @@ class ReviewSynthesizerAgent(RuntimeAwareAgent):
     blocking_statuses = {"revise"}
 
     def synthesize(self, reviews: list[dict[str, Any]]) -> dict[str, Any]:
+        blocking_reviews, must_fix, should_fix = self._deterministic_findings(reviews)
+        if self.backend_note() == "api":
+            response = self.call_api(
+                load_prompt("review_synthesizer"),
+                {"reviews": reviews},
+            )
+            model_must_fix = _string_list(response, "must_fix")
+            model_should_fix = _string_list(response, "should_fix")
+            model_blocking_agents = _string_list(response, "blocking_agents")
+            blocking_agents = _dedupe(
+                [review["agent"] for review in blocking_reviews]
+                + model_blocking_agents
+            )
+            return {
+                "agent": "Review Synthesizer Agent",
+                "backend": self.backend_note(),
+                "status": "revise" if blocking_reviews else _status(response),
+                "blocking_agents": blocking_agents,
+                "must_fix": _dedupe(must_fix + model_must_fix),
+                "should_fix": _dedupe(should_fix + model_should_fix),
+                "iteration_stop_rule": _string_field(
+                    response,
+                    "iteration_stop_rule",
+                ),
+            }
+        return self._deterministic_report(reviews)
+
+    def _deterministic_findings(
+        self,
+        reviews: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
         blocking_reviews = [
             review
             for review in reviews
@@ -278,6 +347,10 @@ class ReviewSynthesizerAgent(RuntimeAwareAgent):
             target = must_fix if review.get("status") in self.blocking_statuses else should_fix
             for recommendation in review.get("recommendations", []):
                 target.append(f"{review['agent']}: {recommendation}")
+        return blocking_reviews, must_fix, should_fix
+
+    def _deterministic_report(self, reviews: list[dict[str, Any]]) -> dict[str, Any]:
+        blocking_reviews, must_fix, should_fix = self._deterministic_findings(reviews)
         return {
             "agent": "Review Synthesizer Agent",
             "backend": self.backend_note(),
@@ -336,3 +409,72 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
         if not recommendations:
             recommendations.append("Final polish preserved the accepted citation set.")
         return recommendations
+
+
+def _status(response: dict[str, Any]) -> str:
+    status = response.get("status")
+    if status not in {"accepted", "advisory", "revise"}:
+        raise APIResponseError(
+            "Model-backed review agent returned an invalid status.",
+            code="invalid_agent_output",
+            retryable=False,
+        )
+    return status
+
+
+def _string_field(response: dict[str, Any], field: str) -> str:
+    value = response.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise APIResponseError(
+            f"Model-backed review agent returned an invalid {field} field.",
+            code="invalid_agent_output",
+            retryable=False,
+        )
+    return value
+
+
+def _int_field(response: dict[str, Any], field: str) -> int:
+    value = response.get(field)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise APIResponseError(
+            f"Model-backed review agent returned an invalid {field} field.",
+            code="invalid_agent_output",
+            retryable=False,
+        )
+    return value
+
+
+def _dict_field(response: dict[str, Any], field: str) -> dict[str, Any]:
+    value = response.get(field)
+    if not isinstance(value, dict):
+        raise APIResponseError(
+            f"Model-backed review agent returned an invalid {field} field.",
+            code="invalid_agent_output",
+            retryable=False,
+        )
+    return value
+
+
+def _string_list(response: dict[str, Any], field: str) -> list[str]:
+    value = response.get(field)
+    if (
+        not isinstance(value, list)
+        or any(not isinstance(item, str) or not item.strip() for item in value)
+    ):
+        raise APIResponseError(
+            f"Model-backed review agent returned an invalid {field} field.",
+            code="invalid_agent_output",
+            retryable=False,
+        )
+    return list(value)
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    output = []
+    seen = set()
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        output.append(item)
+    return output
