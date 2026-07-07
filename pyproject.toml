@@ -21,9 +21,9 @@ include = ["src", "src.*"]
 
 [tool.setuptools.package-data]
 "src.literature_review" = [
-    "resources/*.json",
-    "prompts/*.txt",
-    "workbench/static/*.html",
+  "resources/*.json",
+  "prompts/*.txt",
+  "workbench/static/*.html",
   "workbench/static/*.css",
   "workbench/static/*.js",
 ]
