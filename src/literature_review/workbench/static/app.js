@@ -29,6 +29,8 @@
       retry: "Retry", candidates: "Candidates", candidateFilters: "Candidate filters",
       candidateTable: "Discovered literature candidates", paper: "Paper", year: "Year",
       source: "Source", score: "Score", status: "Status", noCandidates: "No candidates match this filter.",
+      discoveryEmptyTitle: "Discovery completed with no approval candidates.",
+      discoveryEmptyHint: "The providers returned no new papers after deduplication and screening. Try a broader topic, a higher maximum result count, or another provider.",
       selectCandidate: "Select a candidate", selectCandidateHint: "Candidate metadata and decisions appear here.",
       detailLoadFailed: "Run details unavailable",
       abstractEvidence: "Abstract evidence", screeningRecommendation: "Screening recommendation",
@@ -97,6 +99,8 @@
       retry: "重试", candidates: "候选论文", candidateFilters: "候选论文筛选",
       candidateTable: "检索到的候选文献", paper: "论文", year: "年份",
       source: "来源", score: "评分", status: "状态", noCandidates: "当前筛选条件下没有候选论文。",
+      discoveryEmptyTitle: "检索已完成，但没有需要审批的候选论文。",
+      discoveryEmptyHint: "检索结果在去重和筛选后没有留下新论文。可以尝试放宽主题、调高最大结果数，或启用其他检索平台。",
       selectCandidate: "请选择候选论文", selectCandidateHint: "此处显示论文元数据与审批操作。",
       detailLoadFailed: "无法加载运行详情",
       abstractEvidence: "摘要证据", screeningRecommendation: "筛选建议",
@@ -613,6 +617,16 @@
     };
   }
 
+  function hasDiscoveryActivity() {
+    const events = state.detail ? state.detail.events || [] : [];
+    return events.some((event) => (
+      event.stage === "discovering"
+      || event.event_type === "query_started"
+      || event.event_type === "query_completed"
+      || event.event_type === "provider_failed"
+    ));
+  }
+
   function renderCandidates() {
     const body = byId("candidates-body");
     body.replaceChildren();
@@ -626,7 +640,9 @@
       button.setAttribute("aria-pressed", String(active));
     });
     byId("candidate-count").textContent = t("deduplicatedCount", { count: counts.all });
-    byId("candidates-empty").hidden = candidates.length !== 0;
+    const showDiscoveryEmpty = candidates.length === 0 && counts.all === 0 && hasDiscoveryActivity();
+    byId("candidates-empty").hidden = candidates.length !== 0 || showDiscoveryEmpty;
+    byId("discovery-empty").hidden = !showDiscoveryEmpty;
     candidates.forEach((candidate) => body.append(candidateRow(candidate)));
   }
 
