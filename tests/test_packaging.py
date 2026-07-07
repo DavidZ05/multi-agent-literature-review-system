@@ -14,9 +14,11 @@ class PackagingTests(unittest.TestCase):
 
         text = workflow.read_text(encoding="utf-8")
 
-        self.assertIn("python-version: '3.11'", text)
+        self.assertIn("os: [ubuntu-latest, macos-latest]", text)
+        self.assertIn("python-version: ['3.11', '3.12']", text)
         self.assertIn("python -m pip install -e .", text)
         self.assertIn("python -m unittest discover -s tests -v", text)
+        self.assertIn("literature-review --help", text)
 
     def test_public_project_files_are_ready_for_distribution(self) -> None:
         required_files = {
