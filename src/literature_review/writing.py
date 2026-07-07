@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from src.literature_review.api import APIResponseError, load_prompt
 from src.literature_review.base import RuntimeAwareAgent
 from src.literature_review.corpus import (
     PROJECT_TITLE,
@@ -11,6 +12,8 @@ from src.literature_review.corpus import (
 )
 
 __all__ = ["PolishAgent", "WriterAgent"]
+
+_CITATION_PATTERN = re.compile(r"\[([a-z][a-z0-9]+(?:[a-z0-9])?)\]")
 
 
 class WriterAgent(RuntimeAwareAgent):
@@ -24,6 +27,8 @@ class WriterAgent(RuntimeAwareAgent):
         grouped = search_report["grouped_papers"]
         all_papers = [paper for papers in grouped.values() for paper in papers]
         self._fallback_papers = all_papers
+        if self.backend_note() == "api":
+            return self._run_api(search_report, all_papers, review_feedback)
 
         mechanism_papers = grouped.get("memory mechanism", [])
         evaluation_papers = grouped.get("memory evaluation", [])
@@ -395,6 +400,29 @@ class WriterAgent(RuntimeAwareAgent):
         ]
         return "\n".join(sections) + "\n"
 
+    def _run_api(
+        self,
+        search_report: dict[str, Any],
+        all_papers: list[dict[str, Any]],
+        review_feedback: dict[str, Any] | None,
+    ) -> str:
+        citation_allowlist = [paper["citation_key"] for paper in all_papers]
+        response = self.call_api(
+            load_prompt("writer"),
+            {
+                "search_report": search_report,
+                "review_feedback": review_feedback,
+                "citation_allowlist": citation_allowlist,
+            },
+        )
+        markdown = _markdown_from_response(response)
+        _reject_unknown_citations(
+            markdown,
+            citation_allowlist,
+            code="unknown_citation",
+        )
+        return markdown
+
     def _cite_any(self, papers: list[dict[str, Any]], key: str) -> str:
         for paper in papers:
             if paper["citation_key"] == key:
@@ -463,6 +491,69 @@ class PolishAgent(RuntimeAwareAgent):
     """Applies final mechanical cleanup without adding new claims."""
 
     def run(self, markdown: str) -> str:
+        if self.backend_note() == "api":
+            return self._run_api(markdown)
         markdown = re.sub(r"\n{3,}", "\n\n", markdown)
         markdown = markdown.replace("  ", " ")
         return markdown.strip() + "\n"
+
+    def _run_api(self, markdown: str) -> str:
+        citation_allowlist = _citation_keys(markdown)
+        response = self.call_api(
+            load_prompt("polish"),
+            {
+                "markdown": markdown,
+                "citation_allowlist": citation_allowlist,
+            },
+        )
+        polished = _markdown_from_response(response)
+        _reject_unknown_citations(
+            polished,
+            citation_allowlist,
+            code="introduced_citation",
+        )
+        return polished
+
+
+def _markdown_from_response(response: dict[str, Any]) -> str:
+    markdown = response.get("markdown")
+    change_summary = response.get("change_summary")
+    if not isinstance(markdown, str) or not markdown.strip():
+        raise APIResponseError(
+            "Model-backed writing agent returned an invalid markdown field.",
+            code="invalid_agent_output",
+            retryable=False,
+        )
+    if not isinstance(change_summary, str) or not change_summary.strip():
+        raise APIResponseError(
+            "Model-backed writing agent returned an invalid change_summary field.",
+            code="invalid_agent_output",
+            retryable=False,
+        )
+    return markdown
+
+
+def _citation_keys(markdown: str) -> list[str]:
+    keys = []
+    seen = set()
+    for key in _CITATION_PATTERN.findall(markdown):
+        if key not in seen:
+            seen.add(key)
+            keys.append(key)
+    return keys
+
+
+def _reject_unknown_citations(
+    markdown: str,
+    citation_allowlist: list[str],
+    *,
+    code: str,
+) -> None:
+    allowed = set(citation_allowlist)
+    unknown = [key for key in _citation_keys(markdown) if key not in allowed]
+    if unknown:
+        raise APIResponseError(
+            "Model-backed writing agent returned citations outside the allowlist.",
+            code=code,
+            retryable=False,
+        )
