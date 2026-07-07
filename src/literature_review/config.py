@@ -4,7 +4,11 @@ import os
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
-__all__ = ["AgentAPISettings", "AgentRuntimeConfig"]
+__all__ = ["AgentConfigurationError", "AgentAPISettings", "AgentRuntimeConfig"]
+
+
+class AgentConfigurationError(ValueError):
+    """Raised when runtime environment settings are inconsistent."""
 
 
 @dataclass(frozen=True)
@@ -60,24 +64,32 @@ class AgentRuntimeConfig:
         values = os.environ if env is None else env
 
         def float_value(name: str, default: float) -> float:
-            try:
-                return float(values.get(name, default))
-            except (TypeError, ValueError):
+            if name not in values:
                 return default
+            try:
+                return float(values[name])
+            except (TypeError, ValueError):
+                raise AgentConfigurationError(f"{name} must be a number")
 
         def int_value(name: str, default: int) -> int:
-            try:
-                return int(values.get(name, default))
-            except (TypeError, ValueError):
+            if name not in values:
                 return default
+            try:
+                return int(values[name])
+            except (TypeError, ValueError):
+                raise AgentConfigurationError(f"{name} must be an integer")
 
         backend = values.get("AGENT_BACKEND", "deterministic").strip().lower()
         if backend not in {"deterministic", "api"}:
-            backend = "deterministic"
+            raise AgentConfigurationError(
+                "AGENT_BACKEND must be either 'deterministic' or 'api'"
+            )
         api_mode = values.get("AGENT_API_MODE", "single").strip().lower()
         if api_mode not in {"single", "multi"}:
-            api_mode = "single"
-        return cls(
+            raise AgentConfigurationError(
+                "AGENT_API_MODE must be either 'single' or 'multi'"
+            )
+        config = cls(
             backend=backend,
             api_mode=api_mode,
             api_base_url=values.get("AGENT_API_BASE_URL", "").strip(),
@@ -87,22 +99,13 @@ class AgentRuntimeConfig:
             timeout_seconds=int_value("AGENT_TIMEOUT_SECONDS", 60),
             agent_overrides=cls._agent_overrides(values),
         )
+        config.validate()
+        return config
 
     @classmethod
     def _agent_overrides(cls, values: Mapping[str, str]) -> dict[str, dict[str, Any]]:
-        agent_ids = [
-            "search",
-            "writer",
-            "reviewer",
-            "domain_expert",
-            "structure_mentor",
-            "review_synthesizer",
-            "polish",
-            "final_verification",
-            "evaluation_reflection",
-        ]
         overrides: dict[str, dict[str, Any]] = {}
-        for agent_id in agent_ids:
+        for agent_id in cls._agent_ids():
             prefix = f"{agent_id.upper()}_AGENT_"
             raw_values = {
                 "api_base_url": values.get(f"{prefix}API_BASE_URL", "").strip(),
@@ -168,6 +171,32 @@ class AgentRuntimeConfig:
             ),
         )
 
+    def validate(self) -> None:
+        api_field_names = self._configured_api_field_names()
+        if self.backend != "api":
+            if api_field_names:
+                configured = ", ".join(sorted(api_field_names))
+                raise AgentConfigurationError(
+                    "API settings were provided without AGENT_BACKEND=api: "
+                    f"{configured}"
+                )
+            return
+
+        for agent_id in self._agent_ids():
+            settings = self.for_agent(agent_id)
+            missing = []
+            if not settings.api_base_url:
+                missing.append("AGENT_API_BASE_URL")
+            if not settings.api_key:
+                missing.append("AGENT_API_KEY")
+            if not settings.model:
+                missing.append("AGENT_MODEL")
+            if missing:
+                raise AgentConfigurationError(
+                    f"API backend for {agent_id} is missing "
+                    + ", ".join(missing)
+                )
+
     def public_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["api_key"] = "<configured>" if self.api_key else ""
@@ -179,17 +208,7 @@ class AgentRuntimeConfig:
         }
         data["agent_settings"] = {
             agent_id: self.for_agent(agent_id).public_dict()
-            for agent_id in [
-                "search",
-                "writer",
-                "reviewer",
-                "domain_expert",
-                "structure_mentor",
-                "review_synthesizer",
-                "polish",
-                "final_verification",
-                "evaluation_reflection",
-            ]
+            for agent_id in self._agent_ids()
         }
         return data
 
@@ -212,3 +231,33 @@ class AgentRuntimeConfig:
             return int(value)
         except (TypeError, ValueError):
             return default
+
+    def _configured_api_field_names(self) -> set[str]:
+        names = set()
+        if self.api_base_url:
+            names.add("AGENT_API_BASE_URL")
+        if self.api_key:
+            names.add("AGENT_API_KEY")
+        if self.model:
+            names.add("AGENT_MODEL")
+        for agent_id, override in (self.agent_overrides or {}).items():
+            prefix = f"{agent_id.upper()}_AGENT_"
+            for key, value in override.items():
+                if value == "":
+                    continue
+                names.add(f"{prefix}{key.upper()}")
+        return names
+
+    @staticmethod
+    def _agent_ids() -> tuple[str, ...]:
+        return (
+            "search",
+            "writer",
+            "reviewer",
+            "domain_expert",
+            "structure_mentor",
+            "review_synthesizer",
+            "polish",
+            "final_verification",
+            "evaluation_reflection",
+        )

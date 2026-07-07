@@ -14,6 +14,7 @@ class ModuleBoundaryTests(unittest.TestCase):
             [
                 "main",
                 "AgentAPISettings",
+                "AgentConfigurationError",
                 "AgentRuntimeConfig",
                 "PROJECT_TITLE",
                 "citation_label",
@@ -49,15 +50,18 @@ class ModuleBoundaryTests(unittest.TestCase):
         from src.literature_review.base import RuntimeAwareAgent
         from src.literature_review.config import (
             AgentAPISettings,
+            AgentConfigurationError,
             AgentRuntimeConfig,
         )
         from src.memory_review_pipeline import (
             AgentAPISettings as LegacyAgentAPISettings,
+            AgentConfigurationError as LegacyAgentConfigurationError,
             AgentRuntimeConfig as LegacyAgentRuntimeConfig,
             RuntimeAwareAgent as LegacyRuntimeAwareAgent,
         )
 
         self.assertIs(LegacyAgentAPISettings, AgentAPISettings)
+        self.assertIs(LegacyAgentConfigurationError, AgentConfigurationError)
         self.assertIs(LegacyAgentRuntimeConfig, AgentRuntimeConfig)
         self.assertIs(LegacyRuntimeAwareAgent, RuntimeAwareAgent)
 
@@ -69,6 +73,7 @@ class CompatibilityTests(unittest.TestCase):
 
         cases = [
             ("AgentAPISettings", literature_review.AgentAPISettings),
+            ("AgentConfigurationError", literature_review.AgentConfigurationError),
             ("AgentRuntimeConfig", literature_review.AgentRuntimeConfig),
             (
                 "EvaluationReflectionAgent",
@@ -107,6 +112,7 @@ class OrchestratorModuleTests(unittest.TestCase):
             [
                 "RuntimeAwareAgent",
                 "AgentAPISettings",
+                "AgentConfigurationError",
                 "AgentRuntimeConfig",
                 "main",
                 "PROJECT_TITLE",

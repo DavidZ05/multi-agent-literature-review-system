@@ -1,7 +1,11 @@
 """Canonical package API for the literature review workflow."""
 
 from src.literature_review.cli import main
-from src.literature_review.config import AgentAPISettings, AgentRuntimeConfig
+from src.literature_review.config import (
+    AgentAPISettings,
+    AgentConfigurationError,
+    AgentRuntimeConfig,
+)
 from src.literature_review.corpus import (
     PROJECT_TITLE,
     citation_label,
@@ -40,6 +44,7 @@ __version__ = "0.3.0"
 __all__ = [
     "main",
     "AgentAPISettings",
+    "AgentConfigurationError",
     "AgentRuntimeConfig",
     "PROJECT_TITLE",
     "citation_label",

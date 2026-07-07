@@ -13,6 +13,7 @@ from src.memory_review_pipeline import (
     WriterAgent,
     load_papers,
 )
+from src.literature_review.config import AgentConfigurationError
 
 
 def write_sample_corpus(path: Path) -> None:
@@ -283,6 +284,30 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(config.backend, "deterministic")
         self.assertFalse(config.api_enabled)
         self.assertEqual(config.api_mode, "single")
+
+    def test_runtime_config_rejects_unknown_backend(self) -> None:
+        with self.assertRaisesRegex(AgentConfigurationError, "AGENT_BACKEND"):
+            AgentRuntimeConfig.from_env({"AGENT_BACKEND": "apis"})
+
+    def test_runtime_config_rejects_incomplete_api_backend(self) -> None:
+        with self.assertRaisesRegex(AgentConfigurationError, "AGENT_MODEL"):
+            AgentRuntimeConfig.from_env(
+                {
+                    "AGENT_BACKEND": "api",
+                    "AGENT_API_BASE_URL": "https://api.example.com/v1",
+                    "AGENT_API_KEY": "shared-key",
+                }
+            )
+
+    def test_runtime_config_rejects_api_fields_without_api_backend(self) -> None:
+        with self.assertRaisesRegex(AgentConfigurationError, "AGENT_BACKEND=api"):
+            AgentRuntimeConfig.from_env(
+                {
+                    "AGENT_API_BASE_URL": "https://api.example.com/v1",
+                    "AGENT_API_KEY": "shared-key",
+                    "AGENT_MODEL": "shared-model",
+                }
+            )
 
     def test_runtime_config_single_api_applies_defaults_to_all_agents(self) -> None:
         config = AgentRuntimeConfig.from_env(

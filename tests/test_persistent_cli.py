@@ -1,5 +1,6 @@
 import io
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -135,6 +136,31 @@ class PersistentCLITests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIsNone(output)
         self.assertIn("run_not_found", stderr)
+
+    def test_runtime_configuration_errors_are_stable_json_errors(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "AGENT_BACKEND": "api",
+                "AGENT_API_BASE_URL": "https://api.example.com/v1",
+                "AGENT_API_KEY": "secret-key",
+            },
+            clear=True,
+        ):
+            code, output, stderr = self._run(
+                "start",
+                "--topic",
+                "Memory agents",
+                "--corpus",
+                str(self.corpus_path),
+            )
+
+        self.assertEqual(code, 2)
+        self.assertIsNone(output)
+        payload = json.loads(stderr)
+        self.assertEqual(payload["error"], "configuration_error")
+        self.assertIn("AGENT_MODEL", payload["message"])
+        self.assertNotIn("secret-key", stderr)
 
     def test_delete_uses_custom_storage_and_prints_success_json(self) -> None:
         store = SQLiteWorkflowStore(self.db_path)

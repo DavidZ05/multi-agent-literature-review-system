@@ -13,6 +13,7 @@ from src.literature_review.activity import (
     RunDeletionBusy,
     require_supported_platform,
 )
+from src.literature_review.config import AgentConfigurationError
 from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import CandidateStatus, WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
@@ -150,16 +151,27 @@ def _print_json(value: Any, *, stream: Any | None = None) -> None:
 
 
 def _legacy_main() -> int:
-    result = Orchestrator(
-        corpus_path=_default_corpus_path(),
-        output_dir=Path.cwd() / "outputs",
-    ).run()
+    try:
+        result = Orchestrator(
+            corpus_path=_default_corpus_path(),
+            output_dir=Path.cwd() / "outputs",
+        ).run()
+    except AgentConfigurationError as exc:
+        _print_configuration_error(exc)
+        return 2
     _print_json(result)
     return 0
 
 
 def _default_corpus_path() -> Path:
     return Path(__file__).with_name("resources") / "papers.json"
+
+
+def _print_configuration_error(exc: AgentConfigurationError) -> None:
+    _print_json(
+        {"error": "configuration_error", "message": str(exc)},
+        stream=sys.stderr,
+    )
 
 
 def run_workbench(
@@ -413,6 +425,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             stream=sys.stderr,
         )
         return 1
+    except AgentConfigurationError as exc:
+        _print_configuration_error(exc)
+        return 2
     except KeyboardInterrupt:
         interrupted_run_id = getattr(args, "run_id", None)
         if interrupted_run_id is None:
