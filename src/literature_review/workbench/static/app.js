@@ -8,6 +8,22 @@
       cancelRun: "Cancel run", deleteRun: "Delete run", newRun: "New discovery run",
       researchRuns: "Research runs",
       localStorage: "Local storage", database: "Database", artifacts: "Artifacts",
+      runtimeBackend: "Backend", runtimeModel: "Model",
+      runtimeExecutor: "Current executor", runtimeError: "Last safe error",
+      backend_deterministic: "Deterministic", backend_api: "API",
+      model_deterministic: "Local rules", model_multiple_models: "Multiple models",
+      model_api_configured: "API configured", error_none: "None",
+      executor_workflow_planner: "Workflow planner",
+      executor_literature_discovery: "Literature discovery",
+      executor_screening_agent: "Screening agent",
+      executor_human_approval: "Human approval",
+      executor_model_agent_loop: "Model-backed agent loop",
+      executor_deterministic_agent_loop: "Deterministic agent loop",
+      executor_workflow_engine: "Workflow engine", executor_completed: "Completed",
+      retryable_api_failure: "Retryable API failure",
+      permanent_api_failure: "Permanent API failure",
+      retryable_workflow_failure: "Retryable workflow failure",
+      workflow_failure: "Workflow failure",
       loadingRuns: "Loading research runs...", loadingDetail: "Loading run details...",
       noRuns: "No research runs yet.", createFirstRun: "Create the first run",
       retry: "Retry", candidates: "Candidates", candidateFilters: "Candidate filters",
@@ -60,6 +76,22 @@
       cancelRun: "取消运行", deleteRun: "删除运行", newRun: "新建文献检索",
       researchRuns: "研究任务",
       localStorage: "本地存储", database: "数据库", artifacts: "产物目录",
+      runtimeBackend: "后端", runtimeModel: "模型",
+      runtimeExecutor: "当前执行者", runtimeError: "最近安全错误",
+      backend_deterministic: "确定性", backend_api: "API",
+      model_deterministic: "本地规则", model_multiple_models: "多个模型",
+      model_api_configured: "已配置 API", error_none: "无",
+      executor_workflow_planner: "工作流规划",
+      executor_literature_discovery: "文献检索",
+      executor_screening_agent: "筛选 Agent",
+      executor_human_approval: "人工审批",
+      executor_model_agent_loop: "模型 Agent 回环",
+      executor_deterministic_agent_loop: "确定性 Agent 回环",
+      executor_workflow_engine: "工作流引擎", executor_completed: "已完成",
+      retryable_api_failure: "可重试 API 失败",
+      permanent_api_failure: "永久 API 失败",
+      retryable_workflow_failure: "可重试工作流失败",
+      workflow_failure: "工作流失败",
       loadingRuns: "正在加载研究任务...", loadingDetail: "正在加载运行详情...",
       noRuns: "暂无研究任务。", createFirstRun: "创建首个任务",
       retry: "重试", candidates: "候选论文", candidateFilters: "候选论文筛选",
@@ -513,6 +545,25 @@
     return t(run.status || "unknown");
   }
 
+  function renderRuntime(runtime) {
+    runtime = runtime || {};
+    const backend = runtime.backend || "deterministic";
+    byId("runtime-backend").textContent = t(`backend_${backend}`);
+    byId("runtime-model").textContent = runtimeModelLabel(runtime);
+    byId("runtime-executor").textContent = t(`executor_${runtime.current_executor || "workflow_engine"}`);
+    byId("runtime-error").textContent = runtime.safe_error_category
+      ? t(runtime.safe_error_category)
+      : t("error_none");
+  }
+
+  function runtimeModelLabel(runtime) {
+    const names = Array.isArray(runtime.model_names) ? runtime.model_names : [];
+    if (runtime.model_summary === "single_model" && names.length) return names[0];
+    if (runtime.model_summary === "multiple_models") return t("model_multiple_models");
+    if (runtime.model_summary === "api_configured") return t("model_api_configured");
+    return t("model_deterministic");
+  }
+
   function renderRunDetail() {
     const run = state.detail && state.detail.run;
     if (!run) {
@@ -524,6 +575,7 @@
       byId("run-progress").querySelectorAll(".progress-step").forEach((step) => {
         step.classList.remove("done", "current");
       });
+      renderRuntime(null);
       return;
     }
     byId("run-topic").textContent = run.topic;
@@ -543,6 +595,7 @@
       step.classList.toggle("done", index < current - 1 || run.status === "completed");
       step.classList.toggle("current", index === current - 1 && run.status !== "completed");
     });
+    renderRuntime(state.detail.runtime);
   }
 
   function candidateCounts() {

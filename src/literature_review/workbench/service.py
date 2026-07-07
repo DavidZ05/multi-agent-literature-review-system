@@ -14,6 +14,7 @@ from src.literature_review.models import (
     RunStatus,
 )
 from src.literature_review.storage import (
+    LocalArtifactStore,
     RunNotFoundError,
     RunStatusMismatchError,
     SQLiteWorkflowStore,
@@ -77,6 +78,14 @@ class WorkbenchService:
             RunStatus.FAILED,
         }
     )
+    _MODEL_BACKED_AGENT_IDS = (
+        "writer",
+        "domain_expert",
+        "structure_mentor",
+        "review_synthesizer",
+        "polish",
+        "evaluation_reflection",
+    )
 
     def __init__(
         self,
@@ -124,11 +133,13 @@ class WorkbenchService:
     def get_run_detail(self, run_id: str) -> dict[str, object]:
         run = self.store.get_run(run_id)
         candidates = self.store.list_candidates(run_id)
+        events = self.store.list_events(run_id)
         return {
             "run": run.to_dict(),
             "candidate_counts": self._candidate_counts(candidates),
-            "events": [event.to_dict() for event in self.store.list_events(run_id)],
+            "events": [event.to_dict() for event in events],
             "candidates": [candidate.to_dict() for candidate in candidates],
+            "runtime": self._runtime_state(run, events),
         }
 
     def list_candidates(
@@ -323,6 +334,114 @@ class WorkbenchService:
             "delete",
             run_id,
         )
+
+    def _runtime_state(
+        self,
+        run: ResearchRun,
+        events: Iterable[object],
+    ) -> dict[str, object]:
+        config = self._stored_runtime_config(run.run_id)
+        agent_settings = config.get("agent_settings", {})
+        if not isinstance(agent_settings, dict):
+            agent_settings = {}
+        backend = str(
+            config.get("active_backend")
+            or config.get("backend")
+            or "deterministic"
+        )
+        if backend not in {"deterministic", "api"}:
+            backend = "deterministic"
+        api_mode = str(config.get("api_mode") or "single")
+        if api_mode not in {"single", "multi"}:
+            api_mode = "single"
+
+        api_enabled_agents = []
+        model_names = []
+        for agent_id in self._MODEL_BACKED_AGENT_IDS:
+            settings = agent_settings.get(agent_id, {})
+            if not isinstance(settings, dict):
+                continue
+            if settings.get("active_backend") == "api":
+                api_enabled_agents.append(agent_id)
+                model = settings.get("model")
+                if isinstance(model, str) and model and model not in model_names:
+                    model_names.append(model)
+        if backend != "api":
+            model_summary = "deterministic"
+            model_names = []
+            api_enabled_agents = []
+        elif len(model_names) == 1:
+            model_summary = "single_model"
+        elif len(model_names) > 1:
+            model_summary = "multiple_models"
+        else:
+            model_summary = "api_configured"
+
+        return {
+            "backend": backend,
+            "api_mode": api_mode,
+            "model_summary": model_summary,
+            "model_names": model_names,
+            "api_enabled_agents": api_enabled_agents,
+            "current_executor": self._current_executor(run, backend),
+            "safe_error_category": self._safe_error_category(events),
+        }
+
+    def _stored_runtime_config(self, run_id: str) -> dict[str, object]:
+        artifact_store = LocalArtifactStore(self.artifact_root)
+        try:
+            request = artifact_store.read_json(
+                run_id,
+                "inputs/research_request.json",
+            )
+        except Exception:
+            return {}
+        if not isinstance(request, dict):
+            return {}
+        config = request.get("runtime_config", {})
+        return config if isinstance(config, dict) else {}
+
+    @staticmethod
+    def _current_executor(run: ResearchRun, backend: str) -> str:
+        stage = run.current_stage.value
+        mapping = {
+            "created": "workflow_planner",
+            "planning": "workflow_planner",
+            "discovering": "literature_discovery",
+            "screening": "screening_agent",
+            "awaiting_corpus_approval": "human_approval",
+            "completed": "completed",
+        }
+        agent_loop_stages = {
+            "drafting",
+            "reviewing",
+            "revising",
+            "polishing",
+            "final_verification",
+        }
+        if stage in agent_loop_stages:
+            if backend == "api":
+                return "model_agent_loop"
+            return "deterministic_agent_loop"
+        return mapping.get(stage, "workflow_engine")
+
+    @staticmethod
+    def _safe_error_category(events: Iterable[object]) -> str | None:
+        for event in reversed(list(events)):
+            event_type = getattr(event, "event_type", "")
+            payload = getattr(event, "payload", {})
+            message = ""
+            if isinstance(payload, Mapping):
+                message = str(payload.get("message", ""))
+            if event_type == "stage_retry_wait":
+                if message.startswith("API provider retryable failure"):
+                    return "retryable_api_failure"
+                return "retryable_workflow_failure"
+            if event_type == "stage_failed":
+                if message.startswith("API provider permanent failure"):
+                    return "permanent_api_failure"
+                return "workflow_failure"
+        return None
 
     @staticmethod
     def _candidate_counts(

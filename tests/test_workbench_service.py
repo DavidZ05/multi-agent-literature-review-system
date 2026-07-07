@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from src.literature_review import cli
+from src.literature_review.config import AgentRuntimeConfig
 from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import (
     CandidatePaper,
@@ -143,9 +144,76 @@ class WorkbenchServiceTests(unittest.TestCase):
                     self.approved.to_dict(),
                     self.pending.to_dict(),
                 ],
+                "runtime": {
+                    "backend": "deterministic",
+                    "api_mode": "single",
+                    "model_summary": "deterministic",
+                    "model_names": [],
+                    "api_enabled_agents": [],
+                    "current_executor": "workflow_planner",
+                    "safe_error_category": None,
+                },
             },
         )
         json.dumps(detail)
+
+    def test_get_run_detail_adds_sanitized_api_runtime_state(self) -> None:
+        api_run = replace(
+            self.older_run,
+            status=RunStatus.RETRY_WAIT,
+            current_stage=WorkflowStage.DRAFTING,
+        )
+        self.store.update_run(api_run)
+        artifact_root = Path(self.tmp.name) / "artifacts"
+        runtime_config = AgentRuntimeConfig.from_env(
+            {
+                "AGENT_BACKEND": "api",
+                "AGENT_API_MODE": "single",
+                "AGENT_API_BASE_URL": "https://api.example.com/v1",
+                "AGENT_API_KEY": "secret-key",
+                "AGENT_MODEL": "shared-model",
+            }
+        ).public_dict()
+        LocalArtifactStore(artifact_root).write_json(
+            api_run.run_id,
+            "inputs/research_request.json",
+            {"runtime_config": runtime_config},
+        )
+        self.store.append_event(
+            api_run.run_id,
+            "stage_retry_wait",
+            {
+                "error_type": "RetryableStageError",
+                "message": "API provider retryable failure (timeout)",
+            },
+            WorkflowStage.DRAFTING,
+        )
+
+        detail = WorkbenchService(
+            self.store,
+            artifact_root=artifact_root,
+        ).get_run_detail(api_run.run_id)
+
+        self.assertEqual(
+            detail["runtime"],
+            {
+                "backend": "api",
+                "api_mode": "single",
+                "model_summary": "single_model",
+                "model_names": ["shared-model"],
+                "api_enabled_agents": [
+                    "writer",
+                    "domain_expert",
+                    "structure_mentor",
+                    "review_synthesizer",
+                    "polish",
+                    "evaluation_reflection",
+                ],
+                "current_executor": "model_agent_loop",
+                "safe_error_category": "retryable_api_failure",
+            },
+        )
+        self.assertNotIn("secret-key", json.dumps(detail))
 
     def test_list_candidates_preserves_store_order_and_filters_by_status(self) -> None:
         self.assertEqual(

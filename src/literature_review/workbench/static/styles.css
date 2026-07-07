@@ -134,6 +134,35 @@ html[lang="zh-CN"] .lang-zh, html[lang="en"] .lang-en { color: var(--accent); fo
 .progress-step { height: 4px; flex: 1; border-radius: 3px; background: #e3e7ed; }
 .progress-step.done { background: var(--accent); }
 .progress-step.current { background: #d4962f; }
+.runtime-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 0;
+}
+.runtime-strip div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #e1e6ed;
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+.runtime-strip dt {
+  margin: 0 0 4px;
+  color: #6b7485;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 13px;
+  text-transform: uppercase;
+}
+.runtime-strip dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 16px;
+}
 
 .candidate-toolbar {
   min-height: 54px;
@@ -307,6 +336,7 @@ dialog::backdrop { background: rgba(23, 32, 51, .42); }
   .run-button { min-height: 96px; }
   .run-title { display: grid; grid-template-columns: 1fr; }
   .status-badge { justify-self: start; margin-top: 8px; }
+  .runtime-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .candidate-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .table-wrap { overflow: visible; background: var(--surface-soft); }
   .candidate-table { min-width: 0; border-collapse: separate; border-spacing: 0; padding: 12px; }
