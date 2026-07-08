@@ -35,10 +35,12 @@
       continueSeedCorpus: "Continue with seed corpus",
       discoveryIssue_ok: "Discovery ready",
       discoveryIssue_not_run: "Discovery not run",
+      discoveryIssue_running: "Discovery running",
       discoveryIssue_zero_candidates: "No approval candidates",
       discoveryIssue_partial_provider_failure: "Provider warning",
       discoveryMessage_ok: "Discovery found candidate papers for human screening.",
       discoveryMessage_not_run: "This run did not use automatic literature discovery.",
+      discoveryMessage_running: "Automatic discovery is still running. Provider results and candidate counts may change while the job is active.",
       discoveryMessage_zero_candidates: "Automatic discovery ran, but no provider result survived deduplication and screening. The workflow is paused so you can review the cause before drafting.",
       discoveryMessage_zero_candidates_completed: "Automatic discovery ran, but no provider result survived deduplication and screening. This older run already completed; new zero-candidate runs pause for review before drafting.",
       discoveryMessage_partial_provider_failure: "Discovery found candidates, but at least one provider failed or was rate limited. Review the provider details before continuing.",
@@ -133,10 +135,12 @@
       continueSeedCorpus: "使用种子语料继续",
       discoveryIssue_ok: "检索可用",
       discoveryIssue_not_run: "未运行检索",
+      discoveryIssue_running: "正在检索",
       discoveryIssue_zero_candidates: "没有可审批候选",
       discoveryIssue_partial_provider_failure: "检索平台警告",
       discoveryMessage_ok: "自动检索找到了候选论文，可以进入人工筛选。",
       discoveryMessage_not_run: "此任务没有启用自动文献检索。",
+      discoveryMessage_running: "自动检索仍在运行。任务完成前，检索结果和候选数量都可能继续变化。",
       discoveryMessage_zero_candidates: "自动检索已经运行，但没有文献通过去重和筛选。工作流已暂停，方便你先确认原因再生成综述。",
       discoveryMessage_zero_candidates_completed: "自动检索已经运行，但没有文献通过去重和筛选。这个旧任务已经完成；新的 0 候选任务会在生成综述前暂停等待确认。",
       discoveryMessage_partial_provider_failure: "检索找到了候选论文，但至少一个平台失败或被限流。继续前建议查看平台细节。",
@@ -233,6 +237,7 @@
     pending: false,
     stopped: false,
     jobIds: new Set(),
+    startJobIds: new Set(),
     jobTimer: null,
     runTimer: null,
     loadingRuns: false,
@@ -781,7 +786,7 @@
       button.setAttribute("aria-pressed", String(active));
     });
     byId("candidate-count").textContent = t("deduplicatedCount", { count: counts.all });
-    const showDiscoveryEmpty = candidates.length === 0 && counts.all === 0 && hasDiscoveryActivity();
+    const showDiscoveryEmpty = candidates.length === 0 && counts.all === 0 && isZeroCandidateDiscovery();
     byId("candidates-empty").hidden = candidates.length !== 0 || showDiscoveryEmpty;
     byId("discovery-empty").hidden = !showDiscoveryEmpty;
     candidates.forEach((candidate) => body.append(candidateRow(candidate)));
@@ -1040,8 +1045,10 @@
       const payload = await api("/api/runs", { method: "POST", body });
       showCommand(payload);
       state.jobIds.add(payload.job_id);
+      state.startJobIds.add(payload.job_id);
       showFeedback(t("jobQueued"));
       closeDialog("new-run-dialog");
+      await loadRuns({ preserveSelection: false, force: true });
       scheduleJobPoll();
     });
   }
@@ -1153,9 +1160,14 @@
       for (const jobId of Array.from(state.jobIds)) {
         const job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
         showCommand(job);
+        if (job.kind === "start" && ["queued", "running"].includes(job.status)) {
+          state.startJobIds.add(jobId);
+          await loadRuns({ preserveSelection: false, force: true });
+        }
         if (job.status === "running") showFeedback(t("jobRunning"), false, { background: true });
         if (terminalJobStatuses.has(job.status)) {
           state.jobIds.delete(jobId);
+          state.startJobIds.delete(jobId);
           completed = true;
           showFeedback(
             job.status === "succeeded" ? t("jobSucceeded") : t("jobFailed"),

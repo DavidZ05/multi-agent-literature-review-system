@@ -14,6 +14,7 @@ from src.literature_review.models import (
     CorpusDecision,
     ResearchRun,
     RunStatus,
+    WorkflowStage,
 )
 from src.literature_review.storage import (
     LocalArtifactStore,
@@ -538,7 +539,12 @@ class WorkbenchService:
         corpus_alignment = self._corpus_alignment(run)
         issue = "not_run"
         if discovery_enabled:
-            if candidate_count == 0:
+            if run.status == RunStatus.ACTIVE and run.current_stage in {
+                WorkflowStage.DISCOVERING,
+                WorkflowStage.SCREENING,
+            }:
+                issue = "running"
+            elif candidate_count == 0:
                 issue = "zero_candidates"
             elif total_failures:
                 issue = "partial_provider_failure"

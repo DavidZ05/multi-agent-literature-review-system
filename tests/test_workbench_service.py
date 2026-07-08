@@ -288,6 +288,32 @@ class WorkbenchServiceTests(unittest.TestCase):
             },
         )
 
+    def test_get_run_detail_marks_active_discovery_as_running(self) -> None:
+        run = replace(
+            self.newer_run,
+            status=RunStatus.ACTIVE,
+            current_stage=WorkflowStage.DISCOVERING,
+        )
+        self.store.update_run(run)
+        self.store.append_event(
+            run.run_id,
+            "query_started",
+            {"provider": "arxiv", "query_id": "query_a"},
+            WorkflowStage.DISCOVERING,
+        )
+        self.store.append_event(
+            run.run_id,
+            "query_completed",
+            {"provider": "arxiv", "query_id": "query_a", "result_count": 0},
+            WorkflowStage.DISCOVERING,
+        )
+
+        detail = self.service.get_run_detail(run.run_id)
+
+        self.assertEqual(detail["discovery_summary"]["issue"], "running")
+        self.assertEqual(detail["discovery_summary"]["candidate_count"], 0)
+        self.assertEqual(detail["discovery_summary"]["total_queries"], 1)
+
     def test_get_run_detail_adds_sanitized_api_runtime_state(self) -> None:
         api_run = replace(
             self.older_run,
