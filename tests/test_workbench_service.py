@@ -16,6 +16,7 @@ from src.literature_review.models import (
     RunStatus,
     ScreeningRecommendation,
     WorkflowStage,
+    utc_now_iso,
 )
 from src.literature_review.storage import (
     LocalArtifactStore,
@@ -87,6 +88,15 @@ class WorkbenchServiceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
+
+    def _prepare_approval_gate(self) -> None:
+        self.older_run = replace(
+            self.older_run,
+            status=RunStatus.WAITING,
+            current_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
+            updated_at=utc_now_iso(),
+        )
+        self.store.update_run(self.older_run)
 
     def test_list_runs_is_newest_first_with_complete_candidate_counts(self) -> None:
         service = WorkbenchService(NoCandidateHydrationStore(self.store.path))
@@ -388,6 +398,7 @@ class WorkbenchServiceTests(unittest.TestCase):
     def test_approve_candidate_delegates_with_workbench_actor_and_safe_command(
         self,
     ) -> None:
+        self._prepare_approval_gate()
         reason = "Strong evidence; don't execute $(touch /tmp/nope)"
         category = "memory mechanism"
         contribution = "Explains 'reflection' and recall."
@@ -452,11 +463,17 @@ class WorkbenchServiceTests(unittest.TestCase):
                 ("-tag with spaces", "-second tag"),
             ),
         )
-        for reason, category, contribution, tags in cases:
+        self._prepare_approval_gate()
+        for index, (reason, category, contribution, tags) in enumerate(cases):
             with self.subTest(reason=reason):
+                current = candidate(
+                    f"cand_case_{index}",
+                    CandidateStatus.PENDING,
+                )
+                self.store.upsert_candidate(self.older_run.run_id, current)
                 result = self.service.approve_candidate(
                     self.older_run.run_id,
-                    self.pending.candidate_id,
+                    current.candidate_id,
                     reason,
                     category,
                     contribution,
@@ -474,7 +491,7 @@ class WorkbenchServiceTests(unittest.TestCase):
                     self.fail(f"equivalent command did not parse: {exc}")
                 self.assertEqual(parsed.command, "approve")
                 self.assertEqual(parsed.run_id, self.older_run.run_id)
-                self.assertEqual(parsed.candidate_id, self.pending.candidate_id)
+                self.assertEqual(parsed.candidate_id, current.candidate_id)
                 self.assertEqual(parsed.reason, reason)
                 self.assertEqual(parsed.category, category)
                 self.assertEqual(parsed.contribution, contribution)
@@ -501,6 +518,7 @@ class WorkbenchServiceTests(unittest.TestCase):
         self.assertEqual(parsed.tags, ["memory", "reflection"])
 
     def test_reject_candidate_delegates_with_workbench_actor(self) -> None:
+        self._prepare_approval_gate()
         reason = "Outside scope; quoted as 'irrelevant'"
 
         result = self.service.reject_candidate(
@@ -538,6 +556,7 @@ class WorkbenchServiceTests(unittest.TestCase):
         json.dumps(result)
 
     def test_defer_candidate_delegates_with_workbench_actor(self) -> None:
+        self._prepare_approval_gate()
         reason = "Read full text before deciding"
 
         result = self.service.defer_candidate(
@@ -644,6 +663,7 @@ class WorkbenchServiceTests(unittest.TestCase):
         )
 
     def test_close_discovery_returns_ready_without_mutating_run(self) -> None:
+        self._prepare_approval_gate()
         ApprovalService(self.store).defer(
             self.older_run.run_id,
             self.pending.candidate_id,

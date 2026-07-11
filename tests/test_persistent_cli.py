@@ -305,7 +305,12 @@ class PersistentCLITests(unittest.TestCase):
     def test_candidate_approval_commands_are_json_and_persistent(self) -> None:
         store = SQLiteWorkflowStore(self.db_path)
         store.initialize()
-        run = ResearchRun.create("Memory agents")
+        run = replace(
+            ResearchRun.create("Memory agents"),
+            status=RunStatus.WAITING,
+            current_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
+            updated_at=utc_now_iso(),
+        )
         store.create_run(run)
         store.upsert_candidate(
             run.run_id,

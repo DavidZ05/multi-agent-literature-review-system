@@ -1,4 +1,5 @@
 from concurrent.futures import Future
+from dataclasses import replace
 import http.client
 from html.parser import HTMLParser
 import json
@@ -16,6 +17,7 @@ from src.literature_review.models import (
     RunStatus,
     ScreeningRecommendation,
     WorkflowStage,
+    utc_now_iso,
 )
 from src.literature_review.storage import SQLiteWorkflowStore
 from src.literature_review.workbench import (
@@ -166,6 +168,15 @@ class WorkbenchHTTPTests(unittest.TestCase):
     def mutation_headers(self, **extra: str) -> dict[str, str]:
         return {"X-Workbench-Token": self.token, **extra}
 
+    def prepare_approval_gate(self) -> None:
+        self.run = replace(
+            self.run,
+            status=RunStatus.WAITING,
+            current_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
+            updated_at=utc_now_iso(),
+        )
+        self.store.update_run(self.run)
+
     def raw_post(
         self,
         framing_headers: tuple[str, ...],
@@ -261,6 +272,8 @@ class WorkbenchHTTPTests(unittest.TestCase):
                 f"/api/runs/{self.run.run_id}/candidates?status=pending",
                 [self.pending.to_dict()],
             ),
+            ("/api/jobs", self.manager.list_jobs()),
+            ("/api/jobs?status=active", self.manager.list_jobs(active_only=True)),
             (f"/api/jobs/{accepted['job_id']}", self.manager.get_job(accepted["job_id"])),
         )
 
@@ -278,6 +291,10 @@ class WorkbenchHTTPTests(unittest.TestCase):
             f"/api/runs/{self.run.run_id}/candidates?status=unknown",
         )
 
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], "invalid_request")
+
+        status, _, payload = self.request("GET", "/api/jobs?status=finished")
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "invalid_request")
 
@@ -316,6 +333,7 @@ class WorkbenchHTTPTests(unittest.TestCase):
     def test_run_and_candidate_mutation_route_families_return_service_payloads(
         self,
     ) -> None:
+        self.prepare_approval_gate()
         cases = (
             ("approve", {
                 "reason": "Strong evidence",
@@ -536,6 +554,7 @@ class WorkbenchHTTPTests(unittest.TestCase):
         self.assert_json_headers(headers)
 
     def test_close_discovery_returns_pending_conflict_then_service_payload(self) -> None:
+        self.prepare_approval_gate()
         status, _, payload = self.request(
             "POST",
             f"/api/runs/{self.run.run_id}/close-discovery",
@@ -567,6 +586,20 @@ class WorkbenchHTTPTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(payload, self.service.close_discovery(self.run.run_id))
+
+    def test_candidate_mutation_outside_approval_gate_returns_conflict(self) -> None:
+        status, _, payload = self.request(
+            "POST",
+            (
+                f"/api/runs/{self.run.run_id}/candidates/"
+                f"{self.pending.candidate_id}/reject"
+            ),
+            {"reason": "Outside scope"},
+            headers=self.mutation_headers(),
+        )
+
+        self.assertEqual(status, 409)
+        self.assertEqual(payload["error"]["code"], "approval_not_allowed")
 
     def test_duplicate_resume_exposes_only_existing_job_id(self) -> None:
         _, _, first = self.request(
@@ -891,8 +924,11 @@ class WorkbenchHTTPTests(unittest.TestCase):
     ) -> None:
         expected = {
             "/": "text/html; charset=utf-8",
+            f"/?run={self.run.run_id}": "text/html; charset=utf-8",
             "/static/styles.css": "text/css; charset=utf-8",
+            "/static/styles.css?v=workbench": "text/css; charset=utf-8",
             "/static/app.js": "application/javascript; charset=utf-8",
+            "/static/app.js?v=workbench": "application/javascript; charset=utf-8",
         }
         for path, content_type in expected.items():
             with self.subTest(path=path):
@@ -1070,6 +1106,7 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             '"zh-CN"',
             '"/api/runs"',
             '"/api/jobs/"',
+            '"/api/jobs?status=active"',
             '"/events"',
             '"/candidates"',
             '"/approve"',
@@ -1086,6 +1123,16 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             '"cancelled"',
             '"completed"',
             "localStorage",
+            "selectedRunQueryParam",
+            "urlSelectedRunId()",
+            "selectedRunStorageKey",
+            "storedSelectedRunId()",
+            "updateSelectedRunUrl(runId)",
+            "storeSelectedRunId(runId)",
+            "function runHref(",
+            'link.addEventListener("click"',
+            "selectRun(run.run_id)",
+            "window.history.replaceState",
             "navigator.languages",
             "X-Workbench-Token",
             "runtimeBackend:",
@@ -1108,12 +1155,22 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             "function renderDiscoverySummary(",
             "function discoverySummary(",
             "function isZeroCandidateDiscoveryGate(",
+            "approvalGateOpen",
             "function hasDiscoveryActivity(",
             'byId("discovery-empty").hidden',
             'byId("close-discovery-button").textContent',
-            "startJobIds: new Set()",
+            "startJobs: new Map()",
+            "manualSelectionVersion: 0",
             'job.kind === "start"',
-            'await loadRuns({ preserveSelection: false, force: true })',
+            "function refreshStartJobRuns(",
+            "function recoverActiveJobs(",
+            "await recoverActiveJobs()",
+            "state.manualSelectionVersion += 1",
+            "&& !state.selectedRunId",
+            "fallbackToFirst = false",
+            "(!selectedExists && fallbackToFirst)",
+            "loadRuns({ preserveSelection: true, fallbackToFirst: true });",
+            "await loadRuns({ preserveSelection: true, force: true })",
             "backend_deterministic:",
             "backend_api:",
             "model_deterministic:",
@@ -1184,14 +1241,41 @@ class WorkbenchStaticContractTests(unittest.TestCase):
         self.assertNotIn("showFeedback", reset_body)
         self.assertNotIn("clearFeedback", reset_body)
 
-    def test_pending_state_reenables_run_buttons_after_mutation(self) -> None:
+    def test_pending_state_marks_run_links_disabled_after_mutation(self) -> None:
         script = (self.static_root / "app.js").read_text(encoding="utf-8")
         update_start = script.index("function updateActions(")
         update_end = script.index("\n  async function selectRun(", update_start)
         update_body = script[update_start:update_end]
 
         self.assertIn('document.querySelectorAll(".run-button")', update_body)
-        self.assertIn("button.disabled = state.pending", update_body)
+        self.assertIn('link.setAttribute("aria-disabled", String(disabled))', update_body)
+        self.assertIn('link.classList.toggle("disabled", disabled)', update_body)
+
+    def test_run_links_preserve_spa_job_tracking_for_plain_navigation(self) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        render_start = script.index("function renderRuns()")
+        render_end = script.index("\n  function runStatusLabel(", render_start)
+        render_body = script[render_start:render_end]
+
+        self.assertIn('link.addEventListener("click"', render_body)
+        self.assertIn('link.getAttribute("aria-disabled")', render_body)
+        self.assertIn("event.metaKey", render_body)
+        self.assertIn("event.ctrlKey", render_body)
+        self.assertIn("event.preventDefault()", render_body)
+        self.assertIn("selectRun(run.run_id)", render_body)
+
+    def test_candidate_decisions_require_visible_approval_gate(self) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        detail_start = script.index("function renderCandidateDetail()")
+        detail_end = script.index("\n  function renderIdentifiers(", detail_start)
+        detail_body = script[detail_start:detail_end]
+
+        self.assertIn('run.status === "waiting"', detail_body)
+        self.assertIn(
+            'run.current_stage === "awaiting_corpus_approval"',
+            detail_body,
+        )
+        self.assertIn("|| !approvalGateOpen", detail_body)
 
     def test_index_contains_accessible_run_deletion_controls(self) -> None:
         index = (self.static_root / "index.html").read_text(encoding="utf-8")
@@ -1354,7 +1438,10 @@ class WorkbenchStaticContractTests(unittest.TestCase):
         self.assertIn("if (restoreFocus)", dismiss_body)
         self.assertIn('byId("delete-run-button").focus()', dismiss_body)
         self.assertIn('byId("delete-run-button")', focus_body)
-        self.assertIn('document.querySelector(".run-button.selected:not(:disabled)")', focus_body)
+        self.assertIn(
+            'document.querySelector(\'.run-button.selected:not([aria-disabled="true"])\')',
+            focus_body,
+        )
         self.assertIn('byId("empty-new-run-button")', focus_body)
         self.assertIn('byId("new-run-button")', focus_body)
         self.assertIn("dismissDeleteRunDialog({ restoreFocus: false })", delete_body)
@@ -1424,7 +1511,11 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             load_body,
         )
         self.assertIn(
-            "if (!preserveSelection || !selectedExists)",
+            "if (!preserveSelection || (!selectedExists && fallbackToFirst))",
+            load_body,
+        )
+        self.assertIn(
+            "else beginRunSelection(null)",
             load_body,
         )
         self.assertIn(
@@ -1436,6 +1527,27 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             catch_body.index("showFeedback(errorMessage(error), true)"),
         )
         self.assertIn("focusAfterFinalization = true", catch_body)
+
+    def test_initial_load_selects_a_run_without_changing_refresh_behavior(
+        self,
+    ) -> None:
+        script = (self.static_root / "app.js").read_text(encoding="utf-8")
+        initialize_start = script.index("function initialize()")
+        initialize_end = script.index("\n  initialize();", initialize_start)
+        initialize_body = script[initialize_start:initialize_end]
+        refresh_start = script.index("async function refreshStartJobRuns(")
+        refresh_end = script.index("\n  async function withPending(", refresh_start)
+        refresh_body = script[refresh_start:refresh_end]
+
+        self.assertIn(
+            "loadRuns({ preserveSelection: true, fallbackToFirst: true });",
+            initialize_body,
+        )
+        self.assertIn(
+            "await loadRuns({ preserveSelection: true, force: true });",
+            refresh_body,
+        )
+        self.assertNotIn("fallbackToFirst: true", refresh_body)
 
     def test_styles_define_approved_responsive_layout(self) -> None:
         styles = (self.static_root / "styles.css").read_text(encoding="utf-8")

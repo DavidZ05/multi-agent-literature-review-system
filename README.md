@@ -9,7 +9,7 @@ The default mode is deterministic and works offline from the checked-in corpus. 
 Supported platforms: macOS or Linux with Python 3.11 or 3.12.
 
 ```bash
-git clone https://github.com/your-name/multi-agent-literature-review-system.git
+git clone https://github.com/DavidZ05/multi-agent-literature-review-system.git
 cd multi-agent-literature-review-system
 python3 -m pip install -e .
 literature-review --help
@@ -53,6 +53,11 @@ The workbench serves a loopback-only site at `http://127.0.0.1:8765/`. It reads 
 - `.review-workflow/artifacts/`
 
 The UI can create runs, inspect status/events, approve or reject discovered candidates, close discovery, resume, cancel, and delete terminal runs. Every mutation shows the equivalent CLI command. The interface follows the browser language on first use, includes a Chinese/English toggle, and remembers the last manual language choice.
+
+The selected run is stored in the URL and restored on reload. If no saved run
+exists, the newest stored run is selected. Active queued/running Jobs are
+recovered from the Workbench backend after a page refresh, so polling and the
+Job status banner continue without switching away from the run being viewed.
 
 Runtime paths go before the subcommand, while workbench options go after it:
 
@@ -141,6 +146,11 @@ POLISH_AGENT_TEMPERATURE=0.2
 
 If `AGENT_BACKEND=api` is selected, incomplete API settings fail fast with a configuration error. The system does not silently fall back to deterministic generation. Runtime artifacts and workbench responses redact keys; keep `.env` local and never commit it.
 
+Remote API base URLs must use HTTPS. Loopback endpoints such as
+`http://127.0.0.1:11434/v1` remain available for local OpenAI-compatible
+servers. Temperatures must be between `0.0` and `2.0`, and timeouts between
+`1` and `600` seconds.
+
 Supported per-agent prefixes include `WRITER_AGENT_`, `DOMAIN_EXPERT_AGENT_`, `STRUCTURE_MENTOR_AGENT_`, `REVIEW_SYNTHESIZER_AGENT_`, `POLISH_AGENT_`, and `EVALUATION_REFLECTION_AGENT_`. The deterministic Search, Citation Auditor, and Final Verification gates remain part of the safety design.
 
 ## Automatic Literature Discovery
@@ -226,7 +236,7 @@ multi-agent-literature-review-system/
 
 ## Anti-Hallucination Design
 
-The Writer can only cite keys present in the approved corpus. The Citation Auditor rejects unknown citation keys and checks lightweight claim-source alignment. The Review Synthesizer feeds blocking findings back into Writer. Polish is followed by Final Verification, so style editing cannot silently introduce a new citation. This keeps provenance inspectable even when model-backed agents are enabled.
+The Writer can only cite keys present in the approved corpus. The Citation Auditor rejects unknown citation keys and checks lightweight claim-source alignment. The Review Synthesizer feeds blocking findings back into Writer. Polish is followed by Final Verification, which rejects both added and removed citations. A persistent run reaches `completed` only when the orchestrator quality gate returns `accepted`; exhausted revision loops leave the run failed with diagnostic artifacts under `quality_gate/`. This keeps provenance inspectable even when model-backed agents are enabled.
 
 ## Troubleshooting
 

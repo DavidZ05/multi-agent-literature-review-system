@@ -30,6 +30,10 @@ class OrchestratorRunner(Protocol):
 OrchestratorFactory = Callable[..., OrchestratorRunner]
 
 
+class QualityGateRejectedError(RuntimeError):
+    """Raised when review iterations end without an accepted draft."""
+
+
 class PlanningHandler:
     def __init__(self, *, discovery_enabled: bool = False) -> None:
         self.discovery_enabled = discovery_enabled
@@ -169,7 +173,7 @@ class DraftingHandler:
                 kwargs["api_client"] = self.api_client
             orchestrator = self.orchestrator_factory(**kwargs)
             try:
-                orchestrator.run()
+                orchestrator_result = orchestrator.run()
             except APIClientError as exc:
                 if exc.retryable:
                     raise RetryableStageError(
@@ -184,6 +188,29 @@ class DraftingHandler:
             for filename in self._TEXT_ARTIFACTS:
                 artifacts[f"final/{filename}"] = (output_dir / filename).read_text(
                     encoding="utf-8"
+                )
+
+            if orchestrator_result.get("status") != "accepted":
+                for relative_path, content in artifacts.items():
+                    diagnostic_path = relative_path.replace(
+                        "final/",
+                        "quality_gate/",
+                        1,
+                    )
+                    if isinstance(content, str):
+                        context.artifact_store.write_text(
+                            context.run.run_id,
+                            diagnostic_path,
+                            content,
+                        )
+                    else:
+                        context.artifact_store.write_json(
+                            context.run.run_id,
+                            diagnostic_path,
+                            content,
+                        )
+                raise QualityGateRejectedError(
+                    "orchestrator review quality gate was not accepted"
                 )
 
         return StageResult(
@@ -205,5 +232,6 @@ __all__ = [
     "OrchestratorFactory",
     "OrchestratorRunner",
     "PlanningHandler",
+    "QualityGateRejectedError",
     "ScreeningHandler",
 ]

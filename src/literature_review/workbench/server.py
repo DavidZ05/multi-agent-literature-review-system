@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from src.literature_review.activity import RunBusy, RunDeletionBusy
 from src.literature_review.models import CandidateStatus
 from src.literature_review.storage import (
+    CandidateDecisionNotAllowedError,
     CandidateNotFoundError,
     RunNotFoundError,
 )
@@ -128,8 +129,9 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
     server: WorkbenchHTTPServer
 
     def do_GET(self) -> None:
-        if self.path in _STATIC_ASSETS:
-            self._serve_static(self.path)
+        request_path = urlsplit(self.path).path
+        if request_path in _STATIC_ASSETS:
+            self._serve_static(request_path)
             return
         self._handle(self._dispatch_get)
 
@@ -192,6 +194,14 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 "pending_candidates",
                 "Pending candidates must be resolved first.",
                 pending_count=exc.pending_count,
+            )
+        except CandidateDecisionNotAllowedError as exc:
+            self._send_error(
+                409,
+                "approval_not_allowed",
+                "Candidate decisions are only allowed at the approval gate.",
+                run_id=exc.run_id,
+                candidate_id=exc.candidate_id,
             )
         except RunNotDeletableError as exc:
             self._send_error(
@@ -271,6 +281,12 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
             and not query
         ):
             return 200, manager.get_job(segments[2])
+        if segments == ["api", "jobs"]:
+            if query == {"status": ["active"]}:
+                return 200, manager.list_jobs(active_only=True)
+            if not query:
+                return 200, manager.list_jobs()
+            raise _APIError(400, "invalid_request", "Request validation failed.")
         raise _APIError(404, "not_found", "The requested resource was not found.")
 
     def _dispatch_post(self) -> tuple[int, object]:

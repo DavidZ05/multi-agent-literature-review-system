@@ -92,6 +92,7 @@
       forbidden: "Mutation access was denied.", invalid_request: "Check the submitted fields.",
       invalid_json: "The server returned invalid data.", not_found: "The requested item was not found.",
       pending_candidates: "Resolve all pending candidates before closing discovery.",
+      approval_not_allowed: "Candidate decisions are only allowed while the run is waiting for corpus approval.",
       duplicate_resume_job: "A resume job is already active for this run.",
       run_busy: "This run is still executing. Wait for it to stop before deleting it.",
       run_deletion_busy: "This run is being deleted. Reload the run list and try again.",
@@ -192,6 +193,7 @@
       forbidden: "没有修改权限。", invalid_request: "请检查提交字段。",
       invalid_json: "服务器返回了无效数据。", not_found: "找不到所请求的项目。",
       pending_candidates: "关闭检索前，请处理全部待审批论文。",
+      approval_not_allowed: "仅可在任务等待语料审批时处理候选论文。",
       duplicate_resume_job: "此运行已有继续任务正在执行。",
       run_busy: "此运行仍在执行。请等待执行停止后再删除。",
       run_deletion_busy: "此运行正在删除。请刷新运行列表后重试。",
@@ -220,12 +222,14 @@
   const runStatuses = Object.freeze([
     "waiting", "active", "paused", "retry_wait", "failed", "cancelled", "completed"
   ]);
+  const selectedRunQueryParam = "run";
+  const selectedRunStorageKey = "literature-review-selected-run-id";
   const state = {
     language: storedLanguage() || browserLanguage(),
     runs: [],
     detail: null,
     candidates: [],
-    selectedRunId: null,
+    selectedRunId: storedSelectedRunId(),
     selectedCandidateId: null,
     filter: "pending",
     detailState: "empty",
@@ -237,7 +241,8 @@
     pending: false,
     stopped: false,
     jobIds: new Set(),
-    startJobIds: new Set(),
+    startJobs: new Map(),
+    manualSelectionVersion: 0,
     jobTimer: null,
     runTimer: null,
     loadingRuns: false,
@@ -287,6 +292,51 @@
       return messages[value] ? value : null;
     } catch (_) {
       return null;
+    }
+  }
+
+  function urlSelectedRunId() {
+    try {
+      return new URL(window.location.href).searchParams.get(selectedRunQueryParam) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function storedSelectedRunId() {
+    const fromUrl = urlSelectedRunId();
+    if (fromUrl) return fromUrl;
+    try {
+      return localStorage.getItem(selectedRunStorageKey) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function updateSelectedRunUrl(runId) {
+    try {
+      const url = new URL(window.location.href);
+      if (runId) url.searchParams.set(selectedRunQueryParam, runId);
+      else url.searchParams.delete(selectedRunQueryParam);
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    } catch (_) {}
+  }
+
+  function storeSelectedRunId(runId) {
+    try {
+      if (runId) localStorage.setItem(selectedRunStorageKey, runId);
+      else localStorage.removeItem(selectedRunStorageKey);
+    } catch (_) {}
+    updateSelectedRunUrl(runId);
+  }
+
+  function runHref(runId) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set(selectedRunQueryParam, runId);
+      return `${url.pathname}${url.search}${url.hash}`;
+    } catch (_) {
+      return `?${selectedRunQueryParam}=${encodeURIComponent(runId)}`;
     }
   }
 
@@ -415,6 +465,7 @@
     state.runGeneration += 1;
     state.candidateGeneration += 1;
     state.selectedRunId = runId;
+    storeSelectedRunId(runId);
     state.selectedCandidateId = null;
     state.detail = null;
     state.candidates = [];
@@ -451,7 +502,7 @@
     return base;
   }
 
-  async function performRunLoad({ preserveSelection, generation }) {
+  async function performRunLoad({ preserveSelection, fallbackToFirst, generation }) {
     state.loadingRuns = true;
     if (!state.runs.length && generation === state.runReloadGeneration) {
       setInitialState("loading");
@@ -461,8 +512,11 @@
       if (generation !== state.runReloadGeneration) return;
       state.runs = Array.isArray(runs) ? runs : [];
       const selectedExists = state.runs.some((run) => run.run_id === state.selectedRunId);
-      if (!preserveSelection || !selectedExists) {
+      if (!preserveSelection || (!selectedExists && fallbackToFirst)) {
         beginRunSelection(state.runs[0] ? state.runs[0].run_id : null);
+      } else if (state.selectedRunId) {
+        if (selectedExists) storeSelectedRunId(state.selectedRunId);
+        else beginRunSelection(null);
       }
       renderRuns();
       if (!state.selectedRunId) {
@@ -481,13 +535,18 @@
     }
   }
 
-  async function loadRuns({ preserveSelection = true, force = false } = {}) {
+  async function loadRuns({
+    preserveSelection = true,
+    force = false,
+    fallbackToFirst = false
+  } = {}) {
     if (state.stopped) return;
     if (force) {
       state.runReloadGeneration += 1;
     }
     let request = {
       preserveSelection,
+      fallbackToFirst,
       generation: state.runReloadGeneration
     };
     if (state.runReloadPromise) {
@@ -507,6 +566,36 @@
       await state.runReloadPromise;
     } finally {
       state.runReloadPromise = null;
+    }
+  }
+
+  async function recoverActiveJobs() {
+    try {
+      const jobs = await api("/api/jobs?status=active");
+      if (!Array.isArray(jobs)) throw new Error("invalid active job response");
+      jobs.forEach((job) => {
+        if (!job || !job.job_id || !["queued", "running"].includes(job.status)) return;
+        state.jobIds.add(job.job_id);
+        if (job.kind === "start") {
+          state.startJobs.set(job.job_id, {
+            topic: "",
+            submittedAtMs: Date.now(),
+            selectionVersion: state.manualSelectionVersion,
+            autoSelected: true,
+            resultRunId: null
+          });
+        }
+      });
+      if (!state.jobIds.size) return;
+      const hasRunningJob = jobs.some((job) => job && job.status === "running");
+      showFeedback(
+        t(hasRunningJob ? "jobRunning" : "jobQueued"),
+        false,
+        { background: true }
+      );
+      scheduleJobPoll(0);
+    } catch (error) {
+      showFeedback(errorMessage(error), true, { background: true });
     }
   }
 
@@ -589,20 +678,35 @@
     const list = byId("runs-list");
     list.replaceChildren();
     state.runs.forEach((run) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "run-button";
-      button.disabled = state.pending || state.deletingRun;
-      button.classList.toggle("selected", run.run_id === state.selectedRunId);
-      if (run.run_id === state.selectedRunId) button.setAttribute("aria-current", "page");
+      const link = document.createElement("a");
+      link.href = runHref(run.run_id);
+      link.className = "run-button";
+      link.classList.toggle("selected", run.run_id === state.selectedRunId);
+      if (run.run_id === state.selectedRunId) link.setAttribute("aria-current", "page");
+      if (state.pending || state.deletingRun) link.setAttribute("aria-disabled", "true");
       const title = document.createElement("strong");
       title.textContent = run.topic;
       const meta = document.createElement("span");
       const count = Object.values(run.candidate_counts || {}).reduce((sum, value) => sum + Number(value || 0), 0);
       meta.textContent = `${runStatusLabel(run)} · ${t("candidatesCount", { count })}`;
-      button.append(title, meta);
-      button.addEventListener("click", () => selectRun(run.run_id));
-      list.append(button);
+      link.append(title, meta);
+      link.addEventListener("click", (event) => {
+        if (link.getAttribute("aria-disabled") === "true") {
+          event.preventDefault();
+          return;
+        }
+        if (
+          event.defaultPrevented
+          || event.button !== 0
+          || event.metaKey
+          || event.ctrlKey
+          || event.shiftKey
+          || event.altKey
+        ) return;
+        event.preventDefault();
+        selectRun(run.run_id);
+      });
+      list.append(link);
     });
   }
 
@@ -857,10 +961,19 @@
 
   function renderCandidateDetail() {
     const candidate = selectedCandidate();
+    const run = state.detail && state.detail.run;
+    const approvalGateOpen = Boolean(
+      run
+      && run.status === "waiting"
+      && run.current_stage === "awaiting_corpus_approval"
+    );
     byId("candidate-empty").hidden = Boolean(candidate);
     byId("candidate-content").hidden = !candidate;
     byId("approval-form").querySelectorAll("input, textarea, button").forEach((control) => {
-      control.disabled = state.pending || !candidate || candidate.status !== "pending";
+      control.disabled = state.pending
+        || !candidate
+        || candidate.status !== "pending"
+        || !approvalGateOpen;
     });
     if (!candidate) {
       const title = byId("candidate-state-title");
@@ -931,9 +1044,10 @@
     byId("resume-run-button").disabled = !hasRun || mutationPending || ["active", "completed", "cancelled"].includes(run && run.status);
     byId("close-discovery-button").disabled = !hasRun || mutationPending || run.current_stage !== "awaiting_corpus_approval";
     byId("new-run-button").disabled = mutationPending;
-    document.querySelectorAll(".run-button").forEach((button) => {
-      button.disabled = state.pending;
-      if (state.deletingRun) button.disabled = true;
+    document.querySelectorAll(".run-button").forEach((link) => {
+      const disabled = state.pending || state.deletingRun;
+      link.setAttribute("aria-disabled", String(disabled));
+      link.classList.toggle("disabled", disabled);
     });
     document.querySelectorAll("[data-filter]").forEach((button) => {
       button.disabled = !hasRun || mutationPending;
@@ -942,8 +1056,39 @@
 
   async function selectRun(runId) {
     if (runId === state.selectedRunId) return;
+    state.manualSelectionVersion += 1;
     const generation = beginRunSelection(runId);
     await loadRunDetail(runId, generation);
+  }
+
+  function matchingStartRun(startJob) {
+    if (!startJob) return null;
+    return state.runs.find((run) => {
+      if (run.run_id === startJob.resultRunId) return true;
+      if (run.topic !== startJob.topic) return false;
+      const createdAt = new Date(run.created_at).getTime();
+      return Number.isFinite(createdAt)
+        && createdAt >= startJob.submittedAtMs - 5000;
+    }) || null;
+  }
+
+  function canAutoSelectStartJob(startJob) {
+    return Boolean(startJob)
+      && !startJob.autoSelected
+      && !state.selectedRunId
+      && state.manualSelectionVersion === startJob.selectionVersion;
+  }
+
+  async function refreshStartJobRuns(jobId) {
+    const startJob = state.startJobs.get(jobId);
+    await loadRuns({ preserveSelection: true, force: true });
+    if (!canAutoSelectStartJob(startJob)) return;
+    const run = matchingStartRun(startJob);
+    if (!run) return;
+    startJob.autoSelected = true;
+    if (run.run_id === state.selectedRunId) return;
+    const generation = beginRunSelection(run.run_id);
+    await loadRunDetail(run.run_id, generation);
   }
 
   async function withPending(operation) {
@@ -1045,10 +1190,16 @@
       const payload = await api("/api/runs", { method: "POST", body });
       showCommand(payload);
       state.jobIds.add(payload.job_id);
-      state.startJobIds.add(payload.job_id);
+      state.startJobs.set(payload.job_id, {
+        topic: body.topic,
+        submittedAtMs: Date.now(),
+        selectionVersion: state.manualSelectionVersion,
+        autoSelected: false,
+        resultRunId: null
+      });
       showFeedback(t("jobQueued"));
       closeDialog("new-run-dialog");
-      await loadRuns({ preserveSelection: false, force: true });
+      await refreshStartJobRuns(payload.job_id);
       scheduleJobPoll();
     });
   }
@@ -1088,7 +1239,7 @@
       deleteButton.focus();
       return;
     }
-    const selectedRunButton = document.querySelector(".run-button.selected:not(:disabled)");
+    const selectedRunButton = document.querySelector('.run-button.selected:not([aria-disabled="true"])');
     if (selectedRunButton) {
       selectedRunButton.focus();
       return;
@@ -1161,20 +1312,34 @@
         const job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
         showCommand(job);
         if (job.kind === "start" && ["queued", "running"].includes(job.status)) {
-          state.startJobIds.add(jobId);
-          await loadRuns({ preserveSelection: false, force: true });
+          if (!state.startJobs.has(jobId)) {
+            state.startJobs.set(jobId, {
+              topic: "",
+              submittedAtMs: Date.now(),
+              selectionVersion: state.manualSelectionVersion,
+              autoSelected: true,
+              resultRunId: null
+            });
+          }
+          await refreshStartJobRuns(jobId);
         }
         if (job.status === "running") showFeedback(t("jobRunning"), false, { background: true });
         if (terminalJobStatuses.has(job.status)) {
+          const startJob = state.startJobs.get(jobId);
+          if (startJob && job.result && job.result.run_id) {
+            startJob.resultRunId = job.result.run_id;
+          }
+          const maySelectResult = !startJob
+            || (!state.selectedRunId && state.manualSelectionVersion === startJob.selectionVersion);
           state.jobIds.delete(jobId);
-          state.startJobIds.delete(jobId);
+          state.startJobs.delete(jobId);
           completed = true;
           showFeedback(
             job.status === "succeeded" ? t("jobSucceeded") : t("jobFailed"),
             job.status === "failed",
             { background: true }
           );
-          if (job.result && job.result.run_id && job.result.run_id !== state.selectedRunId) {
+          if (maySelectResult && job.result && job.result.run_id && job.result.run_id !== state.selectedRunId) {
             beginRunSelection(job.result.run_id);
           }
         }
@@ -1296,13 +1461,14 @@
     });
   }
 
-  function initialize() {
+  async function initialize() {
     byId("new-run-corpus").value = config.defaultCorpusPath || "";
     byId("database-path").textContent = config.databasePath || "";
     byId("artifact-root").textContent = config.artifactRoot || "";
     bindEvents();
     applyLanguage(state.language);
-    loadRuns({ preserveSelection: false });
+    await loadRuns({ preserveSelection: true, fallbackToFirst: true });
+    await recoverActiveJobs();
   }
 
   initialize();

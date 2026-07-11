@@ -59,6 +59,14 @@ class CandidateNotFoundError(WorkflowStoreError):
     pass
 
 
+class CandidateDecisionNotAllowedError(WorkflowStoreError):
+    def __init__(self, run_id: str, candidate_id: str, reason: str) -> None:
+        self.run_id = run_id
+        self.candidate_id = candidate_id
+        self.reason = reason
+        super().__init__(reason)
+
+
 class SQLiteWorkflowStore:
     SCHEMA_VERSION = 3
 
@@ -533,11 +541,44 @@ class SQLiteWorkflowStore:
         *,
         details: dict[str, object] | None = None,
     ) -> None:
-        candidate = self.get_candidate(decision.run_id, decision.candidate_id)
         details = dict(details or {})
-        updated = replace(candidate, status=decision.status)
-        payload = updated.to_dict()
         with self._connection() as connection, connection:
+            run_row = connection.execute(
+                "SELECT status,current_stage FROM runs WHERE run_id=?",
+                (decision.run_id,),
+            ).fetchone()
+            if run_row is None:
+                raise RunNotFoundError(decision.run_id)
+            if (
+                run_row["status"] != RunStatus.WAITING.value
+                or run_row["current_stage"]
+                != WorkflowStage.AWAITING_CORPUS_APPROVAL.value
+            ):
+                raise CandidateDecisionNotAllowedError(
+                    decision.run_id,
+                    decision.candidate_id,
+                    "candidate decisions require a run waiting for corpus approval",
+                )
+
+            candidate_row = connection.execute(
+                """SELECT status,payload_json FROM candidate_papers
+                WHERE run_id=? AND candidate_id=?""",
+                (decision.run_id, decision.candidate_id),
+            ).fetchone()
+            if candidate_row is None:
+                raise CandidateNotFoundError(decision.candidate_id)
+            if candidate_row["status"] != CandidateStatus.PENDING.value:
+                raise CandidateDecisionNotAllowedError(
+                    decision.run_id,
+                    decision.candidate_id,
+                    "candidate decision is already final",
+                )
+
+            candidate_payload = json.loads(candidate_row["payload_json"])
+            candidate_payload["status"] = candidate_row["status"]
+            candidate = CandidatePaper.from_dict(candidate_payload)
+            updated = replace(candidate, status=decision.status)
+            payload = updated.to_dict()
             connection.execute(
                 """INSERT INTO corpus_decisions VALUES (?,?,?,?,?,?,?,?)""",
                 (
@@ -622,6 +663,10 @@ class SQLiteResponseCache:
     def put(self, key: str, value: bytes, ttl_seconds: int) -> None:
         with sqlite3.connect(self.path) as connection, connection:
             connection.execute(
+                "DELETE FROM provider_response_cache WHERE expires_at<=?",
+                (self.clock(),),
+            )
+            connection.execute(
                 """INSERT INTO provider_response_cache
                 (cache_key,value,expires_at) VALUES (?,?,?)
                 ON CONFLICT(cache_key) DO UPDATE SET
@@ -629,8 +674,17 @@ class SQLiteResponseCache:
                 (key, value, self.clock() + ttl_seconds),
             )
 
+    def prune_expired(self) -> int:
+        with sqlite3.connect(self.path) as connection, connection:
+            cursor = connection.execute(
+                "DELETE FROM provider_response_cache WHERE expires_at<=?",
+                (self.clock(),),
+            )
+            return cursor.rowcount
+
 
 __all__ = [
+    "CandidateDecisionNotAllowedError",
     "CandidateNotFoundError",
     "RunAlreadyExistsError",
     "RunNotFoundError",

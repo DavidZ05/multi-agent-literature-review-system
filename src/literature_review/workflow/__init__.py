@@ -13,6 +13,7 @@ from src.literature_review.workflow.handlers import (
     DiscoveryHandler,
     DraftingHandler,
     PlanningHandler,
+    QualityGateRejectedError,
     ScreeningHandler,
 )
 from src.literature_review.workflow.state import (
@@ -31,6 +32,7 @@ __all__ = [
     "PersistentWorkflowEngine",
     "RetryableStageError",
     "PlanningHandler",
+    "QualityGateRejectedError",
     "ScreeningHandler",
     "StageContext",
     "StageExecutionError",

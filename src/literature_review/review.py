@@ -381,7 +381,7 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
         removed_citations = sorted(set(before) - set(after))
         citation_audit = ReviewerAgent(self.runtime_config).review(polished_markdown, papers)
         status = "accepted"
-        if new_citations or citation_audit["status"] != "accepted":
+        if new_citations or removed_citations or citation_audit["status"] != "accepted":
             status = "revise"
         return {
             "agent": "Final Verification Reviewer",
@@ -394,17 +394,26 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
             "unknown_citations": citation_audit["unknown_citations"],
             "unsupported_claims": citation_audit["unsupported_claims"],
             "missing_sections": citation_audit["missing_sections"],
-            "recommendations": self._recommendations(new_citations, citation_audit),
+            "recommendations": self._recommendations(
+                new_citations,
+                removed_citations,
+                citation_audit,
+            ),
         }
 
     def _recommendations(
         self,
         new_citations: list[str],
+        removed_citations: list[str],
         citation_audit: dict[str, Any],
     ) -> list[str]:
         recommendations = []
         if new_citations:
             recommendations.append("Reject polish output or re-run Writer review; polish added citations.")
+        if removed_citations:
+            recommendations.append(
+                "Reject polish output or re-run Writer review; polish removed citations."
+            )
         recommendations.extend(citation_audit.get("recommendations", []))
         if not recommendations:
             recommendations.append("Final polish preserved the accepted citation set.")

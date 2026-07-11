@@ -693,6 +693,12 @@ class FakeOrchestrator:
         return {"status": "accepted"}
 
 
+class RejectedOrchestrator(FakeOrchestrator):
+    def run(self) -> dict[str, object]:
+        super().run()
+        return {"status": "revise"}
+
+
 class DurableHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
@@ -773,6 +779,37 @@ class DurableHandlerTests(unittest.TestCase):
         self.assertEqual(instance.run_id, self.run.run_id)
         self.assertEqual(instance.corpus_path, self.corpus_path)
         self.assertEqual(instance.runtime_config, runtime_config)
+
+    def test_drafting_handler_rejects_unaccepted_quality_gate(self) -> None:
+        from src.literature_review.workflow.handlers import (
+            QualityGateRejectedError,
+        )
+
+        drafting_context = replace(
+            self.context,
+            run=replace(
+                self.context.run,
+                current_stage=WorkflowStage.DRAFTING,
+                updated_at=utc_now_iso(),
+            ),
+        )
+        handler = DraftingHandler(
+            AgentRuntimeConfig(),
+            orchestrator_factory=RejectedOrchestrator,
+        )
+
+        with self.assertRaises(QualityGateRejectedError):
+            handler(drafting_context)
+
+        self.assertTrue(
+            self.artifacts.exists(
+                self.run.run_id,
+                "quality_gate/review_report.json",
+            )
+        )
+        self.assertFalse(
+            self.artifacts.exists(self.run.run_id, "final/review_report.json")
+        )
 
     def test_real_orchestrator_completes_inside_persistent_engine(self) -> None:
         runtime_config = AgentRuntimeConfig()

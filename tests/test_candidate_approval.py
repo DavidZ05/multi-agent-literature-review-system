@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -8,8 +9,11 @@ from src.literature_review.models import (
     CandidateStatus,
     CorpusDecision,
     ResearchRun,
+    RunStatus,
     ScreeningRecommendation,
     SearchQuery,
+    WorkflowStage,
+    utc_now_iso,
 )
 from src.literature_review.storage import (
     CandidateNotFoundError,
@@ -75,6 +79,13 @@ class CandidateRepositoryTests(unittest.TestCase):
         )
 
     def test_decisions_are_append_only_and_update_candidate_status(self) -> None:
+        self.run = replace(
+            self.run,
+            status=RunStatus.WAITING,
+            current_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
+            updated_at=utc_now_iso(),
+        )
+        self.store.update_run(self.run)
         self.store.upsert_candidate(self.run.run_id, candidate())
         decision = CorpusDecision.create(
             self.run.run_id,
@@ -99,6 +110,13 @@ class CandidateRepositoryTests(unittest.TestCase):
         )
 
     def test_unknown_candidate_decision_is_rejected(self) -> None:
+        self.run = replace(
+            self.run,
+            status=RunStatus.WAITING,
+            current_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
+            updated_at=utc_now_iso(),
+        )
+        self.store.update_run(self.run)
         decision = CorpusDecision.create(
             self.run.run_id,
             "cand_missing",
@@ -117,6 +135,17 @@ class CandidateRepositoryTests(unittest.TestCase):
         now[0] = 111.0
         self.assertIsNone(cache.get("arxiv:key"))
 
+    def test_sqlite_response_cache_prunes_unrelated_expired_values(self) -> None:
+        now = [100.0]
+        cache = SQLiteResponseCache(self.path, clock=lambda: now[0])
+        cache.put("old:key", b"old", ttl_seconds=10)
+        now[0] = 111.0
+        cache.put("new:key", b"new", ttl_seconds=10)
+
+        self.assertEqual(cache.prune_expired(), 0)
+        self.assertIsNone(cache.get("old:key"))
+        self.assertEqual(cache.get("new:key"), b"new")
+
 
 class ApprovalServiceTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -125,6 +154,12 @@ class ApprovalServiceTests(unittest.TestCase):
         self.store = SQLiteWorkflowStore(self.root / "workflow.db")
         self.store.initialize()
         self.run = ResearchRun.create("Memory agents")
+        self.run = replace(
+            self.run,
+            status=RunStatus.WAITING,
+            current_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
+            updated_at=utc_now_iso(),
+        )
         self.store.create_run(self.run)
         self.store.upsert_candidate(self.run.run_id, candidate())
         self.service = ApprovalService(self.store)
@@ -141,6 +176,25 @@ class ApprovalServiceTests(unittest.TestCase):
                 category="",
                 contribution="Contribution",
                 tags=("memory",),
+            )
+
+    def test_decision_is_rejected_outside_approval_gate(self) -> None:
+        active = replace(
+            self.run,
+            status=RunStatus.ACTIVE,
+            current_stage=WorkflowStage.DISCOVERING,
+            updated_at=utc_now_iso(),
+        )
+        self.store.update_run(active)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "waiting for corpus approval",
+        ):
+            self.service.reject(
+                self.run.run_id,
+                "cand_one",
+                reason="Outside scope",
             )
 
     def test_only_approved_candidate_enters_validated_corpus(self) -> None:

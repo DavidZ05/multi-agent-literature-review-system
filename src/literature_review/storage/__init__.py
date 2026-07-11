@@ -5,6 +5,7 @@ from src.literature_review.storage.artifacts import (
     LocalArtifactStore,
 )
 from src.literature_review.storage.sqlite import (
+    CandidateDecisionNotAllowedError,
     CandidateNotFoundError,
     RunAlreadyExistsError,
     RunNotFoundError,
@@ -19,6 +20,7 @@ __all__ = [
     "ArtifactPathError",
     "ArtifactRecord",
     "ArtifactStoreError",
+    "CandidateDecisionNotAllowedError",
     "CandidateNotFoundError",
     "LocalArtifactStore",
     "RunAlreadyExistsError",

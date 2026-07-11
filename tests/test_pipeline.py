@@ -245,6 +245,39 @@ class PipelineTests(unittest.TestCase):
                 ["fake2026paper"],
             )
 
+    def test_orchestrator_revalidates_safe_draft_after_rejected_polish(self) -> None:
+        class CitationDroppingPolisher:
+            def run(self, markdown: str) -> str:
+                return markdown.replace("[packer2023memgpt]", "")
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "papers.json"
+            output_dir = root / "outputs"
+            write_sample_corpus(corpus)
+            orchestrator = Orchestrator(corpus_path=corpus, output_dir=output_dir)
+            orchestrator.polish_agent = CitationDroppingPolisher()
+
+            result = orchestrator.run()
+
+            verification = json.loads(
+                (output_dir / "final_verification.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            survey = (output_dir / "survey.md").read_text(encoding="utf-8")
+            self.assertEqual(result["status"], "accepted")
+            self.assertEqual(verification["status"], "accepted")
+            self.assertEqual(
+                verification["final_action"],
+                "polish_output_rejected; accepted draft retained",
+            )
+            self.assertEqual(
+                verification["rejected_polish_verification"]["status"],
+                "revise",
+            )
+            self.assertIn("[packer2023memgpt]", survey)
+
     def test_final_verification_rejects_polish_added_citation(self) -> None:
         papers = [
             {
@@ -278,6 +311,43 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(report["new_citations_after_polish"], ["fake2026paper"])
         self.assertEqual(report["unknown_citations"], ["fake2026paper"])
 
+    def test_final_verification_rejects_polish_removed_citation(self) -> None:
+        papers = [
+            {
+                "citation_key": "packer2023memgpt",
+                "title": "MemGPT: Towards LLMs as Operating Systems",
+                "authors": ["Charles Packer"],
+                "year": 2023,
+                "venue": "arXiv",
+                "url": "https://arxiv.org/abs/2310.08560",
+                "category": "memory mechanism",
+                "contribution": "Introduces virtual context management for agents.",
+                "evidence": "verified",
+                "tags": ["memory", "virtual context"],
+            }
+        ]
+        accepted_draft = (
+            "## Abstract\n"
+            "MemGPT introduces virtual context management [packer2023memgpt].\n\n"
+            "## Implications for Multi-Agent Literature Review Systems\n"
+            "Memory should remain traceable.\n\n"
+            "## References\n"
+        )
+        polished = accepted_draft.replace(" [packer2023memgpt]", "")
+
+        report = FinalVerificationReviewer().review(
+            accepted_draft,
+            polished,
+            papers,
+        )
+
+        self.assertEqual(report["status"], "revise")
+        self.assertEqual(
+            report["removed_citations_after_polish"],
+            ["packer2023memgpt"],
+        )
+        self.assertIn("removed citations", " ".join(report["recommendations"]))
+
     def test_runtime_config_defaults_to_deterministic_without_env(self) -> None:
         config = AgentRuntimeConfig.from_env({})
 
@@ -308,6 +378,46 @@ class PipelineTests(unittest.TestCase):
                     "AGENT_MODEL": "shared-model",
                 }
             )
+
+    def test_runtime_config_rejects_insecure_remote_api_url(self) -> None:
+        with self.assertRaisesRegex(AgentConfigurationError, "HTTPS"):
+            AgentRuntimeConfig.from_env(
+                {
+                    "AGENT_BACKEND": "api",
+                    "AGENT_API_BASE_URL": "http://api.example.com/v1",
+                    "AGENT_API_KEY": "shared-key",
+                    "AGENT_MODEL": "shared-model",
+                }
+            )
+
+    def test_runtime_config_allows_loopback_http_api_url(self) -> None:
+        config = AgentRuntimeConfig.from_env(
+            {
+                "AGENT_BACKEND": "api",
+                "AGENT_API_BASE_URL": "http://127.0.0.1:11434/v1",
+                "AGENT_API_KEY": "local-key",
+                "AGENT_MODEL": "local-model",
+            }
+        )
+
+        self.assertTrue(config.api_enabled)
+
+    def test_runtime_config_rejects_unsafe_numeric_ranges(self) -> None:
+        base = {
+            "AGENT_BACKEND": "api",
+            "AGENT_API_BASE_URL": "https://api.example.com/v1",
+            "AGENT_API_KEY": "shared-key",
+            "AGENT_MODEL": "shared-model",
+        }
+        cases = (
+            ({"AGENT_TEMPERATURE": "2.1"}, "AGENT_TEMPERATURE"),
+            ({"AGENT_TIMEOUT_SECONDS": "0"}, "AGENT_TIMEOUT_SECONDS"),
+            ({"WRITER_AGENT_TEMPERATURE": "invalid"}, "WRITER_AGENT_TEMPERATURE"),
+        )
+        for changes, message in cases:
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(AgentConfigurationError, message):
+                    AgentRuntimeConfig.from_env({**base, **changes})
 
     def test_runtime_config_single_api_applies_defaults_to_all_agents(self) -> None:
         config = AgentRuntimeConfig.from_env(

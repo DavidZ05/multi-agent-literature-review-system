@@ -138,15 +138,22 @@ class Orchestrator:
         else:
             final = draft
 
-        final_verification = self.final_verification_reviewer.review(
+        polish_verification = self.final_verification_reviewer.review(
             draft, final, papers
         )
-        if final_verification["status"] != "accepted":
+        if polish_verification["status"] != "accepted":
             final = draft
+            final_verification = self.final_verification_reviewer.review(
+                draft,
+                final,
+                papers,
+            )
             final_verification["final_action"] = (
                 "polish_output_rejected; accepted draft retained"
             )
+            final_verification["rejected_polish_verification"] = polish_verification
         else:
+            final_verification = polish_verification
             final_verification["final_action"] = "polish_output_accepted"
 
         self._write_json(

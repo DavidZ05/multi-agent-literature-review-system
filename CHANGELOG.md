@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented here.
 
+## 0.3.1 - 2026-07-10
+
+### Fixed
+
+- Final verification now rejects polish output that adds or removes citations.
+- Persistent runs no longer report `completed` when the orchestrator exhausts
+  its revision loop without an accepted draft; diagnostic artifacts are kept
+  under `quality_gate/`.
+- Candidate decisions are accepted only while a run is waiting at the corpus
+  approval gate and the candidate is still pending.
+- Workbench run selection keeps active Job polling in the current page while
+  preserving real links for modified-click and new-tab navigation.
+- Workbench page reloads recover queued and running Jobs from the backend
+  without replacing the user's selected run.
+- Initial Workbench loading selects an available run without overriding a
+  previously selected run during refresh or background polling.
+- Remote model API URLs require HTTPS, while loopback HTTP remains available
+  for local model servers; temperature and timeout ranges are validated.
+
+### Changed
+
+- Workbench retains a bounded history of completed in-memory Jobs.
+- Provider cache writes prune expired response rows.
+- Public clone instructions now point to the canonical GitHub repository.
+
 ## 0.3.0 - 2026-07-07
 
 ### Added

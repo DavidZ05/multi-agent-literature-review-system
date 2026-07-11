@@ -19,6 +19,7 @@ from src.literature_review.models import CandidateStatus, WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
 from src.literature_review.runtime import build_engine, load_resume_settings
 from src.literature_review.storage import (
+    CandidateDecisionNotAllowedError,
     LocalArtifactStore,
     CandidateNotFoundError,
     RunNotFoundError,
@@ -388,6 +389,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "error": "run_not_deletable",
                 "run_id": exc.run_id,
                 "status": exc.status.value,
+            },
+            stream=sys.stderr,
+        )
+        return 3
+    except CandidateDecisionNotAllowedError as exc:
+        _print_json(
+            {
+                "error": "approval_not_allowed",
+                "run_id": exc.run_id,
+                "candidate_id": exc.candidate_id,
             },
             stream=sys.stderr,
         )

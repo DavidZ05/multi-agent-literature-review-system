@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass
+import ipaddress
+import math
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 __all__ = ["AgentConfigurationError", "AgentAPISettings", "AgentRuntimeConfig"]
 
@@ -120,6 +123,22 @@ class AgentRuntimeConfig:
                 if value != ""
             }
             if cleaned:
+                if "temperature" in cleaned:
+                    try:
+                        cleaned["temperature"] = float(cleaned["temperature"])
+                    except (TypeError, ValueError) as exc:
+                        raise AgentConfigurationError(
+                            f"{prefix}TEMPERATURE must be a number"
+                        ) from exc
+                if "timeout_seconds" in cleaned:
+                    try:
+                        cleaned["timeout_seconds"] = int(
+                            cleaned["timeout_seconds"]
+                        )
+                    except (TypeError, ValueError) as exc:
+                        raise AgentConfigurationError(
+                            f"{prefix}TIMEOUT_SECONDS must be an integer"
+                        ) from exc
                 overrides[agent_id] = cleaned
         return overrides
 
@@ -172,6 +191,12 @@ class AgentRuntimeConfig:
         )
 
     def validate(self) -> None:
+        self._validate_numeric_settings(
+            "AGENT_TEMPERATURE",
+            self.temperature,
+            "AGENT_TIMEOUT_SECONDS",
+            self.timeout_seconds,
+        )
         api_field_names = self._configured_api_field_names()
         if self.backend != "api":
             if api_field_names:
@@ -184,6 +209,13 @@ class AgentRuntimeConfig:
 
         for agent_id in self._agent_ids():
             settings = self.for_agent(agent_id)
+            prefix = f"{agent_id.upper()}_AGENT"
+            self._validate_numeric_settings(
+                f"{prefix}_TEMPERATURE",
+                settings.temperature,
+                f"{prefix}_TIMEOUT_SECONDS",
+                settings.timeout_seconds,
+            )
             missing = []
             if not settings.api_base_url:
                 missing.append("AGENT_API_BASE_URL")
@@ -196,6 +228,7 @@ class AgentRuntimeConfig:
                     f"API backend for {agent_id} is missing "
                     + ", ".join(missing)
                 )
+            self._validate_api_base_url(settings.api_base_url, agent_id)
 
     def public_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -223,14 +256,67 @@ class AgentRuntimeConfig:
         try:
             return float(value)
         except (TypeError, ValueError):
-            return default
+            raise AgentConfigurationError(
+                "agent temperature overrides must be numbers"
+            )
 
     @staticmethod
     def _coerce_int(value: Any, default: int) -> int:
         try:
             return int(value)
         except (TypeError, ValueError):
-            return default
+            raise AgentConfigurationError(
+                "agent timeout overrides must be integers"
+            )
+
+    @staticmethod
+    def _validate_numeric_settings(
+        temperature_name: str,
+        temperature: float,
+        timeout_name: str,
+        timeout_seconds: int,
+    ) -> None:
+        if not math.isfinite(float(temperature)) or not 0.0 <= temperature <= 2.0:
+            raise AgentConfigurationError(
+                f"{temperature_name} must be between 0.0 and 2.0"
+            )
+        if isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= 600:
+            raise AgentConfigurationError(
+                f"{timeout_name} must be between 1 and 600 seconds"
+            )
+
+    @staticmethod
+    def _validate_api_base_url(value: str, agent_id: str) -> None:
+        try:
+            parsed = urlsplit(value)
+            hostname = parsed.hostname
+            _ = parsed.port
+        except ValueError as exc:
+            raise AgentConfigurationError(
+                f"API base URL for {agent_id} is invalid"
+            ) from exc
+        if (
+            hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise AgentConfigurationError(
+                f"API base URL for {agent_id} is invalid"
+            )
+        loopback = hostname.lower() == "localhost"
+        try:
+            loopback = loopback or ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            pass
+        if parsed.scheme.lower() == "https":
+            return
+        if parsed.scheme.lower() == "http" and loopback:
+            return
+        raise AgentConfigurationError(
+            f"API base URL for {agent_id} must use HTTPS unless it is loopback"
+        )
 
     def _configured_api_field_names(self) -> set[str]:
         names = set()

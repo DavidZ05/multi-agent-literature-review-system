@@ -105,9 +105,11 @@ html[lang="zh-CN"] .lang-zh, html[lang="en"] .lang-en { color: var(--accent); fo
   border-radius: 6px;
   background: transparent;
   color: inherit;
+  text-decoration: none;
   text-align: left;
 }
 .run-button.selected { background: #313c50; color: #fff; }
+.run-button.disabled { pointer-events: none; opacity: 0.58; }
 .run-button strong, .storage-card strong { display: block; margin-bottom: 4px; overflow-wrap: anywhere; font-size: 12px; line-height: 1.35; }
 .run-button span, .storage-card span { display: block; color: #b6bfcd; font-size: 11px; line-height: 1.4; }
 

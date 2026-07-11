@@ -33,6 +33,7 @@ from src.literature_review.storage import (
 from src.literature_review.workbench import PendingCandidatesError, WorkbenchService
 from src.literature_review.workbench.jobs import (
     DuplicateResumeJobError,
+    JobNotFoundError,
     StartRunRequest,
     WorkflowJobManager,
 )
@@ -287,10 +288,38 @@ class WorkflowJobManagerTests(unittest.TestCase):
         accepted = manager.submit_start(self._request())
 
         self.assertEqual(manager.get_job(accepted["job_id"])["status"], "queued")
+        self.assertEqual(
+            [job["job_id"] for job in manager.list_jobs(active_only=True)],
+            [accepted["job_id"]],
+        )
         executor.run_next()
         self.assertEqual(manager.get_job(accepted["job_id"])["status"], "succeeded")
+        self.assertEqual(manager.list_jobs(active_only=True), [])
+        self.assertEqual(manager.list_jobs()[0]["run_id"], None)
         manager.shutdown(wait=False)
         self.assertEqual(executor.shutdown_calls, [False])
+
+    def test_terminal_job_history_is_bounded(self) -> None:
+        executor = ManualExecutor()
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            engine_builder=lambda *args, **kwargs: FakeEngine(
+                ResearchRun.create("Memory agents")
+            ),
+            executor=executor,
+            max_retained_jobs=1,
+        )
+
+        first = manager.submit_start(self._request())
+        executor.run_next()
+        second = manager.submit_start(self._request())
+        executor.run_next()
+
+        with self.assertRaises(JobNotFoundError):
+            manager.get_job(first["job_id"])
+        self.assertEqual(manager.get_job(second["job_id"])["status"], "succeeded")
+        manager.shutdown(wait=False)
 
     def test_start_command_is_replay_safe_and_contains_discovery_settings(self) -> None:
         executor = ManualExecutor()
@@ -601,6 +630,7 @@ class WorkflowJobManagerTests(unittest.TestCase):
             {
                 **accepted,
                 "status": "failed",
+                "run_id": run.run_id,
                 "result": None,
                 "error": {
                     "type": "workflow_failed",

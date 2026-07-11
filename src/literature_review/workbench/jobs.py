@@ -118,6 +118,7 @@ class _JobRecord:
             "job_id": self.job_id,
             "kind": self.kind,
             "status": self.status,
+            "run_id": self.run_id,
             "equivalent_command": self.equivalent_command,
             "result": None if self.result is None else dict(self.result),
             "error": None if self.error is None else dict(self.error),
@@ -134,7 +135,10 @@ class WorkflowJobManager:
         resume_settings_loader: ResumeSettingsLoader = load_resume_settings,
         executor: Executor | None = None,
         max_workers: int = 2,
+        max_retained_jobs: int = 200,
     ) -> None:
+        if isinstance(max_retained_jobs, bool) or max_retained_jobs < 1:
+            raise ValueError("max_retained_jobs must be a positive integer")
         self.store = store
         self.store.path = self.store.path.expanduser().resolve()
         self.artifact_root = Path(artifact_root).expanduser().resolve()
@@ -153,6 +157,7 @@ class WorkflowJobManager:
         self._jobs: dict[str, _JobRecord] = {}
         self._active_resume_jobs: dict[str, str] = {}
         self._futures: set[Future[Any]] = set()
+        self._max_retained_jobs = max_retained_jobs
 
     def submit_start(self, request: StartRunRequest) -> dict[str, object]:
         if not isinstance(request, StartRunRequest):
@@ -220,6 +225,13 @@ class WorkflowJobManager:
                 return self._jobs[job_id].to_dict()
             except KeyError as exc:
                 raise JobNotFoundError(job_id) from exc
+
+    def list_jobs(self, *, active_only: bool = False) -> list[dict[str, object]]:
+        with self._lock:
+            jobs = list(self._jobs.values())
+            if active_only:
+                jobs = [job for job in jobs if job.status in {"queued", "running"}]
+            return [job.to_dict() for job in jobs]
 
     def shutdown(self, wait: bool = True) -> None:
         self._executor.shutdown(wait=wait)
@@ -348,6 +360,17 @@ class WorkflowJobManager:
             self._active_resume_jobs.pop(job.run_id, None)
         if job.reservation is not None:
             job.reservation.release()
+        self._prune_terminal_jobs_locked()
+
+    def _prune_terminal_jobs_locked(self) -> None:
+        terminal_ids = [
+            job_id
+            for job_id, stored in self._jobs.items()
+            if stored.status in {"succeeded", "failed"}
+        ]
+        overflow = len(terminal_ids) - self._max_retained_jobs
+        for job_id in terminal_ids[:max(0, overflow)]:
+            self._jobs.pop(job_id, None)
 
     @staticmethod
     def _public_error(exc: BaseException) -> dict[str, str]:
