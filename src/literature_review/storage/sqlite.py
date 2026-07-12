@@ -21,6 +21,7 @@ from src.literature_review.models import (
     WorkflowStage,
     utc_now_iso,
 )
+from src.literature_review.storage.jobs import SQLiteJobRepositoryMixin
 
 
 class WorkflowStoreError(RuntimeError):
@@ -67,8 +68,8 @@ class CandidateDecisionNotAllowedError(WorkflowStoreError):
         super().__init__(reason)
 
 
-class SQLiteWorkflowStore:
-    SCHEMA_VERSION = 3
+class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
+    SCHEMA_VERSION = 4
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -154,7 +155,20 @@ class SQLiteWorkflowStore:
                         value BLOB NOT NULL,
                         expires_at REAL NOT NULL
                     );
-                    PRAGMA user_version = 3;
+                    CREATE TABLE workflow_jobs (
+                        job_id TEXT PRIMARY KEY,
+                        kind TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        equivalent_command TEXT NOT NULL,
+                        run_id TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
+                        result_json TEXT,
+                        error_json TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE INDEX workflow_jobs_status_created_idx
+                        ON workflow_jobs(status, created_at);
+                    PRAGMA user_version = 4;
                     """
                     )
                 return
@@ -201,6 +215,27 @@ class SQLiteWorkflowStore:
                             expires_at REAL NOT NULL
                         );
                         PRAGMA user_version = 3;
+                        """
+                    )
+                version = 3
+            if version == 3:
+                with connection:
+                    connection.executescript(
+                        """
+                        CREATE TABLE workflow_jobs (
+                            job_id TEXT PRIMARY KEY,
+                            kind TEXT NOT NULL,
+                            status TEXT NOT NULL,
+                            equivalent_command TEXT NOT NULL,
+                            run_id TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
+                            result_json TEXT,
+                            error_json TEXT,
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL
+                        );
+                        CREATE INDEX workflow_jobs_status_created_idx
+                            ON workflow_jobs(status, created_at);
+                        PRAGMA user_version = 4;
                         """
                     )
 

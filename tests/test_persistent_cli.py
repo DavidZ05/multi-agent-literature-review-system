@@ -13,6 +13,7 @@ from src.literature_review.activity import (
     RunBusy,
     RunDeletionBusy,
 )
+from src.literature_review import cli
 from src.literature_review.cli import main
 from src.literature_review.models import (
     CandidatePaper,
@@ -84,6 +85,39 @@ class PersistentCLITests(unittest.TestCase):
         code, runs, stderr = self._run("list")
         self.assertEqual(code, 0, stderr)
         self.assertEqual([run["run_id"] for run in runs], [run_id])
+
+    def test_doctor_initializes_local_runtime_and_reports_checks(self) -> None:
+        code, report, stderr = self._run("doctor")
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(
+            [check["name"] for check in report["checks"]],
+            ["database", "artifacts", "default_corpus", "agent_configuration"],
+        )
+        self.assertTrue(self.db_path.is_file())
+        self.assertTrue(self.artifact_path.is_dir())
+
+    def test_workbench_command_translates_dedicated_options(self) -> None:
+        with patch.object(cli, "main", return_value=0) as run:
+            code = cli.workbench_main(
+                [
+                    "--db", str(self.db_path),
+                    "--artifacts", str(self.artifact_path),
+                    "--port", "9000",
+                    "--no-browser",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        run.assert_called_once_with(
+            [
+                "--db", str(self.db_path),
+                "--artifacts", str(self.artifact_path),
+                "ui", "--host", "127.0.0.1", "--port", "9000",
+                "--no-browser",
+            ]
+        )
 
     def test_resume_completed_run_is_idempotent(self) -> None:
         _, started, _ = self._run(

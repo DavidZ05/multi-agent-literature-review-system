@@ -8,7 +8,7 @@ class ModuleBoundaryTests(unittest.TestCase):
     def test_package_exposes_version(self) -> None:
         from src import literature_review
 
-        self.assertEqual(literature_review.__version__, "0.3.0")
+        self.assertEqual(literature_review.__version__, "0.4.0")
         self.assertEqual(
             literature_review.__all__,
             [

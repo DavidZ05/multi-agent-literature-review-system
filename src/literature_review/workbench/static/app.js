@@ -82,6 +82,7 @@
       workflowProgress: "Workflow progress: stage {current} of 6", unknown: "Unknown",
       noAbstract: "No abstract available.", noIdentifiers: "No identifiers or source URLs available.",
       jobQueued: "Job queued.", jobRunning: "Job running.", jobSucceeded: "Job completed.",
+      jobInterrupted: "A previous Job was interrupted when the Workbench backend stopped. Review the run and use Resume when appropriate.",
       mutationSucceeded: "Update saved.", runCancelled: "Run cancelled.",
       discoveryClosed: "Discovery closed.", eventsEmpty: "No events recorded.",
       loadingEvents: "Loading events...", reasonRequired: "A decision reason is required.",
@@ -183,6 +184,7 @@
       workflowProgress: "工作流进度：第 {current} 阶段，共 6 阶段", unknown: "未知",
       noAbstract: "暂无摘要。", noIdentifiers: "暂无标识符或来源链接。",
       jobQueued: "任务已进入队列。", jobRunning: "任务正在运行。", jobSucceeded: "任务已完成。",
+      jobInterrupted: "工作台后端停止时有任务尚未完成，现已标记为中断。请检查对应运行，并在合适时点击继续运行。",
       mutationSucceeded: "更新已保存。", runCancelled: "运行已取消。",
       discoveryClosed: "检索已关闭。", eventsEmpty: "暂无事件记录。",
       loadingEvents: "正在加载事件...", reasonRequired: "请填写审批理由。",
@@ -224,6 +226,7 @@
   ]);
   const selectedRunQueryParam = "run";
   const selectedRunStorageKey = "literature-review-selected-run-id";
+  const acknowledgedInterruptedJobStorageKey = "literature-review-interrupted-job-id";
   const state = {
     language: storedLanguage() || browserLanguage(),
     runs: [],
@@ -259,7 +262,7 @@
   const terminalRunStatuses = new Set(runStatuses.slice(4));
   const deletableRunStatuses = new Set(["cancelled", "completed", "failed"]);
   const pollableRunStatuses = new Set(["waiting", "active", "retry_wait"]);
-  const terminalJobStatuses = new Set(["succeeded", "failed"]);
+  const terminalJobStatuses = new Set(["succeeded", "failed", "interrupted"]);
   const stageGroups = [
     ["created", "planning"],
     ["discovering", "screening"],
@@ -571,8 +574,22 @@
 
   async function recoverActiveJobs() {
     try {
-      const jobs = await api("/api/jobs?status=active");
+      const [jobs, history] = await Promise.all([
+        api("/api/jobs?status=active"),
+        api("/api/jobs")
+      ]);
       if (!Array.isArray(jobs)) throw new Error("invalid active job response");
+      if (!Array.isArray(history)) throw new Error("invalid job history response");
+      const interrupted = history.slice().reverse().find((job) => (
+        job && job.job_id && job.status === "interrupted"
+      ));
+      if (
+        interrupted
+        && localStorage.getItem(acknowledgedInterruptedJobStorageKey) !== interrupted.job_id
+      ) {
+        localStorage.setItem(acknowledgedInterruptedJobStorageKey, interrupted.job_id);
+        showFeedback(t("jobInterrupted"), true, { background: true });
+      }
       jobs.forEach((job) => {
         if (!job || !job.job_id || !["queued", "running"].includes(job.status)) return;
         state.jobIds.add(job.job_id);

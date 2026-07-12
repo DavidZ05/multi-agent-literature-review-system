@@ -19,11 +19,15 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("python -m pip install -e .", text)
         self.assertIn("python -m unittest discover -s tests -v", text)
         self.assertIn("literature-review --help", text)
+        self.assertIn("python -m compileall -q src tests", text)
+        self.assertIn("python -m pip wheel . --no-deps --wheel-dir dist", text)
+        self.assertIn("literature-review-workbench --help", text)
+        self.assertIn("doctor", text)
 
     def test_public_project_files_are_ready_for_distribution(self) -> None:
         required_files = {
             "LICENSE": "MIT License",
-            "CHANGELOG.md": "0.3.0",
+            "CHANGELOG.md": "0.4.0",
             "CONTRIBUTING.md": "Contributing",
             "SECURITY.md": "Security",
         }
@@ -45,6 +49,10 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(
             project["scripts"]["literature-review"],
             "src.literature_review.cli:main",
+        )
+        self.assertEqual(
+            project["scripts"]["literature-review-workbench"],
+            "src.literature_review.cli:workbench_main",
         )
 
     def test_distribution_includes_workbench_static_assets(self) -> None:
@@ -99,6 +107,8 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("macOS or Linux", readme)
         self.assertIn("python3 -m pip install -e .", readme)
         self.assertIn("literature-review --help", readme)
+        self.assertIn("literature-review doctor", readme)
+        self.assertIn("literature-review-workbench", readme)
         self.assertIn("AGENT_BACKEND=deterministic", readme)
         self.assertIn("AGENT_BACKEND=api", readme)
         self.assertIn("SEMANTIC_SCHOLAR_API_KEY", readme)

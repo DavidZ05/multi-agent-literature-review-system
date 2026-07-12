@@ -12,6 +12,7 @@ from src.literature_review.models import (
     WorkflowStage,
     utc_now_iso,
 )
+from src.literature_review.job_state import WorkflowJob
 from src.literature_review.storage.sqlite import (
     RunAlreadyExistsError,
     RunNotFoundError,
@@ -40,7 +41,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         self.store.initialize()
         with sqlite3.connect(self.path) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-        self.assertEqual(version, 3)
+        self.assertEqual(version, 4)
 
     def test_version_one_database_migrates_without_losing_data(self) -> None:
         legacy_path = Path(self.tmp.name) / "legacy.db"
@@ -96,7 +97,52 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             checkpoint,
         )
         with sqlite3.connect(legacy_path) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
+
+    def test_version_three_database_adds_durable_jobs(self) -> None:
+        legacy_path = Path(self.tmp.name) / "version-three.db"
+        with sqlite3.connect(legacy_path) as connection:
+            connection.execute("PRAGMA user_version = 3")
+
+        legacy = SQLiteWorkflowStore(legacy_path)
+        legacy.initialize()
+
+        with sqlite3.connect(legacy_path) as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            table = connection.execute(
+                "SELECT name FROM sqlite_master WHERE name='workflow_jobs'"
+            ).fetchone()
+        self.assertEqual(version, 4)
+        self.assertEqual(table, ("workflow_jobs",))
+
+    def test_jobs_round_trip_and_active_jobs_are_interrupted(self) -> None:
+        queued = WorkflowJob(
+            job_id="job_queued",
+            kind="start",
+            status="queued",
+            equivalent_command="literature-review start",
+        )
+        completed = WorkflowJob(
+            job_id="job_completed",
+            kind="resume",
+            status="succeeded",
+            equivalent_command="literature-review resume run_1",
+            result={"status": "completed"},
+        )
+        self.store.put_job(queued)
+        self.store.put_job(completed)
+
+        self.assertEqual(self.store.get_job(queued.job_id), queued)
+        self.assertEqual(self.store.interrupt_active_jobs(), 1)
+
+        interrupted = self.store.get_job(queued.job_id)
+        assert interrupted is not None
+        self.assertEqual(interrupted.status, "interrupted")
+        self.assertEqual(interrupted.error["type"], "backend_restarted")
+        self.assertEqual(self.store.get_job(completed.job_id), completed)
+
+        self.store.delete_job(queued.job_id)
+        self.assertIsNone(self.store.get_job(queued.job_id))
 
     def test_create_get_list_and_update_run(self) -> None:
         self.store.create_run(self.run)
@@ -348,11 +394,11 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
     def test_future_schema_is_rejected_without_change(self) -> None:
         future = Path(self.tmp.name) / "future.db"
         with sqlite3.connect(future) as connection:
-            connection.execute("PRAGMA user_version = 4")
+            connection.execute("PRAGMA user_version = 5")
         with self.assertRaises(UnsupportedSchemaVersionError):
             SQLiteWorkflowStore(future).initialize()
         with sqlite3.connect(future) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 5)
 
 
 class LocalArtifactStoreTests(unittest.TestCase):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Sequence
@@ -13,7 +14,8 @@ from src.literature_review.activity import (
     RunDeletionBusy,
     require_supported_platform,
 )
-from src.literature_review.config import AgentConfigurationError
+from src.literature_review.config import AgentConfigurationError, AgentRuntimeConfig
+from src.literature_review.corpus import load_papers
 from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import CandidateStatus, WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
@@ -129,6 +131,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     close.add_argument("run_id")
 
+    commands.add_parser("doctor", help="check local installation and configuration")
+
     ui = commands.add_parser("ui", help="open the local review workbench")
     ui.add_argument(
         "--host",
@@ -173,6 +177,47 @@ def _print_configuration_error(exc: AgentConfigurationError) -> None:
         {"error": "configuration_error", "message": str(exc)},
         stream=sys.stderr,
     )
+
+
+def _doctor_report(
+    store: SQLiteWorkflowStore,
+    artifact_root: Path,
+) -> tuple[int, dict[str, object]]:
+    checks: list[dict[str, object]] = []
+
+    def checked(name: str, operation: Any) -> None:
+        try:
+            detail = operation()
+        except Exception as exc:
+            checks.append({"name": name, "status": "error", "detail": str(exc)})
+        else:
+            checks.append({"name": name, "status": "ok", "detail": detail})
+
+    checked("database", lambda: str(store.path.expanduser().resolve()))
+
+    artifact_root = Path(artifact_root).expanduser().resolve()
+
+    def check_artifacts() -> str:
+        artifact_root.mkdir(parents=True, exist_ok=True)
+        if not os.access(artifact_root, os.W_OK):
+            raise PermissionError("artifact directory is not writable")
+        return str(artifact_root)
+
+    checked("artifacts", check_artifacts)
+    checked(
+        "default_corpus",
+        lambda: f"{len(load_papers(_default_corpus_path()))} verified seed papers",
+    )
+    checked(
+        "agent_configuration",
+        lambda: AgentRuntimeConfig.from_env().active_backend,
+    )
+    status = "ok" if all(item["status"] == "ok" for item in checks) else "error"
+    return (0 if status == "ok" else 2), {
+        "status": status,
+        "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        "checks": checks,
+    }
 
 
 def run_workbench(
@@ -267,6 +312,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 open_browser=not args.no_browser,
                 default_corpus_path=_default_corpus_path(),
             )
+        if args.command == "doctor":
+            code, report = _doctor_report(store, args.artifacts)
+            _print_json(report, stream=sys.stdout if code == 0 else sys.stderr)
+            return code
         if args.command == "status":
             _print_json(store.get_run(args.run_id).to_dict())
             return 0
@@ -455,4 +504,36 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["main", "run_workbench"]
+def workbench_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="literature-review-workbench")
+    parser.add_argument("--db", type=Path, default=Path(".review-workflow/workflow.db"))
+    parser.add_argument(
+        "--artifacts",
+        type=Path,
+        default=Path(".review-workflow/artifacts"),
+    )
+    parser.add_argument(
+        "--host",
+        choices=("127.0.0.1", "localhost"),
+        default="127.0.0.1",
+    )
+    parser.add_argument("--port", type=_port_number, default=8765)
+    parser.add_argument("--no-browser", action="store_true")
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    translated = [
+        "--db",
+        str(args.db),
+        "--artifacts",
+        str(args.artifacts),
+        "ui",
+        "--host",
+        args.host,
+        "--port",
+        str(args.port),
+    ]
+    if args.no_browser:
+        translated.append("--no-browser")
+    return main(translated)
+
+
+__all__ = ["main", "run_workbench", "workbench_main"]

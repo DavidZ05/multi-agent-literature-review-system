@@ -24,6 +24,7 @@ from src.literature_review.models import (
     WorkflowStage,
     utc_now_iso,
 )
+from src.literature_review.job_state import WorkflowJob
 from src.literature_review.runtime import load_resume_settings
 from src.literature_review.storage import (
     LocalArtifactStore,
@@ -298,6 +299,27 @@ class WorkflowJobManagerTests(unittest.TestCase):
         self.assertEqual(manager.list_jobs()[0]["run_id"], None)
         manager.shutdown(wait=False)
         self.assertEqual(executor.shutdown_calls, [False])
+
+    def test_manager_loads_history_and_marks_stale_active_job_interrupted(self) -> None:
+        stale = WorkflowJob(
+            job_id="job_stale",
+            kind="start",
+            status="running",
+            equivalent_command="literature-review start --topic=Memory",
+        )
+        self.store.put_job(stale)
+
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            executor=ManualExecutor(),
+        )
+
+        recovered = manager.get_job(stale.job_id)
+        self.assertEqual(recovered["status"], "interrupted")
+        self.assertEqual(recovered["error"]["type"], "backend_restarted")
+        self.assertEqual(manager.list_jobs(active_only=True), [])
+        manager.shutdown(wait=False)
 
     def test_terminal_job_history_is_bounded(self) -> None:
         executor = ManualExecutor()

@@ -14,6 +14,7 @@ from src.literature_review.activity import (
     ActivityCoordinator,
     ActivityReservation,
 )
+from src.literature_review.job_state import ACTIVE_JOB_STATUSES, WorkflowJob
 from src.literature_review.models import CandidateStatus, ResearchRun, WorkflowStage
 from src.literature_review.runtime import build_engine, load_resume_settings
 from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
@@ -112,6 +113,8 @@ class _JobRecord:
     result: dict[str, Any] | None = None
     error: dict[str, str] | None = None
     reservation: ActivityReservation | None = None
+    created_at: str = ""
+    updated_at: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -123,6 +126,33 @@ class _JobRecord:
             "result": None if self.result is None else dict(self.result),
             "error": None if self.error is None else dict(self.error),
         }
+
+    def to_stored_job(self) -> WorkflowJob:
+        return WorkflowJob(
+            job_id=self.job_id,
+            kind=self.kind,
+            status=self.status,
+            equivalent_command=self.equivalent_command,
+            run_id=self.run_id,
+            result=None if self.result is None else dict(self.result),
+            error=None if self.error is None else dict(self.error),
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+        )
+
+    @classmethod
+    def from_stored_job(cls, job: WorkflowJob) -> _JobRecord:
+        return cls(
+            job_id=job.job_id,
+            kind=job.kind,
+            status=job.status,
+            equivalent_command=job.equivalent_command,
+            run_id=job.run_id,
+            result=None if job.result is None else dict(job.result),
+            error=None if job.error is None else dict(job.error),
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
 
 
 class WorkflowJobManager:
@@ -141,6 +171,7 @@ class WorkflowJobManager:
             raise ValueError("max_retained_jobs must be a positive integer")
         self.store = store
         self.store.path = self.store.path.expanduser().resolve()
+        self.store.initialize()
         self.artifact_root = Path(artifact_root).expanduser().resolve()
         self._engine_builder = engine_builder
         self._resume_settings_loader = resume_settings_loader
@@ -154,10 +185,16 @@ class WorkflowJobManager:
             )
         )
         self._lock = threading.Lock()
-        self._jobs: dict[str, _JobRecord] = {}
+        self.store.interrupt_active_jobs()
+        stored_jobs = self.store.list_jobs()
+        self._jobs: dict[str, _JobRecord] = {
+            job.job_id: _JobRecord.from_stored_job(job) for job in stored_jobs
+        }
         self._active_resume_jobs: dict[str, str] = {}
         self._futures: set[Future[Any]] = set()
         self._max_retained_jobs = max_retained_jobs
+        with self._lock:
+            self._prune_terminal_jobs_locked()
 
     def submit_start(self, request: StartRunRequest) -> dict[str, object]:
         if not isinstance(request, StartRunRequest):
@@ -230,7 +267,7 @@ class WorkflowJobManager:
         with self._lock:
             jobs = list(self._jobs.values())
             if active_only:
-                jobs = [job for job in jobs if job.status in {"queued", "running"}]
+                jobs = [job for job in jobs if job.status in ACTIVE_JOB_STATUSES]
             return [job.to_dict() for job in jobs]
 
     def shutdown(self, wait: bool = True) -> None:
@@ -272,6 +309,10 @@ class WorkflowJobManager:
                 run_id=run_id,
                 reservation=reservation,
             )
+            stored = job.to_stored_job()
+            job.created_at = stored.created_at
+            job.updated_at = stored.updated_at
+            self.store.put_job(job.to_stored_job())
             self._jobs[job.job_id] = job
             if run_id is not None:
                 self._active_resume_jobs[run_id] = job.job_id
@@ -287,6 +328,7 @@ class WorkflowJobManager:
         except BaseException:
             with self._lock:
                 self._jobs.pop(job.job_id, None)
+                self.store.delete_job(job.job_id)
                 if job.run_id is not None:
                     self._active_resume_jobs.pop(job.run_id, None)
                 if job.reservation is not None:
@@ -306,6 +348,7 @@ class WorkflowJobManager:
         with self._lock:
             job = self._jobs[job_id]
             job.status = "running"
+            self._persist_job_locked(job)
         try:
             if job.reservation is None:
                 result = operation().to_dict()
@@ -316,6 +359,7 @@ class WorkflowJobManager:
             with self._lock:
                 job.status = "failed"
                 job.error = self._public_error(exc)
+                self._persist_job_locked(job)
             _LOGGER.exception("Workflow job %s failed", job_id)
             if not isinstance(exc, Exception):
                 raise
@@ -323,6 +367,7 @@ class WorkflowJobManager:
             with self._lock:
                 job.status = "succeeded"
                 job.result = result
+                self._persist_job_locked(job)
         finally:
             with self._lock:
                 self._release_job(job)
@@ -349,10 +394,11 @@ class WorkflowJobManager:
         )
         with self._lock:
             job = self._jobs.get(job_id)
-            if job is not None and job.status in {"queued", "running"}:
+            if job is not None and job.status in ACTIVE_JOB_STATUSES:
                 if job.status == "queued":
                     job.status = "failed"
                     job.error = self._public_error(failure)
+                    self._persist_job_locked(job)
                     self._release_job(job)
 
     def _release_job(self, job: _JobRecord) -> None:
@@ -366,11 +412,18 @@ class WorkflowJobManager:
         terminal_ids = [
             job_id
             for job_id, stored in self._jobs.items()
-            if stored.status in {"succeeded", "failed"}
+            if stored.status in {"succeeded", "failed", "interrupted"}
         ]
         overflow = len(terminal_ids) - self._max_retained_jobs
         for job_id in terminal_ids[:max(0, overflow)]:
             self._jobs.pop(job_id, None)
+            self.store.delete_job(job_id)
+
+    def _persist_job_locked(self, job: _JobRecord) -> None:
+        stored = job.to_stored_job().evolve()
+        job.created_at = stored.created_at
+        job.updated_at = stored.updated_at
+        self.store.put_job(stored)
 
     @staticmethod
     def _public_error(exc: BaseException) -> dict[str, str]:

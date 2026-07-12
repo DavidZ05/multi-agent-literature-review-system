@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here.
 
+## 0.4.0 - 2026-07-11
+
+### Added
+
+- Durable Workbench Job records in SQLite, including sanitized results and
+  errors.
+- Automatic reconciliation that marks queued or running Jobs `interrupted`
+  after a Workbench backend restart.
+- A one-time bilingual Workbench notice for interrupted Jobs.
+- `literature-review doctor` for first-run database, artifact, corpus, and
+  agent-configuration checks.
+- The `literature-review-workbench` command as a direct local UI launcher.
+- CI wheel builds, installed-command smoke tests, and source compilation.
+
+### Changed
+
+- SQLite schema version 4 adds `workflow_jobs` without altering existing runs,
+  candidates, decisions, events, or checkpoints.
+- Job state and its SQLite repository are separate modules, so Workbench
+  execution, persistence, and schema migration have explicit boundaries.
+- Public setup instructions now start with the local diagnostic command and
+  the dedicated Workbench launcher.
+
 ## 0.3.1 - 2026-07-10
 
 ### Fixed

@@ -1,5 +1,7 @@
 # Multi-Agent Literature Review System
 
+[![CI](https://github.com/DavidZ05/multi-agent-literature-review-system/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidZ05/multi-agent-literature-review-system/actions/workflows/ci.yml)
+
 A local-first workflow for running literature reviews with multiple agents. It can discover candidate papers, pause for human approval, draft a survey, run expert review, revise, polish, and verify citations before producing final artifacts.
 
 The default mode is deterministic and works offline from the checked-in corpus. API-backed writing and review agents are optional and OpenAI-compatible, but the citation gates stay deterministic.
@@ -13,7 +15,12 @@ git clone https://github.com/DavidZ05/multi-agent-literature-review-system.git
 cd multi-agent-literature-review-system
 python3 -m pip install -e .
 literature-review --help
+literature-review doctor
 ```
+
+`doctor` creates the local database and artifact directory when needed, then
+checks the packaged seed corpus and deterministic/API configuration. It does
+not call a remote model or literature provider.
 
 Run the deterministic one-shot workflow:
 
@@ -44,8 +51,12 @@ python3 -m unittest discover -s tests -v
 Start the local browser workbench:
 
 ```bash
-literature-review ui
+literature-review-workbench
 ```
+
+`literature-review ui` remains available and is equivalent. The dedicated
+command accepts `--db`, `--artifacts`, `--host`, `--port`, and `--no-browser`
+directly.
 
 The workbench serves a loopback-only site at `http://127.0.0.1:8765/`. It reads and writes the same local SQLite database and artifact directory as the CLI:
 
@@ -58,6 +69,10 @@ The selected run is stored in the URL and restored on reload. If no saved run
 exists, the newest stored run is selected. Active queued/running Jobs are
 recovered from the Workbench backend after a page refresh, so polling and the
 Job status banner continue without switching away from the run being viewed.
+Job history is stored in the same SQLite database. If the backend process stops
+before a queued or running Job finishes, the next launch marks that Job
+`interrupted` and shows a one-time Workbench notice. The research run and its
+checkpoints remain available; use `Resume` after inspecting the run state.
 
 Runtime paths go before the subcommand, while workbench options go after it:
 
@@ -220,8 +235,10 @@ multi-agent-literature-review-system/
 │   └── literature_review/
 │       ├── api/
 │       ├── discovery/
+│       ├── job_state.py
 │       ├── providers/
 │       ├── storage/
+│       │   └── jobs.py
 │       ├── workbench/
 │       └── workflow/
 └── tests/
@@ -233,6 +250,10 @@ multi-agent-literature-review-system/
 - `prompts/`: packaged model-agent prompt contracts.
 - `outputs/`: default one-shot artifacts.
 - `.review-workflow/`: ignored local persistent state created by CLI/workbench.
+
+The canonical implementation is already split by responsibility. The legacy
+`src/memory_review_pipeline.py` file contains no pipeline implementation; it is
+only a compatibility wrapper for older module commands and imports.
 
 ## Anti-Hallucination Design
 
@@ -252,7 +273,11 @@ The Writer can only cite keys present in the approved corpus. The Citation Audit
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
+python3 -m pip wheel . --no-deps --wheel-dir dist
 ```
+
+GitHub Actions runs these checks on macOS and Linux with Python 3.11 and 3.12,
+then installs the built wheel and smoke-tests both console commands.
 
 Live provider checks are opt-in:
 
