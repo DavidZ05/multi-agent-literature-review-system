@@ -93,10 +93,28 @@ class PersistentCLITests(unittest.TestCase):
         self.assertEqual(report["status"], "ok")
         self.assertEqual(
             [check["name"] for check in report["checks"]],
-            ["database", "artifacts", "default_corpus", "agent_configuration"],
+            [
+                "database",
+                "artifacts",
+                "default_corpus",
+                "agent_configuration",
+                "provider_plugins",
+                "agent_plugins",
+            ],
         )
         self.assertTrue(self.db_path.is_file())
         self.assertTrue(self.artifact_path.is_dir())
+
+    def test_plugins_command_lists_builtins_and_protected_roles(self) -> None:
+        code, report, stderr = self._run("plugins")
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(
+            [provider["id"] for provider in report["providers"]],
+            ["arxiv", "semantic_scholar"],
+        )
+        self.assertTrue(report["agents"]["reviewer"]["protected"])
+        self.assertFalse(report["agents"]["writer"]["protected"])
 
     def test_workbench_command_translates_dedicated_options(self) -> None:
         with patch.object(cli, "main", return_value=0) as run:

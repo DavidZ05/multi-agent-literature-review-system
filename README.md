@@ -213,6 +213,29 @@ SEMANTIC_SCHOLAR_API_KEY=
 
 Provider responses are cached in SQLite for 24 hours. arXiv calls are spaced by at least three seconds, and Semantic Scholar calls use conservative throttling. If every provider fails, the run enters `retry_wait` and can be resumed later. If some providers succeed and others fail, the run remains inspectable: the Workbench reports partial failures and lets the user decide whether to retry discovery, adjust the topic, configure `SEMANTIC_SCHOLAR_API_KEY`, or continue with approved/seed material.
 
+## Plugins
+
+Installed provider and Agent plugins are discovered through standard Python
+entry points. Inspect the active registry with:
+
+```bash
+literature-review plugins
+literature-review doctor
+```
+
+The Workbench builds its provider controls from this registry, so an installed
+provider appears in the new-run dialog after the Workbench restarts. Provider
+plugins use the `literature_review.providers` entry-point group. Replaceable
+Agent roles use `literature_review.agents`.
+
+The `search`, `reviewer`, and `final_verification` Agent roles are protected and
+cannot be replaced. This prevents a plugin from bypassing corpus provenance,
+citation auditing, or final post-polish verification. Plugins are trusted Python
+code and are not sandboxed.
+
+See [Plugin Development](docs/plugin_development.md) for complete contracts,
+packaging examples, replaceable roles, and reproducibility rules.
+
 ## Project Structure
 
 ```text
@@ -227,7 +250,8 @@ multi-agent-literature-review-system/
 │   │   ├── FINAL_SUBMISSION.md
 │   │   ├── design_document.md
 │   │   └── seed_corpus_review.md
-│   └── implementation_plan.md
+│   ├── implementation_plan.md
+│   └── plugin_development.md
 ├── outputs/
 ├── prompts/
 ├── src/
@@ -236,6 +260,7 @@ multi-agent-literature-review-system/
 │       ├── api/
 │       ├── discovery/
 │       ├── job_state.py
+│       ├── plugins/
 │       ├── providers/
 │       ├── storage/
 │       │   └── jobs.py

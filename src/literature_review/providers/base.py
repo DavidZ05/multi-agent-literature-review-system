@@ -11,6 +11,7 @@ from src.literature_review.models import (
 
 class SearchProvider(Protocol):
     provider_id: str
+    artifact_extension: str
 
     def search(self, query: SearchQuery) -> ProviderSearchResult: ...
 

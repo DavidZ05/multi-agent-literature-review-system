@@ -154,7 +154,7 @@ class StartRunRequestTests(unittest.TestCase):
             ({"topic": " "}, "topic must be nonblank"),
             ({"corpus_path": missing}, "corpus_path must be an existing file"),
             ({"discovery_enabled": True, "providers": ()}, "providers must be nonempty"),
-            ({"providers": ("crossref",)}, "unknown provider"),
+            ({"providers": ("Cross-Ref",)}, "invalid provider id"),
             ({"max_results": True}, "max_results must be an integer"),
             ({"max_results": 0}, "max_results must be between 1 and 50"),
             ({"max_results": 51}, "max_results must be between 1 and 50"),
@@ -299,6 +299,44 @@ class WorkflowJobManagerTests(unittest.TestCase):
         self.assertEqual(manager.list_jobs()[0]["run_id"], None)
         manager.shutdown(wait=False)
         self.assertEqual(executor.shutdown_calls, [False])
+
+    def test_manager_rejects_provider_that_is_not_registered(self) -> None:
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            executor=ManualExecutor(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "unknown provider: crossref"):
+            manager.submit_start(self._request(providers=("crossref",)))
+        manager.shutdown(wait=False)
+
+    def test_manager_accepts_provider_from_injected_plugin_catalog(self) -> None:
+        executor = ManualExecutor()
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            engine_builder=lambda *args, **kwargs: FakeEngine(
+                ResearchRun.create("Plugin provider")
+            ),
+            executor=executor,
+            provider_options=(
+                {
+                    "id": "crossref",
+                    "label": "Crossref",
+                    "source": "test",
+                    "default_enabled": False,
+                },
+            ),
+        )
+
+        accepted = manager.submit_start(self._request(providers=("crossref",)))
+
+        self.assertEqual(accepted["status"], "queued")
+        self.assertEqual(manager.provider_names, ("crossref",))
+        executor.run_next()
+        self.assertEqual(manager.get_job(accepted["job_id"])["status"], "succeeded")
+        manager.shutdown(wait=False)
 
     def test_manager_loads_history_and_marks_stale_active_job_interrupted(self) -> None:
         stale = WorkflowJob(

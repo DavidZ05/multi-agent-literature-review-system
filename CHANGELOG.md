@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here.
 
+## 0.5.0 - 2026-07-12
+
+### Added
+
+- Provider and Agent plugin registries with standard Python entry-point
+  discovery.
+- Dynamic Workbench provider controls generated from installed plugins.
+- `literature-review plugins` for inspecting provider sources, Agent sources,
+  installed versions, and protected roles.
+- A public plugin-development guide with packaging and contract examples.
+
+### Changed
+
+- Runtime artifacts record selected providers, the active Agent manifest, and
+  plugin distribution versions for checkpoint reproducibility.
+- Search, citation review, and final verification are protected core roles;
+  replaceable Agent plugins cannot override these safety gates.
+- Built-in providers remain enabled by default, while third-party providers
+  require explicit selection for each new run.
+
 ## 0.4.0 - 2026-07-11
 
 ### Added

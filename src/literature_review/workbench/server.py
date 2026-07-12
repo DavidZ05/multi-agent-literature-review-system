@@ -614,6 +614,7 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 "defaultCorpusPath": self.server.default_corpus_path,
                 "databasePath": self.server.database_path,
                 "artifactRoot": self.server.artifact_root,
+                "providers": list(self.server.job_manager.provider_options),
             },
             ensure_ascii=True,
             separators=(",", ":"),

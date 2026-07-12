@@ -284,7 +284,8 @@
         mutationToken: "",
         defaultCorpusPath: null,
         databasePath: "",
-        artifactRoot: ""
+        artifactRoot: "",
+        providers: []
       };
     }
   }
@@ -350,6 +351,28 @@
     return languages.some((language) => String(language).toLowerCase().startsWith("zh"))
       ? "zh-CN"
       : "en";
+  }
+
+  function renderProviderOptions() {
+    const container = byId("provider-options");
+    container.replaceChildren();
+    const providers = Array.isArray(config.providers) ? config.providers : [];
+    providers.forEach((provider) => {
+      if (!provider || !provider.id) return;
+      const label = document.createElement("label");
+      label.className = "check-row";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = "providers";
+      input.value = provider.id;
+      input.checked = provider.default_enabled !== false;
+      input.id = `provider-${provider.id.replaceAll("_", "-")}`;
+      const text = document.createElement("span");
+      text.textContent = provider.label || provider.id;
+      label.htmlFor = input.id;
+      label.append(input, text);
+      container.append(label);
+    });
   }
 
   function t(key, values = {}) {
@@ -1482,6 +1505,7 @@
     byId("new-run-corpus").value = config.defaultCorpusPath || "";
     byId("database-path").textContent = config.databasePath || "";
     byId("artifact-root").textContent = config.artifactRoot || "";
+    renderProviderOptions();
     bindEvents();
     applyLanguage(state.language);
     await loadRuns({ preserveSelection: true, fallbackToFirst: true });

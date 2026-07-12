@@ -18,6 +18,7 @@ from src.literature_review.providers.http import HttpTransport
 
 class SemanticScholarProvider:
     provider_id = "semantic_scholar"
+    artifact_extension = "json"
     endpoint = "https://api.semanticscholar.org/graph/v1"
     fields = "title,abstract,year,venue,authors,externalIds,url,openAccessPdf"
 

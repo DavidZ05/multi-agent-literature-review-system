@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from src.literature_review.api import OpenAIChatClient
 from src.literature_review.config import AgentRuntimeConfig
@@ -12,9 +12,15 @@ from src.literature_review.discovery import (
     QueryPlanner,
 )
 from src.literature_review.models import WorkflowStage
+from src.literature_review.plugins import (
+    AgentFactory,
+    ProviderContext,
+    ProviderPluginError,
+    ProviderRegistry,
+    build_agent_factory,
+    build_provider_registry,
+)
 from src.literature_review.providers import (
-    ArxivProvider,
-    SemanticScholarProvider,
     UrllibHttpTransport,
 )
 from src.literature_review.storage import (
@@ -31,9 +37,6 @@ from src.literature_review.workflow import (
     ScreeningHandler,
 )
 
-_DISCOVERY_PROVIDERS = frozenset({"arxiv", "semantic_scholar"})
-
-
 def build_engine(
     store: SQLiteWorkflowStore,
     artifact_root: Path,
@@ -42,8 +45,14 @@ def build_engine(
     providers: tuple[str, ...] = ("arxiv", "semantic_scholar"),
     max_results: int = 10,
     api_client: Any | None = None,
+    provider_registry: ProviderRegistry | None = None,
+    agent_factory: AgentFactory | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> PersistentWorkflowEngine:
-    runtime_config = AgentRuntimeConfig.from_env()
+    environment = os.environ if environment is None else environment
+    provider_registry = provider_registry or build_provider_registry()
+    agent_factory = agent_factory or build_agent_factory()
+    runtime_config = AgentRuntimeConfig.from_env(environment)
     if runtime_config.active_backend == "api" and api_client is None:
         api_client = OpenAIChatClient()
     handlers = {
@@ -51,28 +60,32 @@ def build_engine(
         WorkflowStage.DRAFTING: DraftingHandler(
             runtime_config,
             api_client=api_client,
+            agent_factory=agent_factory,
         ),
     }
     workflow_config = runtime_config.public_dict()
+    selected_provider_plugins = [
+        option
+        for option in provider_registry.options()
+        if discovery_enabled and option["id"] in providers
+    ]
     workflow_config.update(
         {
             "discovery_enabled": discovery_enabled,
             "discovery_providers": list(providers),
             "discovery_max_results": max_results,
+            "provider_plugins": selected_provider_plugins,
+            "agent_plugins": agent_factory.manifest(),
         }
     )
     if discovery_enabled:
         transport = UrllibHttpTransport()
         cache = SQLiteResponseCache(store.path)
-        provider_instances = {}
-        if "arxiv" in providers:
-            provider_instances["arxiv"] = ArxivProvider(transport, cache)
-        if "semantic_scholar" in providers:
-            provider_instances["semantic_scholar"] = SemanticScholarProvider(
-                transport,
-                cache,
-                api_key=os.environ.get("SEMANTIC_SCHOLAR_API_KEY", ""),
-            )
+        context = ProviderContext(transport, cache, environment)
+        provider_instances = {
+            provider_id: provider_registry.create(provider_id, context)
+            for provider_id in providers
+        }
         approval = ApprovalService(store)
         handlers.update(
             {
@@ -97,6 +110,8 @@ def build_engine(
 def load_resume_settings(
     artifact_store: LocalArtifactStore,
     run_id: str,
+    *,
+    provider_registry: ProviderRegistry | None = None,
 ) -> tuple[bool, tuple[str, ...], int]:
     request = artifact_store.read_json(run_id, "inputs/research_request.json")
     if not isinstance(request, dict):
@@ -119,9 +134,13 @@ def load_resume_settings(
     ):
         raise TypeError("stored discovery_providers must be a list of strings")
     providers = tuple(provider_values)
-    unknown_providers = set(providers) - _DISCOVERY_PROVIDERS
+    provider_registry = provider_registry or build_provider_registry()
+    unknown_providers = set(providers) - set(provider_registry.names())
     if unknown_providers:
-        raise ValueError("stored discovery_providers contains an unknown provider")
+        unknown = sorted(unknown_providers)[0]
+        raise ProviderPluginError(
+            f"stored discovery_providers contains unavailable provider: {unknown}"
+        )
     if enabled and not providers:
         raise ValueError("stored discovery_providers must be nonempty")
 

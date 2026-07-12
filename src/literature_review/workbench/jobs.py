@@ -5,6 +5,7 @@ from concurrent.futures import CancelledError, Executor, Future, ThreadPoolExecu
 from dataclasses import dataclass
 import logging
 from pathlib import Path
+import re
 import shlex
 import threading
 from typing import Any, Protocol
@@ -16,14 +17,15 @@ from src.literature_review.activity import (
 )
 from src.literature_review.job_state import ACTIVE_JOB_STATUSES, WorkflowJob
 from src.literature_review.models import CandidateStatus, ResearchRun, WorkflowStage
+from src.literature_review.plugins import build_provider_registry
 from src.literature_review.runtime import build_engine, load_resume_settings
 from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
 from src.literature_review.workbench.service import PendingCandidatesError
 
 
-_ALLOWED_PROVIDERS = frozenset({"arxiv", "semantic_scholar"})
 _COMMAND_PREFIX = ("python3", "-m", "src.memory_review_pipeline")
 _LOGGER = logging.getLogger(__name__)
+_PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 class WorkflowEngine(Protocol):
@@ -61,9 +63,9 @@ class StartRunRequest:
             raise TypeError("discovery_enabled must be a boolean")
 
         providers = self._normalize_providers(self.providers)
-        unknown = set(providers) - _ALLOWED_PROVIDERS
-        if unknown:
-            raise ValueError(f"unknown provider: {sorted(unknown)[0]}")
+        invalid = [provider for provider in providers if not _PROVIDER_ID.fullmatch(provider)]
+        if invalid:
+            raise ValueError(f"invalid provider id: {invalid[0]}")
         if self.discovery_enabled and not providers:
             raise ValueError("providers must be nonempty when discovery is enabled")
 
@@ -166,6 +168,7 @@ class WorkflowJobManager:
         executor: Executor | None = None,
         max_workers: int = 2,
         max_retained_jobs: int = 200,
+        provider_options: tuple[dict[str, object], ...] | None = None,
     ) -> None:
         if isinstance(max_retained_jobs, bool) or max_retained_jobs < 1:
             raise ValueError("max_retained_jobs must be a positive integer")
@@ -175,6 +178,15 @@ class WorkflowJobManager:
         self.artifact_root = Path(artifact_root).expanduser().resolve()
         self._engine_builder = engine_builder
         self._resume_settings_loader = resume_settings_loader
+        options = (
+            build_provider_registry().options()
+            if provider_options is None
+            else provider_options
+        )
+        self.provider_options = tuple(dict(option) for option in options)
+        self.provider_names = tuple(option["id"] for option in self.provider_options)
+        if not self.provider_names:
+            raise ValueError("at least one literature provider must be registered")
         self._activity = ActivityCoordinator.for_artifact_root(self.artifact_root)
         self._executor = (
             executor
@@ -206,6 +218,9 @@ class WorkflowJobManager:
             providers=request.providers,
             max_results=request.max_results,
         )
+        unknown = set(request.providers) - set(self.provider_names)
+        if unknown:
+            raise ValueError(f"unknown provider: {sorted(unknown)[0]}")
         reservation = self._activity.reserve_start()
         try:
             command = self._start_command(request)

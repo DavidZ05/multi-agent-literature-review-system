@@ -40,7 +40,7 @@ from src.literature_review.review import (
 from src.literature_review.search import SearchAgent
 from src.literature_review.writing import PolishAgent, WriterAgent
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "main",

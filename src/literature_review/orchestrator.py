@@ -7,16 +7,7 @@ from typing import Any
 
 from src.literature_review.config import AgentRuntimeConfig
 from src.literature_review.corpus import load_papers
-from src.literature_review.evaluation import EvaluationReflectionAgent
-from src.literature_review.review import (
-    DomainExpertAgent,
-    FinalVerificationReviewer,
-    ReviewerAgent,
-    ReviewSynthesizerAgent,
-    StructureMentorAgent,
-)
-from src.literature_review.search import SearchAgent
-from src.literature_review.writing import PolishAgent, WriterAgent
+from src.literature_review.plugins import AgentFactory, build_agent_factory
 
 
 class Orchestrator:
@@ -29,34 +20,33 @@ class Orchestrator:
         runtime_config: AgentRuntimeConfig | None = None,
         run_id: str | None = None,
         api_client: Any | None = None,
+        agent_factory: AgentFactory | None = None,
     ) -> None:
         self.corpus_path = corpus_path
         self.output_dir = output_dir
         self.runtime_config = runtime_config or AgentRuntimeConfig.from_env()
         self.run_id = run_id
         self.api_client = api_client
-        self.search_agent = SearchAgent(self.runtime_config)
-        self.writer_agent = WriterAgent(self.runtime_config, api_client=api_client)
-        self.reviewer_agent = ReviewerAgent(self.runtime_config)
-        self.domain_expert_agent = DomainExpertAgent(
-            self.runtime_config,
-            api_client=api_client,
+        self.agent_factory = agent_factory or build_agent_factory()
+        create = self.agent_factory.create
+        self.search_agent = create("search", self.runtime_config, api_client)
+        self.writer_agent = create("writer", self.runtime_config, api_client)
+        self.reviewer_agent = create("reviewer", self.runtime_config, api_client)
+        self.domain_expert_agent = create(
+            "domain_expert", self.runtime_config, api_client
         )
-        self.structure_mentor_agent = StructureMentorAgent(
-            self.runtime_config,
-            api_client=api_client,
+        self.structure_mentor_agent = create(
+            "structure_mentor", self.runtime_config, api_client
         )
-        self.review_synthesizer_agent = ReviewSynthesizerAgent(
-            self.runtime_config,
-            api_client=api_client,
+        self.review_synthesizer_agent = create(
+            "review_synthesizer", self.runtime_config, api_client
         )
-        self.polish_agent = PolishAgent(self.runtime_config, api_client=api_client)
-        self.final_verification_reviewer = FinalVerificationReviewer(
-            self.runtime_config
+        self.polish_agent = create("polish", self.runtime_config, api_client)
+        self.final_verification_reviewer = create(
+            "final_verification", self.runtime_config, api_client
         )
-        self.evaluation_reflection_agent = EvaluationReflectionAgent(
-            self.runtime_config,
-            api_client=api_client,
+        self.evaluation_reflection_agent = create(
+            "evaluation_reflection", self.runtime_config, api_client
         )
 
     def run(self, max_revision_loops: int = 2) -> dict[str, Any]:

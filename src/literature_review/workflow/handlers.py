@@ -16,6 +16,7 @@ from src.literature_review.discovery.service import (
 from src.literature_review.models import CandidateStatus
 from src.literature_review.models import WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
+from src.literature_review.plugins import AgentFactory
 from src.literature_review.workflow.engine import (
     RetryableStageError,
     StageContext,
@@ -147,10 +148,12 @@ class DraftingHandler:
         *,
         api_client: Any | None = None,
         orchestrator_factory: OrchestratorFactory = Orchestrator,
+        agent_factory: AgentFactory | None = None,
     ) -> None:
         self.runtime_config = runtime_config or AgentRuntimeConfig.from_env()
         self.api_client = api_client
         self.orchestrator_factory = orchestrator_factory
+        self.agent_factory = agent_factory
 
     def __call__(self, context: StageContext) -> StageResult:
         with TemporaryDirectory(prefix=f"{context.run.run_id}-") as temporary:
@@ -171,6 +174,8 @@ class DraftingHandler:
             }
             if self.api_client is not None:
                 kwargs["api_client"] = self.api_client
+            if self.agent_factory is not None:
+                kwargs["agent_factory"] = self.agent_factory
             orchestrator = self.orchestrator_factory(**kwargs)
             try:
                 orchestrator_result = orchestrator.run()

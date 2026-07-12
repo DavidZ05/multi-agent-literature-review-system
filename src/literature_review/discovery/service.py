@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import re
 from typing import Any, Callable, Mapping
 
 from src.literature_review.discovery.deduplication import deduplicate_papers
@@ -74,7 +75,15 @@ class DiscoveryService:
                 continue
             succeeded.add(query.provider)
             papers.extend(result.papers)
-            extension = "xml" if query.provider == "arxiv" else "json"
+            extension = getattr(
+                self.providers[query.provider],
+                "artifact_extension",
+                "json",
+            )
+            if not isinstance(extension, str) or not re.fullmatch(
+                r"[a-z0-9]{1,10}", extension
+            ):
+                raise ValueError("provider artifact_extension is invalid")
             artifacts[
                 f"discovery/raw/{query.provider}/{query.query_id}.{extension}"
             ] = result.raw_body.decode("utf-8", errors="replace")

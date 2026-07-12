@@ -22,12 +22,13 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("python -m compileall -q src tests", text)
         self.assertIn("python -m pip wheel . --no-deps --wheel-dir dist", text)
         self.assertIn("literature-review-workbench --help", text)
+        self.assertIn("literature-review plugins", text)
         self.assertIn("doctor", text)
 
     def test_public_project_files_are_ready_for_distribution(self) -> None:
         required_files = {
             "LICENSE": "MIT License",
-            "CHANGELOG.md": "0.4.0",
+            "CHANGELOG.md": "0.5.0",
             "CONTRIBUTING.md": "Contributing",
             "SECURITY.md": "Security",
         }
@@ -92,6 +93,7 @@ class PackagingTests(unittest.TestCase):
             "## Workbench",
             "## Deterministic and API Modes",
             "## Automatic Literature Discovery",
+            "## Plugins",
             "## Troubleshooting",
             "## Course Project Archive",
         ]
@@ -109,6 +111,8 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("literature-review --help", readme)
         self.assertIn("literature-review doctor", readme)
         self.assertIn("literature-review-workbench", readme)
+        self.assertIn("literature-review plugins", readme)
+        self.assertIn("docs/plugin_development.md", readme)
         self.assertIn("AGENT_BACKEND=deterministic", readme)
         self.assertIn("AGENT_BACKEND=api", readme)
         self.assertIn("SEMANTIC_SCHOLAR_API_KEY", readme)
@@ -130,6 +134,15 @@ class PackagingTests(unittest.TestCase):
         self.assertFalse((ROOT / "FINAL_SUBMISSION.md").exists())
         self.assertFalse((ROOT / "docs" / "design_document.md").exists())
         self.assertFalse((ROOT / "docs" / "seed_corpus_review.md").exists())
+
+    def test_plugin_development_guide_documents_entry_point_contracts(self) -> None:
+        guide = (ROOT / "docs" / "plugin_development.md").read_text(encoding="utf-8")
+
+        self.assertIn('literature_review.providers', guide)
+        self.assertIn('literature_review.agents', guide)
+        self.assertIn('ProviderContext', guide)
+        self.assertIn('final_verification', guide)
+        self.assertIn('trusted code', guide)
 
 
 if __name__ == "__main__":

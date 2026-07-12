@@ -42,5 +42,6 @@ jobs:
           python -m pip install --force-reinstall --no-deps dist/*.whl
           python -m pip check
           literature-review --help
+          literature-review plugins
           literature-review-workbench --help
           literature-review --db .ci/workflow.db --artifacts .ci/artifacts doctor

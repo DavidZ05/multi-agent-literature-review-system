@@ -18,6 +18,7 @@ from src.literature_review.providers.http import HttpTransport
 
 class ArxivProvider:
     provider_id = "arxiv"
+    artifact_extension = "xml"
     endpoint = "https://export.arxiv.org/api/query"
     _ATOM = "http://www.w3.org/2005/Atom"
     _ARXIV = "http://arxiv.org/schemas/atom"

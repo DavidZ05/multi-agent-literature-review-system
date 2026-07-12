@@ -962,6 +962,7 @@ class WorkbenchHTTPTests(unittest.TestCase):
                 "defaultCorpusPath": str(self.corpus_path),
                 "databasePath": str(self.store.path),
                 "artifactRoot": str(self.manager.artifact_root),
+                "providers": list(self.manager.provider_options),
             },
         )
         self.assertNotIn("__WORKBENCH_CONFIG__", body.decode("utf-8"))
@@ -1075,6 +1076,7 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             'id="feedback"',
             'id="equivalent-command"',
             'id="workbench-config"',
+            'id="provider-options"',
             'id="database-path"',
             'id="artifact-root"',
             'id="runtime-panel"',
@@ -1095,6 +1097,8 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, index)
         self.assertEqual(index.count("<h1"), 1)
+        self.assertNotIn('id="provider-arxiv"', index)
+        self.assertNotIn('id="provider-s2"', index)
 
     def test_client_declares_api_routes_statuses_and_translation_dictionaries(
         self,
@@ -1168,6 +1172,9 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             "await recoverActiveJobs()",
             'job.status === "interrupted"',
             't("jobInterrupted")',
+            "function renderProviderOptions(",
+            "config.providers",
+            'input.name = "providers"',
             "state.manualSelectionVersion += 1",
             "&& !state.selectedRunId",
             "fallbackToFirst = false",

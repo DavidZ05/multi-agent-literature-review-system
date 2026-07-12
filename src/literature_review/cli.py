@@ -19,6 +19,12 @@ from src.literature_review.corpus import load_papers
 from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import CandidateStatus, WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
+from src.literature_review.plugins import (
+    AgentPluginError,
+    ProviderPluginError,
+    build_agent_factory,
+    build_provider_registry,
+)
 from src.literature_review.runtime import build_engine, load_resume_settings
 from src.literature_review.storage import (
     CandidateDecisionNotAllowedError,
@@ -83,8 +89,9 @@ def _parser() -> argparse.ArgumentParser:
         "--providers",
         nargs="+",
         action=_ExtendTupleAction,
-        choices=("arxiv", "semantic_scholar"),
         default=("arxiv", "semantic_scholar"),
+        metavar="PROVIDER",
+        help="registered provider id; repeat or provide multiple values",
     )
     start.add_argument("--max-results", type=int, default=10)
 
@@ -132,6 +139,7 @@ def _parser() -> argparse.ArgumentParser:
     close.add_argument("run_id")
 
     commands.add_parser("doctor", help="check local installation and configuration")
+    commands.add_parser("plugins", help="list registered provider and agent plugins")
 
     ui = commands.add_parser("ui", help="open the local review workbench")
     ui.add_argument(
@@ -211,6 +219,14 @@ def _doctor_report(
     checked(
         "agent_configuration",
         lambda: AgentRuntimeConfig.from_env().active_backend,
+    )
+    checked(
+        "provider_plugins",
+        lambda: ", ".join(build_provider_registry().names()),
+    )
+    checked(
+        "agent_plugins",
+        lambda: ", ".join(build_agent_factory().manifest()),
     )
     status = "ok" if all(item["status"] == "ok" for item in checks) else "error"
     return (0 if status == "ok" else 2), {
@@ -316,6 +332,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             code, report = _doctor_report(store, args.artifacts)
             _print_json(report, stream=sys.stdout if code == 0 else sys.stderr)
             return code
+        if args.command == "plugins":
+            _print_json(
+                {
+                    "providers": list(build_provider_registry().options()),
+                    "agents": build_agent_factory().manifest(),
+                }
+            )
+            return 0
         if args.command == "status":
             _print_json(store.get_run(args.run_id).to_dict())
             return 0
@@ -487,6 +511,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     except AgentConfigurationError as exc:
         _print_configuration_error(exc)
+        return 2
+    except (ProviderPluginError, AgentPluginError) as exc:
+        _print_json(
+            {"error": "plugin_configuration_error", "message": str(exc)},
+            stream=sys.stderr,
+        )
         return 2
     except KeyboardInterrupt:
         interrupted_run_id = getattr(args, "run_id", None)

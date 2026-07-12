@@ -187,14 +187,7 @@
       </label>
       <fieldset class="provider-fields">
         <legend data-i18n="providers">Providers</legend>
-        <label class="check-row" for="provider-arxiv">
-          <input id="provider-arxiv" name="providers" type="checkbox" value="arxiv" checked>
-          <span>arXiv</span>
-        </label>
-        <label class="check-row" for="provider-s2">
-          <input id="provider-s2" name="providers" type="checkbox" value="semantic_scholar" checked>
-          <span>Semantic Scholar</span>
-        </label>
+        <div class="provider-options" id="provider-options"></div>
       </fieldset>
       <label for="new-run-max-results" data-i18n="maxResults">Maximum results per query</label>
       <input class="field number-field" id="new-run-max-results" name="max_results" type="number" value="10" min="1" max="50" required>
