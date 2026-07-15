@@ -330,6 +330,25 @@ class WorkbenchHTTPTests(unittest.TestCase):
         self.assertEqual(resume["kind"], "resume")
         self.assertEqual(resume["status"], "queued")
 
+    def test_discovery_retry_route_accepts_provider_query_controls(self) -> None:
+        self.prepare_approval_gate()
+
+        status, _, payload = self.request(
+            "POST",
+            f"/api/runs/{self.run.run_id}/retry-discovery",
+            {
+                "providers": ["arxiv"],
+                "max_results": 9,
+                "queries": ["agent memory benchmark"],
+            },
+            headers=self.mutation_headers(),
+        )
+
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["kind"], "discovery_retry")
+        self.assertIn("retry-discovery", payload["equivalent_command"])
+        self.assertIn("--providers=arxiv", payload["equivalent_command"])
+
     def test_run_and_candidate_mutation_route_families_return_service_payloads(
         self,
     ) -> None:
@@ -1087,8 +1106,13 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             'id="discovery-panel"',
             'id="discovery-summary-title"',
             'id="discovery-summary-status"',
+            'id="retry-discovery-button"',
+            'id="discovery-funnel"',
             'id="discovery-provider-list"',
+            'id="discovery-attempts"',
             'id="discovery-recommendations"',
+            'id="retry-discovery-dialog"',
+            'id="retry-queries"',
             'id="candidate-state-title"',
             'id="candidate-state-message"',
             "__WORKBENCH_CONFIG__",
@@ -1120,6 +1144,7 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             '"/resume"',
             '"/cancel"',
             '"/close-discovery"',
+            '"/retry-discovery"',
             '"waiting"',
             '"active"',
             '"paused"',
@@ -1174,7 +1199,10 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             't("jobInterrupted")',
             "function renderProviderOptions(",
             "config.providers",
-            'input.name = "providers"',
+            "input.name = name",
+            "function openRetryDiscoveryDialog(",
+            "async function retryDiscovery(",
+            "function queryLines(",
             "state.manualSelectionVersion += 1",
             "&& !state.selectedRunId",
             "fallbackToFirst = false",

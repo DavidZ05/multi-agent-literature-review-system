@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from src.literature_review.models import (
+    DiscoveryAttempt,
     ResearchRun,
     RunStatus,
     StageCheckpoint,
@@ -41,7 +42,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         self.store.initialize()
         with sqlite3.connect(self.path) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-        self.assertEqual(version, 4)
+        self.assertEqual(version, 5)
 
     def test_version_one_database_migrates_without_losing_data(self) -> None:
         legacy_path = Path(self.tmp.name) / "legacy.db"
@@ -97,7 +98,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             checkpoint,
         )
         with sqlite3.connect(legacy_path) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 5)
 
     def test_version_three_database_adds_durable_jobs(self) -> None:
         legacy_path = Path(self.tmp.name) / "version-three.db"
@@ -112,8 +113,63 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             table = connection.execute(
                 "SELECT name FROM sqlite_master WHERE name='workflow_jobs'"
             ).fetchone()
-        self.assertEqual(version, 4)
+        self.assertEqual(version, 5)
         self.assertEqual(table, ("workflow_jobs",))
+
+    def test_version_four_database_adds_discovery_attempts(self) -> None:
+        legacy_path = Path(self.tmp.name) / "version-four.db"
+        with sqlite3.connect(legacy_path) as connection:
+            connection.execute("PRAGMA user_version = 4")
+
+        legacy = SQLiteWorkflowStore(legacy_path)
+        legacy.initialize()
+
+        with sqlite3.connect(legacy_path) as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            table = connection.execute(
+                "SELECT name FROM sqlite_master WHERE name='discovery_attempts'"
+            ).fetchone()
+        self.assertEqual(version, 5)
+        self.assertEqual(table, ("discovery_attempts",))
+
+    def test_discovery_attempts_round_trip_in_creation_order(self) -> None:
+        self.store.create_run(self.run)
+        first = DiscoveryAttempt.create(
+            self.run.run_id,
+            ("arxiv",),
+            ("agent memory",),
+            10,
+        )
+        second = replace(
+            DiscoveryAttempt.create(
+                self.run.run_id,
+                ("semantic_scholar",),
+                ("memory benchmark",),
+                5,
+            ),
+            created_at=first.created_at,
+        )
+        self.store.put_discovery_attempt(first)
+        self.store.put_discovery_attempt(second)
+
+        self.assertEqual(self.store.get_discovery_attempt(first.attempt_id), first)
+        self.assertEqual(
+            self.store.list_discovery_attempts(self.run.run_id),
+            sorted((first, second), key=lambda item: (item.created_at, item.attempt_id)),
+        )
+
+    def test_active_discovery_attempt_can_be_failed_for_one_run(self) -> None:
+        self.store.create_run(self.run)
+        other = ResearchRun.create("Other topic")
+        self.store.create_run(other)
+        current = DiscoveryAttempt.create(self.run.run_id, ("arxiv",), ("memory",), 2)
+        untouched = DiscoveryAttempt.create(other.run_id, ("arxiv",), ("agents",), 2)
+        self.store.put_discovery_attempt(current)
+        self.store.put_discovery_attempt(untouched)
+
+        self.assertEqual(self.store.fail_active_discovery_attempts(self.run.run_id), 1)
+        self.assertEqual(self.store.get_discovery_attempt(current.attempt_id).status, "failed")
+        self.assertEqual(self.store.get_discovery_attempt(untouched.attempt_id).status, "running")
 
     def test_jobs_round_trip_and_active_jobs_are_interrupted(self) -> None:
         queued = WorkflowJob(
@@ -259,6 +315,18 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
                         "{}",
                     ),
                 )
+                connection.execute(
+                    """INSERT INTO discovery_attempts
+                    (attempt_id,run_id,status,created_at,payload_json)
+                    VALUES (?,?,?,?,?)""",
+                    (
+                        f"attempt-{run.run_id}",
+                        run.run_id,
+                        "succeeded",
+                        utc_now_iso(),
+                        "{}",
+                    ),
+                )
             connection.execute(
                 """INSERT INTO provider_response_cache
                 (cache_key,value,expires_at) VALUES (?,?,?)""",
@@ -280,6 +348,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
                 "search_queries",
                 "candidate_papers",
                 "corpus_decisions",
+                "discovery_attempts",
             ):
                 with self.subTest(table=table):
                     self.assertEqual(
@@ -394,11 +463,11 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
     def test_future_schema_is_rejected_without_change(self) -> None:
         future = Path(self.tmp.name) / "future.db"
         with sqlite3.connect(future) as connection:
-            connection.execute("PRAGMA user_version = 5")
+            connection.execute("PRAGMA user_version = 6")
         with self.assertRaises(UnsupportedSchemaVersionError):
             SQLiteWorkflowStore(future).initialize()
         with sqlite3.connect(future) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 5)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 6)
 
 
 class LocalArtifactStoreTests(unittest.TestCase):

@@ -32,18 +32,29 @@
       discoveryEmptyTitle: "Discovery completed with no approval candidates.",
       discoveryEmptyHint: "No papers are ready for approval. Review the discovery summary, then retry discovery or continue with the seed corpus.",
       discoverySummaryTitle: "Discovery summary", discoveryReview: "Discovery needs review",
+      retryDiscovery: "Retry discovery", retryDiscoveryHint: "Runs another discovery attempt in this research run. Existing candidates and decisions are preserved.",
+      runDiscoveryAttempt: "Run discovery attempt", discoveryRetryQueued: "Discovery retry queued.",
+      customQueries: "Custom queries", customQueriesPlaceholder: "One exact scholarly query per line",
+      customQueriesHint: "Optional. Enter one exact scholarly query per line; leave blank to use four generated queries.",
+      retryQueryHint: "Edit the generated suggestions or enter one exact query per line.",
+      queryRequired: "Enter no more than eight queries, one per line.",
+      funnelRaw: "Retrieved", funnelNormalized: "Normalized", funnelDeduplicated: "Deduplicated",
+      funnelScreened: "Screened", funnelNew: "New candidates", discoveryAttempts: "Attempts",
+      attemptSummary: "Attempt {number} · {status} · {providers}",
       continueSeedCorpus: "Continue with seed corpus",
       discoveryIssue_ok: "Discovery ready",
       discoveryIssue_not_run: "Discovery not run",
       discoveryIssue_running: "Discovery running",
       discoveryIssue_zero_candidates: "No approval candidates",
       discoveryIssue_partial_provider_failure: "Provider warning",
+      discoveryIssue_provider_failure: "Discovery provider failure",
       discoveryMessage_ok: "Discovery found candidate papers for human screening.",
       discoveryMessage_not_run: "This run did not use automatic literature discovery.",
       discoveryMessage_running: "Automatic discovery is still running. Provider results and candidate counts may change while the job is active.",
       discoveryMessage_zero_candidates: "Automatic discovery ran, but no provider result survived deduplication and screening. The workflow is paused so you can review the cause before drafting.",
       discoveryMessage_zero_candidates_completed: "Automatic discovery ran, but no provider result survived deduplication and screening. This older run already completed; new zero-candidate runs pause for review before drafting.",
       discoveryMessage_partial_provider_failure: "Discovery found candidates, but at least one provider failed or was rate limited. Review the provider details before continuing.",
+      discoveryMessage_provider_failure: "The selected providers did not return a usable response. Adjust the providers or queries, then retry this run.",
       providerSummary: "{provider}: {queries} queries, {results} results, {failures} failures",
       providerError_rate_limited: "Latest error: rate limited. Add an API key or retry later.",
       providerError_network_unavailable: "Latest error: network unavailable. Retry later.",
@@ -76,6 +87,7 @@
       pending: "Pending", recommended: "Recommended", approved: "Approved", all: "All sources",
       rejected: "Rejected", deferred: "Deferred", include: "Include", review: "Review", exclude: "Exclude",
       waiting: "Waiting", active: "Active", paused: "Paused", retry_wait: "Retry wait",
+      running: "Running", succeeded: "Succeeded", partial: "Partial",
       failed: "Failed", cancelled: "Cancelled", completed: "Completed",
       waitingApproval: "Waiting for approval", candidatesCount: "{count} candidates",
       deduplicatedCount: "{count} deduplicated candidates", runMeta: "{id} · {stage} · corpus v{version}",
@@ -134,18 +146,29 @@
       discoveryEmptyTitle: "检索已完成，但没有需要审批的候选论文。",
       discoveryEmptyHint: "当前没有可审批论文。请先查看上方检索摘要，再选择重新检索或用种子语料继续。",
       discoverySummaryTitle: "检索摘要", discoveryReview: "检索需要确认",
+      retryDiscovery: "重新检索", retryDiscoveryHint: "在当前研究任务中运行新一轮检索；已有候选论文和审批决定都会保留。",
+      runDiscoveryAttempt: "运行本轮检索", discoveryRetryQueued: "重新检索任务已进入队列。",
+      customQueries: "自定义检索式", customQueriesPlaceholder: "每行填写一条精确的学术检索式",
+      customQueriesHint: "可选。每行一条精确检索式；留空时自动生成四条检索式。",
+      retryQueryHint: "可以修改系统建议，也可以每行填写一条精确检索式。",
+      queryRequired: "最多填写八条检索式，每行一条。",
+      funnelRaw: "原始结果", funnelNormalized: "标准化", funnelDeduplicated: "去重后",
+      funnelScreened: "筛选后", funnelNew: "新增候选", discoveryAttempts: "检索轮次",
+      attemptSummary: "第 {number} 轮 · {status} · {providers}",
       continueSeedCorpus: "使用种子语料继续",
       discoveryIssue_ok: "检索可用",
       discoveryIssue_not_run: "未运行检索",
       discoveryIssue_running: "正在检索",
       discoveryIssue_zero_candidates: "没有可审批候选",
       discoveryIssue_partial_provider_failure: "检索平台警告",
+      discoveryIssue_provider_failure: "检索平台失败",
       discoveryMessage_ok: "自动检索找到了候选论文，可以进入人工筛选。",
       discoveryMessage_not_run: "此任务没有启用自动文献检索。",
       discoveryMessage_running: "自动检索仍在运行。任务完成前，检索结果和候选数量都可能继续变化。",
       discoveryMessage_zero_candidates: "自动检索已经运行，但没有文献通过去重和筛选。工作流已暂停，方便你先确认原因再生成综述。",
       discoveryMessage_zero_candidates_completed: "自动检索已经运行，但没有文献通过去重和筛选。这个旧任务已经完成；新的 0 候选任务会在生成综述前暂停等待确认。",
       discoveryMessage_partial_provider_failure: "检索找到了候选论文，但至少一个平台失败或被限流。继续前建议查看平台细节。",
+      discoveryMessage_provider_failure: "所选平台没有返回可用结果。请调整平台或检索式，然后在当前任务中重新检索。",
       providerSummary: "{provider}：{queries} 次查询，{results} 条结果，{failures} 次失败",
       providerError_rate_limited: "最近错误：请求被限流。可以配置 API key 或稍后重试。",
       providerError_network_unavailable: "最近错误：网络不可用。可以稍后重试。",
@@ -178,6 +201,7 @@
       pending: "待处理", recommended: "推荐", approved: "已批准", all: "全部来源",
       rejected: "已拒绝", deferred: "暂缓", include: "纳入", review: "复核", exclude: "排除",
       waiting: "等待中", active: "运行中", paused: "已暂停", retry_wait: "等待重试",
+      running: "运行中", succeeded: "成功", partial: "部分成功",
       failed: "失败", cancelled: "已取消", completed: "已完成",
       waitingApproval: "等待人工审批", candidatesCount: "{count} 篇候选论文",
       deduplicatedCount: "{count} 篇去重候选论文", runMeta: "{id} · {stage} · 语料版本 {version}",
@@ -219,7 +243,8 @@
     reject: "/reject",
     resume: "/resume",
     cancel: "/cancel",
-    closeDiscovery: "/close-discovery"
+    closeDiscovery: "/close-discovery",
+    retryDiscovery: "/retry-discovery"
   });
   const runStatuses = Object.freeze([
     "waiting", "active", "paused", "retry_wait", "failed", "cancelled", "completed"
@@ -354,24 +379,29 @@
   }
 
   function renderProviderOptions() {
-    const container = byId("provider-options");
-    container.replaceChildren();
     const providers = Array.isArray(config.providers) ? config.providers : [];
-    providers.forEach((provider) => {
-      if (!provider || !provider.id) return;
-      const label = document.createElement("label");
-      label.className = "check-row";
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.name = "providers";
-      input.value = provider.id;
-      input.checked = provider.default_enabled !== false;
-      input.id = `provider-${provider.id.replaceAll("_", "-")}`;
-      const text = document.createElement("span");
-      text.textContent = provider.label || provider.id;
-      label.htmlFor = input.id;
-      label.append(input, text);
-      container.append(label);
+    [
+      ["provider-options", "providers", "provider"],
+      ["retry-provider-options", "retry-providers", "retry-provider"]
+    ].forEach(([containerId, name, prefix]) => {
+      const container = byId(containerId);
+      container.replaceChildren();
+      providers.forEach((provider) => {
+        if (!provider || !provider.id) return;
+        const label = document.createElement("label");
+        label.className = "check-row";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.name = name;
+        input.value = provider.id;
+        input.checked = provider.default_enabled !== false;
+        input.id = `${prefix}-${provider.id.replaceAll("_", "-")}`;
+        const text = document.createElement("span");
+        text.textContent = provider.label || provider.id;
+        label.htmlFor = input.id;
+        label.append(input, text);
+        container.append(label);
+      });
     });
   }
 
@@ -391,6 +421,9 @@
     });
     document.querySelectorAll("[data-i18n-aria]").forEach((element) => {
       element.setAttribute("aria-label", t(element.dataset.i18nAria));
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {
+      element.setAttribute("placeholder", t(element.dataset.i18nPlaceholder));
     });
     const toggle = byId("language-toggle");
     toggle.setAttribute("aria-label", state.language === "zh-CN" ? "Switch interface to English" : "切换界面为中文");
@@ -849,6 +882,25 @@
       : `discoveryMessage_${summary.issue || "not_run"}`;
     byId("discovery-summary-message").textContent = t(messageKey);
 
+    const funnel = byId("discovery-funnel");
+    funnel.replaceChildren();
+    const funnelValues = summary.funnel || {};
+    [
+      ["funnelRaw", "raw_results"],
+      ["funnelNormalized", "normalized"],
+      ["funnelDeduplicated", "deduplicated"],
+      ["funnelScreened", "screened"],
+      ["funnelNew", "new_candidates"]
+    ].forEach(([labelKey, valueKey]) => {
+      const item = document.createElement("div");
+      const label = document.createElement("dt");
+      const value = document.createElement("dd");
+      label.textContent = t(labelKey);
+      value.textContent = String(Number(funnelValues[valueKey] || 0));
+      item.append(label, value);
+      funnel.append(item);
+    });
+
     const providers = byId("discovery-provider-list");
     providers.replaceChildren();
     (summary.providers || []).forEach((provider) => {
@@ -879,6 +931,26 @@
       }
       providers.append(item);
     });
+
+    const attempts = byId("discovery-attempts");
+    attempts.replaceChildren();
+    const attemptHistory = state.detail && Array.isArray(state.detail.discovery_attempts)
+      ? state.detail.discovery_attempts
+      : [];
+    if (attemptHistory.length) {
+      const heading = document.createElement("strong");
+      heading.textContent = t("discoveryAttempts");
+      attempts.append(heading);
+      attemptHistory.slice().reverse().slice(0, 5).forEach((attempt, index) => {
+        const line = document.createElement("span");
+        line.textContent = t("attemptSummary", {
+          number: attemptHistory.length - index,
+          status: t(attempt.status || "unknown"),
+          providers: (attempt.providers || []).join(", ") || t("unknown")
+        });
+        attempts.append(line);
+      });
+    }
 
     const recommendations = byId("discovery-recommendations");
     recommendations.replaceChildren();
@@ -930,7 +1002,9 @@
       button.setAttribute("aria-pressed", String(active));
     });
     byId("candidate-count").textContent = t("deduplicatedCount", { count: counts.all });
-    const showDiscoveryEmpty = candidates.length === 0 && counts.all === 0 && isZeroCandidateDiscovery();
+    const showDiscoveryEmpty = candidates.length === 0
+      && counts.all === 0
+      && ["zero_candidates", "provider_failure"].includes(discoverySummary().issue);
     byId("candidates-empty").hidden = candidates.length !== 0 || showDiscoveryEmpty;
     byId("discovery-empty").hidden = !showDiscoveryEmpty;
     candidates.forEach((candidate) => body.append(candidateRow(candidate)));
@@ -1083,6 +1157,11 @@
       !hasRun || mutationPending || !deletableRunStatuses.has(run && run.status);
     byId("resume-run-button").disabled = !hasRun || mutationPending || ["active", "completed", "cancelled"].includes(run && run.status);
     byId("close-discovery-button").disabled = !hasRun || mutationPending || run.current_stage !== "awaiting_corpus_approval";
+    const canRetryDiscovery = hasRun && (
+      (run.status === "waiting" && run.current_stage === "awaiting_corpus_approval")
+      || (run.status === "retry_wait" && run.current_stage === "discovering")
+    );
+    byId("retry-discovery-button").disabled = mutationPending || !canRetryDiscovery;
     byId("new-run-button").disabled = mutationPending;
     document.querySelectorAll(".run-button").forEach((link) => {
       const disabled = state.pending || state.deletingRun;
@@ -1214,9 +1293,14 @@
   async function startRun(event) {
     event.preventDefault();
     const discover = byId("new-run-discover").checked;
-    const providers = Array.from(document.querySelectorAll('input[name="providers"]:checked')).map((input) => input.value);
+    const providers = selectedProviders("providers");
     if (discover && providers.length === 0) {
       showFeedback(t("providerRequired"), true);
+      return;
+    }
+    const queries = queryLines("new-run-queries");
+    if (queries.length > 8 || queries.some((query) => query.length > 300)) {
+      showFeedback(t("queryRequired"), true);
       return;
     }
     const body = {
@@ -1224,7 +1308,8 @@
       corpus_path: byId("new-run-corpus").value,
       discover,
       providers,
-      max_results: Number(byId("new-run-max-results").value)
+      max_results: Number(byId("new-run-max-results").value),
+      queries
     };
     await withPending(async () => {
       const payload = await api("/api/runs", { method: "POST", body });
@@ -1241,6 +1326,73 @@
       closeDialog("new-run-dialog");
       await refreshStartJobRuns(payload.job_id);
       scheduleJobPoll();
+    });
+  }
+
+  function selectedProviders(name) {
+    return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`))
+      .map((input) => input.value);
+  }
+
+  function queryLines(id) {
+    const queries = byId(id).value
+      .split(/\r?\n/)
+      .map((query) => query.trim().replace(/\s+/g, " "))
+      .filter(Boolean);
+    return Array.from(new Set(queries));
+  }
+
+  function openRetryDiscoveryDialog() {
+    const summary = discoverySummary();
+    const latest = summary.latest_attempt || {};
+    const preferred = new Set(
+      (latest.failed_providers && latest.failed_providers.length)
+        ? latest.failed_providers
+        : (latest.providers || [])
+    );
+    document.querySelectorAll('input[name="retry-providers"]').forEach((input) => {
+      input.checked = preferred.size ? preferred.has(input.value) : input.checked;
+    });
+    byId("retry-max-results").value = String(latest.max_results || 10);
+    const queries = (latest.query_texts && latest.query_texts.length)
+      ? latest.query_texts
+      : (summary.suggested_queries || []);
+    byId("retry-queries").value = queries.join("\n");
+    openDialog("retry-discovery-dialog");
+  }
+
+  async function retryDiscovery(event) {
+    event.preventDefault();
+    const providers = selectedProviders("retry-providers");
+    const queries = queryLines("retry-queries");
+    if (!providers.length) {
+      showFeedback(t("providerRequired"), true);
+      return;
+    }
+    if (queries.length > 8 || queries.some((query) => query.length > 300)) {
+      showFeedback(t("queryRequired"), true);
+      return;
+    }
+    const runId = state.selectedRunId;
+    if (!runId) return;
+    await withPending(async () => {
+      const payload = await api(
+        `/api/runs/${encodeURIComponent(runId)}${apiPaths.retryDiscovery}`,
+        {
+          method: "POST",
+          body: {
+            providers,
+            max_results: Number(byId("retry-max-results").value),
+            queries
+          }
+        }
+      );
+      showCommand(payload);
+      state.jobIds.add(payload.job_id);
+      showFeedback(t("discoveryRetryQueued"));
+      closeDialog("retry-discovery-dialog");
+      scheduleJobPoll();
+      await refreshRunDetail(runId);
     });
   }
 
@@ -1457,6 +1609,7 @@
     byId("empty-new-run-button").addEventListener("click", () => openDialog("new-run-dialog"));
     byId("events-button").addEventListener("click", openEvents);
     byId("resume-run-button").addEventListener("click", () => mutateRun("resume", "jobQueued"));
+    byId("retry-discovery-button").addEventListener("click", openRetryDiscoveryDialog);
     byId("cancel-run-button").addEventListener("click", () => mutateRun("cancel", "runCancelled"));
     byId("delete-run-button").addEventListener("click", openDeleteRunDialog);
     byId("delete-run-close-button").addEventListener("click", () => dismissDeleteRunDialog());
@@ -1469,6 +1622,7 @@
     byId("close-discovery-button").addEventListener("click", () => mutateRun("close-discovery", "discoveryClosed"));
     byId("retry-load-button").addEventListener("click", () => loadRuns({ preserveSelection: false }));
     byId("new-run-form").addEventListener("submit", startRun);
+    byId("retry-discovery-form").addEventListener("submit", retryDiscovery);
     byId("approval-form").addEventListener("submit", (event) => {
       event.preventDefault();
       decideCandidate("approve");
@@ -1493,6 +1647,8 @@
       document.querySelectorAll('input[name="providers"]').forEach((input) => {
         input.disabled = !event.target.checked;
       });
+      byId("new-run-max-results").disabled = !event.target.checked;
+      byId("new-run-queries").disabled = !event.target.checked;
     });
     window.addEventListener("pagehide", () => {
       state.stopped = true;

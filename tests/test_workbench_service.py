@@ -12,6 +12,7 @@ from src.literature_review.discovery import ApprovalService
 from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
+    DiscoveryAttempt,
     ResearchRun,
     RunStatus,
     ScreeningRecommendation,
@@ -150,6 +151,7 @@ class WorkbenchServiceTests(unittest.TestCase):
                     "deferred": 0,
                 },
                 "events": [event.to_dict()],
+                "discovery_attempts": [],
                 "candidates": [
                     self.approved.to_dict(),
                     self.pending.to_dict(),
@@ -171,6 +173,21 @@ class WorkbenchServiceTests(unittest.TestCase):
                     "total_queries": 0,
                     "total_results": 0,
                     "total_failures": 0,
+                    "attempt_count": 0,
+                    "latest_attempt": None,
+                    "funnel": {
+                        "raw_results": 0,
+                        "normalized": 0,
+                        "deduplicated": 2,
+                        "screened": 2,
+                        "new_candidates": 2,
+                    },
+                    "suggested_queries": [
+                        "Older topic",
+                        "Older topic survey",
+                        "Older topic evaluation",
+                        "Older topic reliability",
+                    ],
                     "providers": [],
                     "corpus_alignment": {
                         "status": "unknown",
@@ -181,6 +198,34 @@ class WorkbenchServiceTests(unittest.TestCase):
             },
         )
         json.dumps(detail)
+
+    def test_discovery_attempt_enables_summary_without_legacy_events(self) -> None:
+        attempt = replace(
+            DiscoveryAttempt.create(
+                self.newer_run.run_id,
+                ("arxiv",),
+                ("newer topic survey",),
+                5,
+            ),
+            status="succeeded",
+            raw_result_count=4,
+            normalized_count=4,
+            deduplicated_count=3,
+            screened_count=3,
+            new_candidate_count=3,
+            completed_at=utc_now_iso(),
+        )
+        self.store.put_discovery_attempt(attempt)
+
+        summary = self.service.get_run_detail(self.newer_run.run_id)[
+            "discovery_summary"
+        ]
+
+        self.assertTrue(summary["enabled"])
+        self.assertEqual(summary["issue"], "zero_candidates")
+        self.assertEqual(summary["attempt_count"], 1)
+        self.assertEqual(summary["funnel"]["raw_results"], 4)
+        self.assertEqual(summary["funnel"]["new_candidates"], 3)
 
     def test_get_run_detail_summarizes_zero_candidate_discovery(self) -> None:
         run = replace(
@@ -259,6 +304,21 @@ class WorkbenchServiceTests(unittest.TestCase):
                 "total_queries": 1,
                 "total_results": 0,
                 "total_failures": 1,
+                "attempt_count": 0,
+                "latest_attempt": None,
+                "funnel": {
+                    "raw_results": 0,
+                    "normalized": 0,
+                    "deduplicated": 0,
+                    "screened": 0,
+                    "new_candidates": 0,
+                },
+                "suggested_queries": [
+                    "Football",
+                    "Football survey",
+                    "Football evaluation",
+                    "Football reliability",
+                ],
                 "providers": [
                     {
                         "provider": "arxiv",

@@ -187,6 +187,16 @@ html[lang="zh-CN"] .lang-zh, html[lang="en"] .lang-en { color: var(--accent); fo
   font-size: 13px;
   line-height: 18px;
 }
+.discovery-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.wb-btn.compact {
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: 11px;
+}
 #discovery-summary-status {
   flex: none;
   color: #76520f;
@@ -200,6 +210,32 @@ html[lang="zh-CN"] .lang-zh, html[lang="en"] .lang-en { color: var(--accent); fo
   color: #4e596b;
   font-size: 12px;
   line-height: 1.45;
+}
+.discovery-funnel {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  margin: 10px 0 0;
+  overflow: hidden;
+  border: 1px solid #e1e6ed;
+  border-radius: 5px;
+  background: #e1e6ed;
+}
+.discovery-funnel div {
+  min-width: 0;
+  padding: 7px 8px;
+  background: var(--surface);
+}
+.discovery-funnel dt {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+.discovery-funnel dd {
+  margin: 3px 0 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 720;
 }
 .discovery-provider-list {
   display: grid;
@@ -227,6 +263,15 @@ html[lang="zh-CN"] .lang-zh, html[lang="en"] .lang-en { color: var(--accent); fo
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+.discovery-attempts {
+  display: grid;
+  gap: 3px;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.discovery-attempts strong { color: var(--text); font-size: 11px; }
 .discovery-recommendations {
   display: grid;
   gap: 4px;
@@ -323,6 +368,13 @@ html[lang="zh-CN"] .lang-zh, html[lang="en"] .lang-en { color: var(--accent); fo
   line-height: 1.4;
 }
 textarea.field { resize: vertical; }
+.field-hint, .dialog-intro {
+  margin: -7px 0 14px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.dialog-intro { margin: 0 0 14px; }
 .decision-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 2px; }
 .decision { min-height: 32px; padding: 8px 5px; font-size: 11px; }
 .command-panel { min-height: 58px; margin-top: 12px; padding: 8px; border-radius: 5px; background: var(--canvas); color: #3f4b5d; font-size: 10px; line-height: 1.45; }
@@ -425,6 +477,9 @@ dialog::backdrop { background: rgba(23, 32, 51, .42); }
   .run-title { display: grid; grid-template-columns: 1fr; }
   .status-badge { justify-self: start; margin-top: 8px; }
   .runtime-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .discovery-panel-head { align-items: flex-start; }
+  .discovery-panel-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .discovery-funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .discovery-provider-list { grid-template-columns: 1fr; }
   .candidate-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .table-wrap { overflow: visible; background: var(--surface-soft); }

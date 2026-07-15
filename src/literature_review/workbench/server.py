@@ -19,6 +19,7 @@ from src.literature_review.storage import (
 from src.literature_review.workbench.jobs import (
     DuplicateResumeJobError,
     JobNotFoundError,
+    RetryDiscoveryRequest,
     StartRunRequest,
     WorkflowJobManager,
 )
@@ -301,7 +302,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         if (
             len(segments) == 4
             and segments[:2] == ["api", "runs"]
-            and segments[3] in {"resume", "cancel", "close-discovery"}
+            and segments[3]
+            in {"resume", "cancel", "close-discovery", "retry-discovery"}
         ):
             body = self._read_json_body()
             return self._run_action(segments[2], segments[3], body)
@@ -336,16 +338,16 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         raise _APIError(404, "not_found", "The requested resource was not found.")
 
     def _start_run(self, body: Mapping[str, object]) -> dict[str, object]:
-        self._require_fields(
-            body,
-            {"topic", "corpus_path", "discover", "providers", "max_results"},
-        )
+        required = {"topic", "corpus_path", "discover", "providers", "max_results"}
+        if set(body) not in {frozenset(required), frozenset(required | {"queries"})}:
+            raise _APIError(400, "invalid_request", "Request validation failed.")
         request = StartRunRequest(
             topic=body["topic"],  # type: ignore[arg-type]
             corpus_path=body["corpus_path"],  # type: ignore[arg-type]
             discovery_enabled=body["discover"],  # type: ignore[arg-type]
             providers=body["providers"],  # type: ignore[arg-type]
             max_results=body["max_results"],  # type: ignore[arg-type]
+            query_texts=body.get("queries", ()),  # type: ignore[arg-type]
         )
         return self.server.job_manager.submit_start(request)
 
@@ -355,12 +357,24 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         action: str,
         body: Mapping[str, object],
     ) -> tuple[int, object]:
-        self._require_fields(body, set())
         if action == "resume":
+            self._require_fields(body, set())
             return 202, self.server.job_manager.submit_resume(run_id)
+        if action == "retry-discovery":
+            self._require_fields(body, {"providers", "max_results", "queries"})
+            return 202, self.server.job_manager.submit_discovery_retry(
+                RetryDiscoveryRequest(
+                    run_id=run_id,
+                    providers=body["providers"],  # type: ignore[arg-type]
+                    max_results=body["max_results"],  # type: ignore[arg-type]
+                    query_texts=body["queries"],  # type: ignore[arg-type]
+                )
+            )
         if action == "cancel":
+            self._require_fields(body, set())
             return 200, self.server.workbench_service.cancel_run(run_id)
         if action == "close-discovery":
+            self._require_fields(body, set())
             return 200, self.server.workbench_service.close_discovery(run_id)
         raise _APIError(404, "not_found", "The requested resource was not found.")
 

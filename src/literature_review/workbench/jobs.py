@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from concurrent.futures import CancelledError, Executor, Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 from pathlib import Path
 import re
@@ -16,9 +16,20 @@ from src.literature_review.activity import (
     ActivityReservation,
 )
 from src.literature_review.job_state import ACTIVE_JOB_STATUSES, WorkflowJob
-from src.literature_review.models import CandidateStatus, ResearchRun, WorkflowStage
+from src.literature_review.models import (
+    CandidateStatus,
+    ResearchRun,
+    RunStatus,
+    WorkflowStage,
+    utc_now_iso,
+)
 from src.literature_review.plugins import build_provider_registry
-from src.literature_review.runtime import build_engine, load_resume_settings
+from src.literature_review.runtime import (
+    build_engine,
+    load_resume_query_texts,
+    load_resume_settings,
+    retry_discovery,
+)
 from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
 from src.literature_review.workbench.service import PendingCandidatesError
 
@@ -39,6 +50,7 @@ ResumeSettingsLoader = Callable[
     [LocalArtifactStore, str],
     tuple[bool, tuple[str, ...], int],
 ]
+ResumeQueryLoader = Callable[[LocalArtifactStore, str], tuple[str, ...]]
 
 
 @dataclass(frozen=True)
@@ -48,6 +60,7 @@ class StartRunRequest:
     discovery_enabled: bool = False
     providers: tuple[str, ...] = ("arxiv", "semantic_scholar")
     max_results: int = 10
+    query_texts: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.topic, str):
@@ -73,10 +86,12 @@ class StartRunRequest:
             raise TypeError("max_results must be an integer")
         if not 1 <= self.max_results <= 50:
             raise ValueError("max_results must be between 1 and 50")
+        query_texts = self._normalize_queries(self.query_texts)
 
         object.__setattr__(self, "topic", topic)
         object.__setattr__(self, "corpus_path", corpus_path)
         object.__setattr__(self, "providers", providers)
+        object.__setattr__(self, "query_texts", query_texts)
 
     @staticmethod
     def _normalize_providers(providers: Iterable[str]) -> tuple[str, ...]:
@@ -90,6 +105,51 @@ class StartRunRequest:
             if value not in normalized:
                 normalized.append(value)
         return tuple(normalized)
+
+    @staticmethod
+    def _normalize_queries(query_texts: Iterable[str]) -> tuple[str, ...]:
+        if isinstance(query_texts, str):
+            raise TypeError("query_texts must be an iterable of strings")
+        normalized: list[str] = []
+        for query in query_texts:
+            if not isinstance(query, str):
+                raise TypeError("query_texts must contain strings")
+            value = " ".join(query.split())
+            if not value:
+                continue
+            if len(value) > 300:
+                raise ValueError("each query must be at most 300 characters")
+            if value not in normalized:
+                normalized.append(value)
+        if len(normalized) > 8:
+            raise ValueError("at most 8 custom queries are allowed")
+        return tuple(normalized)
+
+
+@dataclass(frozen=True)
+class RetryDiscoveryRequest:
+    run_id: str
+    providers: tuple[str, ...]
+    max_results: int
+    query_texts: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        providers = StartRunRequest._normalize_providers(self.providers)
+        if not providers:
+            raise ValueError("providers must be nonempty")
+        invalid = [provider for provider in providers if not _PROVIDER_ID.fullmatch(provider)]
+        if invalid:
+            raise ValueError(f"invalid provider id: {invalid[0]}")
+        if isinstance(self.max_results, bool) or not isinstance(self.max_results, int):
+            raise TypeError("max_results must be an integer")
+        if not 1 <= self.max_results <= 50:
+            raise ValueError("max_results must be between 1 and 50")
+        object.__setattr__(self, "providers", providers)
+        object.__setattr__(
+            self,
+            "query_texts",
+            StartRunRequest._normalize_queries(self.query_texts),
+        )
 
 
 class DuplicateResumeJobError(RuntimeError):
@@ -165,6 +225,7 @@ class WorkflowJobManager:
         *,
         engine_builder: EngineBuilder = build_engine,
         resume_settings_loader: ResumeSettingsLoader = load_resume_settings,
+        resume_query_loader: ResumeQueryLoader = load_resume_query_texts,
         executor: Executor | None = None,
         max_workers: int = 2,
         max_retained_jobs: int = 200,
@@ -178,6 +239,7 @@ class WorkflowJobManager:
         self.artifact_root = Path(artifact_root).expanduser().resolve()
         self._engine_builder = engine_builder
         self._resume_settings_loader = resume_settings_loader
+        self._resume_query_loader = resume_query_loader
         options = (
             build_provider_registry().options()
             if provider_options is None
@@ -198,7 +260,9 @@ class WorkflowJobManager:
         )
         self._lock = threading.Lock()
         self.store.interrupt_active_jobs()
+        self.store.interrupt_active_discovery_attempts()
         stored_jobs = self.store.list_jobs()
+        self._recover_interrupted_discovery_retries(stored_jobs)
         self._jobs: dict[str, _JobRecord] = {
             job.job_id: _JobRecord.from_stored_job(job) for job in stored_jobs
         }
@@ -207,6 +271,59 @@ class WorkflowJobManager:
         self._max_retained_jobs = max_retained_jobs
         with self._lock:
             self._prune_terminal_jobs_locked()
+
+    def _recover_interrupted_discovery_retries(
+        self,
+        jobs: Iterable[WorkflowJob],
+    ) -> None:
+        for job in jobs:
+            if (
+                job.kind != "discovery_retry"
+                or job.status != "interrupted"
+                or job.run_id is None
+            ):
+                continue
+            run = self.store.get_run(job.run_id)
+            if (
+                run.status != RunStatus.ACTIVE
+                or run.current_stage != WorkflowStage.DISCOVERING
+            ):
+                continue
+            return_status = RunStatus.WAITING
+            return_stage = WorkflowStage.AWAITING_CORPUS_APPROVAL
+            for event in reversed(self.store.list_events(run.run_id)):
+                if event.event_type != "discovery_retry_started":
+                    continue
+                if (
+                    event.payload.get("return_status") == RunStatus.RETRY_WAIT.value
+                    and event.payload.get("return_stage")
+                    == WorkflowStage.DISCOVERING.value
+                ):
+                    return_status = RunStatus.RETRY_WAIT
+                    return_stage = WorkflowStage.DISCOVERING
+                break
+            recovered = replace(
+                run,
+                status=return_status,
+                current_stage=return_stage,
+                updated_at=utc_now_iso(),
+            )
+            if not self.store.compare_and_update_run(
+                recovered,
+                expected_status=RunStatus.ACTIVE,
+                expected_stage=WorkflowStage.DISCOVERING,
+            ):
+                continue
+            self.store.append_event(
+                run.run_id,
+                "discovery_retry_interrupted",
+                {
+                    "job_id": job.job_id,
+                    "return_status": return_status.value,
+                    "return_stage": return_stage.value,
+                },
+                return_stage,
+            )
 
     def submit_start(self, request: StartRunRequest) -> dict[str, object]:
         if not isinstance(request, StartRunRequest):
@@ -217,6 +334,7 @@ class WorkflowJobManager:
             discovery_enabled=request.discovery_enabled,
             providers=request.providers,
             max_results=request.max_results,
+            query_texts=request.query_texts,
         )
         unknown = set(request.providers) - set(self.provider_names)
         if unknown:
@@ -233,7 +351,53 @@ class WorkflowJobManager:
                     discovery_enabled=request.discovery_enabled,
                     providers=request.providers,
                     max_results=request.max_results,
+                    query_texts=request.query_texts,
                 ).start(request.topic, request.corpus_path),
+            )
+        except BaseException:
+            reservation.release()
+            raise
+        return self._accepted_payload(job)
+
+    def submit_discovery_retry(
+        self,
+        request: RetryDiscoveryRequest,
+    ) -> dict[str, object]:
+        if not isinstance(request, RetryDiscoveryRequest):
+            raise TypeError("request must be a RetryDiscoveryRequest")
+        unknown = set(request.providers) - set(self.provider_names)
+        if unknown:
+            raise ValueError(f"unknown provider: {sorted(unknown)[0]}")
+        run = self.store.get_run(request.run_id)
+        allowed = (
+            run.status.value == "waiting"
+            and run.current_stage == WorkflowStage.AWAITING_CORPUS_APPROVAL
+        ) or (
+            run.status.value == "retry_wait"
+            and run.current_stage == WorkflowStage.DISCOVERING
+        )
+        if not allowed:
+            raise ValueError("discovery retry is not available for this run")
+
+        reservation = self._activity.reserve_resume(request.run_id)
+        try:
+            command = self._retry_discovery_command(request)
+            job = self._new_job(
+                "discovery_retry",
+                command,
+                run_id=request.run_id,
+                reservation=reservation,
+            )
+            self._schedule(
+                job,
+                lambda: retry_discovery(
+                    self.store,
+                    self.artifact_root,
+                    request.run_id,
+                    providers=request.providers,
+                    max_results=request.max_results,
+                    query_texts=request.query_texts,
+                ),
             )
         except BaseException:
             reservation.release()
@@ -294,13 +458,15 @@ class WorkflowJobManager:
             artifact_store,
             run_id,
         )
-        engine = self._engine_builder(
-            self.store,
-            self.artifact_root,
-            discovery_enabled=enabled,
-            providers=providers,
-            max_results=max_results,
-        )
+        query_texts = self._resume_query_loader(artifact_store, run_id)
+        kwargs: dict[str, object] = {
+            "discovery_enabled": enabled,
+            "providers": providers,
+            "max_results": max_results,
+        }
+        if query_texts:
+            kwargs["query_texts"] = query_texts
+        engine = self._engine_builder(self.store, self.artifact_root, **kwargs)
         return engine.resume(run_id)
 
     def _new_job(
@@ -481,6 +647,14 @@ class WorkflowJobManager:
             arguments.append("--discover")
         arguments.extend(f"--providers={provider}" for provider in request.providers)
         arguments.append(f"--max-results={request.max_results}")
+        arguments.extend(f"--query={query}" for query in request.query_texts)
+        return self._equivalent_command(*arguments)
+
+    def _retry_discovery_command(self, request: RetryDiscoveryRequest) -> str:
+        arguments = ["retry-discovery", request.run_id]
+        arguments.extend(f"--providers={provider}" for provider in request.providers)
+        arguments.append(f"--max-results={request.max_results}")
+        arguments.extend(f"--query={query}" for query in request.query_texts)
         return self._equivalent_command(*arguments)
 
     def _equivalent_command(self, *arguments: str) -> str:
@@ -497,6 +671,7 @@ class WorkflowJobManager:
 __all__ = [
     "DuplicateResumeJobError",
     "JobNotFoundError",
+    "RetryDiscoveryRequest",
     "StartRunRequest",
     "WorkflowJobManager",
 ]

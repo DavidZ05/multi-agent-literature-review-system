@@ -18,6 +18,7 @@ from src.literature_review.activity import (
 from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
+    DiscoveryAttempt,
     ResearchRun,
     RunStatus,
     ScreeningRecommendation,
@@ -35,6 +36,7 @@ from src.literature_review.workbench import PendingCandidatesError, WorkbenchSer
 from src.literature_review.workbench.jobs import (
     DuplicateResumeJobError,
     JobNotFoundError,
+    RetryDiscoveryRequest,
     StartRunRequest,
     WorkflowJobManager,
 )
@@ -147,6 +149,21 @@ class StartRunRequestTests(unittest.TestCase):
         self.assertEqual(request.providers, ("semantic_scholar", "arxiv"))
         with self.assertRaises(FrozenInstanceError):
             request.topic = "Changed"  # type: ignore[misc]
+
+    def test_custom_queries_are_normalized_and_bounded(self) -> None:
+        request = StartRunRequest(
+            topic="Memory",
+            corpus_path=self.corpus_path,
+            query_texts=("  agent   memory  ", "agent memory", "benchmark"),
+        )
+        self.assertEqual(request.query_texts, ("agent memory", "benchmark"))
+
+        with self.assertRaisesRegex(ValueError, "at most 8"):
+            StartRunRequest(
+                topic="Memory",
+                corpus_path=self.corpus_path,
+                query_texts=tuple(f"query {index}" for index in range(9)),
+            )
 
     def test_rejects_invalid_inputs_before_scheduling(self) -> None:
         missing = self.corpus_path.with_name("missing.json")
@@ -298,6 +315,47 @@ class WorkflowJobManagerTests(unittest.TestCase):
         self.assertEqual(manager.list_jobs(active_only=True), [])
         self.assertEqual(manager.list_jobs()[0]["run_id"], None)
         manager.shutdown(wait=False)
+
+    def test_discovery_retry_is_a_durable_same_run_job(self) -> None:
+        run = replace(
+            ResearchRun.create("Memory agents"),
+            status=RunStatus.WAITING,
+            current_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
+            updated_at=utc_now_iso(),
+        )
+        self.store.create_run(run)
+        executor = ManualExecutor()
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            executor=executor,
+        )
+        request = RetryDiscoveryRequest(
+            run_id=run.run_id,
+            providers=("arxiv",),
+            max_results=8,
+            query_texts=("agent memory verification",),
+        )
+
+        try:
+            accepted = manager.submit_discovery_retry(request)
+            self.assertEqual(accepted["kind"], "discovery_retry")
+            tokens = shlex.split(accepted["equivalent_command"])
+            self.assertIn("retry-discovery", tokens)
+            self.assertIn("--providers=arxiv", tokens)
+            self.assertIn("--query=agent memory verification", tokens)
+            with patch(
+                "src.literature_review.workbench.jobs.retry_discovery",
+                return_value=run,
+            ) as retry:
+                executor.run_next()
+            retry.assert_called_once()
+            self.assertEqual(
+                manager.get_job(accepted["job_id"])["status"],
+                "succeeded",
+            )
+        finally:
+            manager.shutdown(wait=False)
         self.assertEqual(executor.shutdown_calls, [False])
 
     def test_manager_rejects_provider_that_is_not_registered(self) -> None:
@@ -346,6 +404,15 @@ class WorkflowJobManagerTests(unittest.TestCase):
             equivalent_command="literature-review start --topic=Memory",
         )
         self.store.put_job(stale)
+        run = ResearchRun.create("Interrupted discovery")
+        self.store.create_run(run)
+        attempt = DiscoveryAttempt.create(
+            run.run_id,
+            ("arxiv",),
+            ("agent memory",),
+            10,
+        )
+        self.store.put_discovery_attempt(attempt)
 
         manager = WorkflowJobManager(
             self.store,
@@ -357,6 +424,66 @@ class WorkflowJobManagerTests(unittest.TestCase):
         self.assertEqual(recovered["status"], "interrupted")
         self.assertEqual(recovered["error"]["type"], "backend_restarted")
         self.assertEqual(manager.list_jobs(active_only=True), [])
+        self.assertEqual(
+            self.store.get_discovery_attempt(attempt.attempt_id).status,
+            "interrupted",
+        )
+        manager.shutdown(wait=False)
+
+    def test_manager_restores_gate_for_interrupted_discovery_retry(self) -> None:
+        run = replace(
+            ResearchRun.create("Interrupted retry"),
+            status=RunStatus.ACTIVE,
+            current_stage=WorkflowStage.DISCOVERING,
+            updated_at=utc_now_iso(),
+        )
+        self.store.create_run(run)
+        self.store.append_event(
+            run.run_id,
+            "discovery_retry_started",
+            {
+                "return_status": RunStatus.WAITING.value,
+                "return_stage": WorkflowStage.AWAITING_CORPUS_APPROVAL.value,
+            },
+            WorkflowStage.DISCOVERING,
+        )
+        attempt = DiscoveryAttempt.create(
+            run.run_id,
+            ("arxiv",),
+            ("agent memory",),
+            10,
+        )
+        self.store.put_discovery_attempt(attempt)
+        job = WorkflowJob(
+            job_id="job_retry_stale",
+            kind="discovery_retry",
+            status="running",
+            run_id=run.run_id,
+            equivalent_command="literature-review retry-discovery RUN_ID",
+        )
+        self.store.put_job(job)
+
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            executor=ManualExecutor(),
+        )
+
+        recovered = self.store.get_run(run.run_id)
+        self.assertEqual(recovered.status, RunStatus.WAITING)
+        self.assertEqual(
+            recovered.current_stage,
+            WorkflowStage.AWAITING_CORPUS_APPROVAL,
+        )
+        self.assertEqual(manager.get_job(job.job_id)["status"], "interrupted")
+        self.assertEqual(
+            self.store.get_discovery_attempt(attempt.attempt_id).status,
+            "interrupted",
+        )
+        self.assertEqual(
+            self.store.list_events(run.run_id)[-1].event_type,
+            "discovery_retry_interrupted",
+        )
         manager.shutdown(wait=False)
 
     def test_terminal_job_history_is_bounded(self) -> None:
@@ -391,7 +518,10 @@ class WorkflowJobManagerTests(unittest.TestCase):
             ),
             executor=executor,
         )
-        request = self._request(topic="-memory agents")
+        request = self._request(
+            topic="-memory agents",
+            query_texts=("agent memory benchmark",),
+        )
 
         accepted = manager.submit_start(request)
         tokens = shlex.split(accepted["equivalent_command"])
@@ -405,6 +535,7 @@ class WorkflowJobManagerTests(unittest.TestCase):
         self.assertTrue(parsed.discover)
         self.assertEqual(tuple(parsed.providers), request.providers)
         self.assertEqual(parsed.max_results, request.max_results)
+        self.assertEqual(tuple(parsed.query), request.query_texts)
         self.assertEqual(tokens[3], f"--db={self.store.path}")
         self.assertEqual(tokens[4], f"--artifacts={self.artifact_root.resolve()}")
         self.assertEqual(tokens[5], "start")

@@ -12,6 +12,7 @@ from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
     CorpusDecision,
+    DiscoveryAttempt,
     ResearchRun,
     RunStatus,
     ScreeningRecommendation,
@@ -69,7 +70,7 @@ class CandidateDecisionNotAllowedError(WorkflowStoreError):
 
 
 class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -168,7 +169,16 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
                     );
                     CREATE INDEX workflow_jobs_status_created_idx
                         ON workflow_jobs(status, created_at);
-                    PRAGMA user_version = 4;
+                    CREATE TABLE discovery_attempts (
+                        attempt_id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                        status TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        payload_json TEXT NOT NULL
+                    );
+                    CREATE INDEX discovery_attempts_run_created_idx
+                        ON discovery_attempts(run_id, created_at);
+                    PRAGMA user_version = 5;
                     """
                     )
                 return
@@ -236,6 +246,23 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
                         CREATE INDEX workflow_jobs_status_created_idx
                             ON workflow_jobs(status, created_at);
                         PRAGMA user_version = 4;
+                        """
+                    )
+                version = 4
+            if version == 4:
+                with connection:
+                    connection.executescript(
+                        """
+                        CREATE TABLE discovery_attempts (
+                            attempt_id TEXT PRIMARY KEY,
+                            run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                            status TEXT NOT NULL,
+                            created_at TEXT NOT NULL,
+                            payload_json TEXT NOT NULL
+                        );
+                        CREATE INDEX discovery_attempts_run_created_idx
+                            ON discovery_attempts(run_id, created_at);
+                        PRAGMA user_version = 5;
                         """
                     )
 
@@ -472,6 +499,78 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
                 (run_id,),
             ).fetchall()
         return [SearchQuery.from_dict(json.loads(row[0])) for row in rows]
+
+    def put_discovery_attempt(self, attempt: DiscoveryAttempt) -> None:
+        self._require_run(attempt.run_id)
+        with self._connection() as connection, connection:
+            connection.execute(
+                """INSERT INTO discovery_attempts
+                (attempt_id,run_id,status,created_at,payload_json)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(attempt_id) DO UPDATE SET
+                status=excluded.status,
+                payload_json=excluded.payload_json""",
+                (
+                    attempt.attempt_id,
+                    attempt.run_id,
+                    attempt.status,
+                    attempt.created_at,
+                    json.dumps(attempt.to_dict(), sort_keys=True),
+                ),
+            )
+
+    def get_discovery_attempt(self, attempt_id: str) -> DiscoveryAttempt:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM discovery_attempts WHERE attempt_id=?",
+                (attempt_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(attempt_id)
+        return DiscoveryAttempt.from_dict(json.loads(row[0]))
+
+    def list_discovery_attempts(self, run_id: str) -> list[DiscoveryAttempt]:
+        self._require_run(run_id)
+        with self._connection() as connection:
+            rows = connection.execute(
+                """SELECT payload_json FROM discovery_attempts
+                WHERE run_id=? ORDER BY created_at,attempt_id""",
+                (run_id,),
+            ).fetchall()
+        return [DiscoveryAttempt.from_dict(json.loads(row[0])) for row in rows]
+
+    def interrupt_active_discovery_attempts(self) -> int:
+        return self._finish_active_discovery_attempts("interrupted")
+
+    def fail_active_discovery_attempts(self, run_id: str) -> int:
+        self._require_run(run_id)
+        return self._finish_active_discovery_attempts("failed", run_id=run_id)
+
+    def _finish_active_discovery_attempts(
+        self,
+        status: str,
+        *,
+        run_id: str | None = None,
+    ) -> int:
+        query = "SELECT payload_json FROM discovery_attempts WHERE status='running'"
+        parameters: tuple[str, ...] = ()
+        if run_id is not None:
+            query += " AND run_id=?"
+            parameters = (run_id,)
+        with self._connection() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        finished = 0
+        for row in rows:
+            attempt = DiscoveryAttempt.from_dict(json.loads(row[0]))
+            self.put_discovery_attempt(
+                replace(
+                    attempt,
+                    status=status,
+                    completed_at=utc_now_iso(),
+                )
+            )
+            finished += 1
+        return finished
 
     def upsert_candidate(
         self,

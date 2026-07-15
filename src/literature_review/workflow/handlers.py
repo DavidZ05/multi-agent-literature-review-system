@@ -69,6 +69,9 @@ class DiscoveryHandler:
             )
         except AllProvidersFailedError as exc:
             raise RetryableStageError(str(exc)) from exc
+        except Exception:
+            context.workflow_store.fail_active_discovery_attempts(context.run.run_id)
+            raise
         return StageResult(
             next_stage=WorkflowStage.SCREENING,
             output_artifacts=outcome.output_artifacts,

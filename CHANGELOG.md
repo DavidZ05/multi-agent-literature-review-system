@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented here.
 
+## 0.5.1 - 2026-07-14
+
+### Added
+
+- Persistent discovery-attempt history with per-attempt providers, exact query
+  text, result funnel, failures, and artifact summaries.
+- Same-run discovery retry from the CLI and Workbench, including single-provider
+  retry and editable scholarly queries.
+- `literature-review discovery-attempts RUN_ID` for inspecting retrieval history.
+- Workbench discovery funnel and bilingual retry controls.
+
+### Changed
+
+- arXiv searches now use bounded keyword conjunctions instead of treating a
+  long generated query as one exact phrase.
+- Default query suggestions are domain-neutral topic, survey, evaluation, and
+  reliability searches.
+- Discovery retries merge new candidates without overwriting existing candidate
+  decisions. Backend restarts mark active attempts as interrupted and return an
+  interrupted retry to its previous review gate.
+- arXiv query tokenization preserves Unicode terms, including Chinese topics.
+- SQLite schema version 5 adds discovery attempts without altering existing runs,
+  candidates, decisions, events, checkpoints, or Jobs.
+
 ## 0.5.0 - 2026-07-12
 
 ### Added

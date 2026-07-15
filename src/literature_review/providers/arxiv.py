@@ -22,6 +22,9 @@ class ArxivProvider:
     endpoint = "https://export.arxiv.org/api/query"
     _ATOM = "http://www.w3.org/2005/Atom"
     _ARXIV = "http://arxiv.org/schemas/atom"
+    _QUERY_STOPWORDS = frozenset(
+        {"a", "an", "and", "for", "in", "of", "on", "or", "the", "to", "with"}
+    )
 
     def __init__(
         self,
@@ -40,17 +43,27 @@ class ArxivProvider:
     def search(self, query: SearchQuery) -> ProviderSearchResult:
         if query.provider != self.provider_id:
             raise ValueError("arXiv provider received a query for another provider")
-        escaped = query.text.replace("\\", "\\\\").replace('"', '\\"')
         return self._request(
             query.query_id,
             {
-                "search_query": f'all:"{escaped}"',
+                "search_query": self._search_expression(query.text),
                 "start": 0,
                 "max_results": min(max(query.max_results, 1), 100),
                 "sortBy": "relevance",
                 "sortOrder": "descending",
             },
         )
+
+    @classmethod
+    def _search_expression(cls, text: str) -> str:
+        tokens: list[str] = []
+        for token in re.findall(r"[^\W_][\w-]*", text.casefold(), flags=re.UNICODE):
+            if token in cls._QUERY_STOPWORDS or token in tokens:
+                continue
+            tokens.append(token)
+        if not tokens:
+            raise ValueError("arXiv query must contain a searchable term")
+        return " AND ".join(f"all:{token}" for token in tokens[:8])
 
     def fetch_details(self, provider_id: str) -> ProviderPaper:
         result = self._request(

@@ -18,6 +18,7 @@ from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
     CorpusDecision,
+    DiscoveryAttempt,
     ProviderPaper,
     ProviderSearchResult,
     ResearchRun,
@@ -38,9 +39,10 @@ from src.literature_review.review import (
     StructureMentorAgent,
 )
 from src.literature_review.search import SearchAgent
+from src.literature_review.version import VERSION
 from src.literature_review.writing import PolishAgent, WriterAgent
 
-__version__ = "0.5.0"
+__version__ = VERSION
 
 __all__ = [
     "main",
@@ -65,6 +67,7 @@ __all__ = [
     "CandidatePaper",
     "CandidateStatus",
     "CorpusDecision",
+    "DiscoveryAttempt",
     "ProviderPaper",
     "ProviderSearchResult",
     "ResearchRun",

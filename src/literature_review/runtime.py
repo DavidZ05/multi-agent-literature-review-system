@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
 
 from src.literature_review.api import OpenAIChatClient
 from src.literature_review.config import AgentRuntimeConfig
 from src.literature_review.discovery import (
+    AllProvidersFailedError,
     ApprovalService,
     DiscoveryService,
     QueryPlanner,
 )
-from src.literature_review.models import WorkflowStage
+from src.literature_review.models import ResearchRun, RunStatus, WorkflowStage, utc_now_iso
 from src.literature_review.plugins import (
     AgentFactory,
     ProviderContext,
@@ -44,6 +46,7 @@ def build_engine(
     discovery_enabled: bool = False,
     providers: tuple[str, ...] = ("arxiv", "semantic_scholar"),
     max_results: int = 10,
+    query_texts: tuple[str, ...] = (),
     api_client: Any | None = None,
     provider_registry: ProviderRegistry | None = None,
     agent_factory: AgentFactory | None = None,
@@ -74,6 +77,7 @@ def build_engine(
             "discovery_enabled": discovery_enabled,
             "discovery_providers": list(providers),
             "discovery_max_results": max_results,
+            "discovery_query_texts": list(query_texts),
             "provider_plugins": selected_provider_plugins,
             "agent_plugins": agent_factory.manifest(),
         }
@@ -93,6 +97,7 @@ def build_engine(
                     DiscoveryService(
                         QueryPlanner(max_results=max_results),
                         provider_instances,
+                        query_texts=query_texts,
                     )
                 ),
                 WorkflowStage.SCREENING: ScreeningHandler(),
@@ -152,4 +157,173 @@ def load_resume_settings(
     return enabled, providers, max_results
 
 
-__all__ = ["build_engine", "load_resume_settings"]
+def load_resume_query_texts(
+    artifact_store: LocalArtifactStore,
+    run_id: str,
+) -> tuple[str, ...]:
+    try:
+        request = artifact_store.read_json(run_id, "inputs/research_request.json")
+    except FileNotFoundError:
+        return ()
+    if not isinstance(request, dict):
+        raise TypeError("stored research request must be an object")
+    config = request.get("runtime_config", {})
+    if not isinstance(config, dict):
+        raise TypeError("stored runtime_config must be an object")
+    values = config.get("discovery_query_texts", ())
+    if (
+        not isinstance(values, (list, tuple))
+        or any(not isinstance(value, str) or not value.strip() for value in values)
+    ):
+        raise TypeError("stored discovery_query_texts must be a list of strings")
+    return tuple(dict.fromkeys(value.strip() for value in values))
+
+
+def retry_discovery(
+    store: SQLiteWorkflowStore,
+    artifact_root: Path,
+    run_id: str,
+    *,
+    providers: tuple[str, ...],
+    max_results: int,
+    query_texts: tuple[str, ...] = (),
+    provider_registry: ProviderRegistry | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> ResearchRun:
+    environment = os.environ if environment is None else environment
+    provider_registry = provider_registry or build_provider_registry()
+    unknown = set(providers) - set(provider_registry.names())
+    if unknown:
+        raise ProviderPluginError(f"unknown provider: {sorted(unknown)[0]}")
+    if not providers:
+        raise ValueError("providers must be nonempty")
+    if not 1 <= max_results <= 50:
+        raise ValueError("max_results must be between 1 and 50")
+    normalized_queries = tuple(
+        dict.fromkeys(query.strip() for query in query_texts if query.strip())
+    )
+
+    previous = store.get_run(run_id)
+    allowed = (
+        previous.status == RunStatus.WAITING
+        and previous.current_stage == WorkflowStage.AWAITING_CORPUS_APPROVAL
+    ) or (
+        previous.status == RunStatus.RETRY_WAIT
+        and previous.current_stage == WorkflowStage.DISCOVERING
+    )
+    if not allowed:
+        raise ValueError("discovery can only be retried from its review or retry gate")
+
+    active = replace(
+        previous,
+        status=RunStatus.ACTIVE,
+        current_stage=WorkflowStage.DISCOVERING,
+        updated_at=utc_now_iso(),
+    )
+    if not store.compare_and_update_run(
+        active,
+        expected_status=previous.status,
+        expected_stage=previous.current_stage,
+    ):
+        raise ValueError("run changed while discovery retry was starting")
+    store.append_event(
+        run_id,
+        "discovery_retry_started",
+        {
+            "providers": list(providers),
+            "query_texts": list(normalized_queries),
+            "max_results": max_results,
+            "return_status": previous.status.value,
+            "return_stage": previous.current_stage.value,
+        },
+        WorkflowStage.DISCOVERING,
+    )
+
+    transport = UrllibHttpTransport()
+    cache = SQLiteResponseCache(store.path)
+    context = ProviderContext(transport, cache, environment)
+    instances = {
+        provider_id: provider_registry.create(provider_id, context)
+        for provider_id in providers
+    }
+    service = DiscoveryService(
+        QueryPlanner(max_results=max_results),
+        instances,
+        query_texts=normalized_queries,
+    )
+    artifact_store = LocalArtifactStore(artifact_root)
+    try:
+        outcome = service.run(
+            active,
+            artifact_store,
+            store,
+            cancellation_check=lambda: (
+                store.get_run(run_id).status == RunStatus.CANCELLED
+            ),
+        )
+    except AllProvidersFailedError:
+        target = replace(
+            previous,
+            status=(
+                RunStatus.WAITING
+                if previous.current_stage == WorkflowStage.AWAITING_CORPUS_APPROVAL
+                else RunStatus.RETRY_WAIT
+            ),
+            updated_at=utc_now_iso(),
+        )
+        store.compare_and_update_run(
+            target,
+            expected_status=RunStatus.ACTIVE,
+            expected_stage=WorkflowStage.DISCOVERING,
+        )
+        store.append_event(
+            run_id,
+            "discovery_retry_wait",
+            {"reason": "all literature providers failed"},
+            target.current_stage,
+        )
+        return store.get_run(run_id)
+    except Exception:
+        store.fail_active_discovery_attempts(run_id)
+        store.compare_and_update_run(
+            replace(previous, updated_at=utc_now_iso()),
+            expected_status=RunStatus.ACTIVE,
+            expected_stage=WorkflowStage.DISCOVERING,
+        )
+        raise
+
+    for relative_path, content in outcome.output_artifacts.items():
+        if isinstance(content, str):
+            artifact_store.write_text(run_id, relative_path, content)
+        else:
+            artifact_store.write_json(run_id, relative_path, content)
+    current = store.get_run(run_id)
+    if current.status == RunStatus.CANCELLED or outcome.cancelled:
+        return current
+    waiting = replace(
+        current,
+        status=RunStatus.WAITING,
+        current_stage=WorkflowStage.AWAITING_CORPUS_APPROVAL,
+        updated_at=utc_now_iso(),
+    )
+    if not store.compare_and_update_run(
+        waiting,
+        expected_status=RunStatus.ACTIVE,
+        expected_stage=WorkflowStage.DISCOVERING,
+    ):
+        return store.get_run(run_id)
+    store.append_event(
+        run_id,
+        "discovery_retry_completed",
+        {"attempt_id": outcome.attempt.attempt_id},
+        WorkflowStage.AWAITING_CORPUS_APPROVAL,
+    )
+    return waiting
+
+
+__all__ = [
+    "build_engine",
+    "load_resume_query_texts",
+    "load_resume_settings",
+    "retry_discovery",
+]

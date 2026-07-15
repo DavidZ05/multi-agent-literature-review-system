@@ -183,6 +183,21 @@ literature-review start \
 
 The workflow normalizes, deduplicates, and scores candidates, then waits at `awaiting_corpus_approval`. Candidate papers are not citable until a human approves them.
 
+By default, the planner creates four domain-neutral scholarly queries from the
+topic: the topic itself plus survey, evaluation, and reliability variants. To
+use exact queries instead, repeat `--query` up to eight times:
+
+```bash
+literature-review start \
+  --topic "Memory-Augmented LLM Agents" \
+  --corpus data/papers.json \
+  --discover \
+  --providers arxiv semantic_scholar \
+  --max-results 10 \
+  --query "memory augmented language agents survey" \
+  --query "long term memory evaluation for LLM agents"
+```
+
 If discovery runs but produces zero approval candidates, the workflow now pauses instead of silently drafting from the seed corpus. The Workbench shows a discovery summary with provider query counts, result counts, provider failures such as Semantic Scholar rate limits, seed-corpus alignment hints, and suggested next actions. Use `close-discovery` only when continuing with the existing seed corpus is intentional.
 
 ```bash
@@ -204,6 +219,28 @@ literature-review defer RUN_ID CANDIDATE_ID \
 literature-review close-discovery RUN_ID
 literature-review resume RUN_ID
 ```
+
+Retry discovery inside the same run when a provider is rate limited, a query is
+too narrow, or the first attempt returns no useful candidates:
+
+```bash
+literature-review retry-discovery RUN_ID \
+  --providers arxiv \
+  --max-results 20 \
+  --query "memory augmented language agents" \
+  --query "LLM agent memory benchmark"
+
+literature-review discovery-attempts RUN_ID
+```
+
+Each retry is a durable discovery attempt. Existing candidates and human
+decisions are preserved; newly found papers are normalized, deduplicated against
+the accumulated candidate pool, and added as pending candidates. Attempt
+records preserve provider selection, query text, limits, failures, and the
+retrieved/normalized/deduplicated/screened/new-candidate funnel. The Workbench
+offers the same controls and preselects failed providers when possible.
+If the backend restarts during a retry, the interrupted attempt remains in the
+history and the run returns to its previous human-review gate.
 
 arXiv does not need a key. Semantic Scholar works with limited anonymous quota; set `SEMANTIC_SCHOLAR_API_KEY` in `.env` if you have one:
 

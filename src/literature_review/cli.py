@@ -25,7 +25,12 @@ from src.literature_review.plugins import (
     build_agent_factory,
     build_provider_registry,
 )
-from src.literature_review.runtime import build_engine, load_resume_settings
+from src.literature_review.runtime import (
+    build_engine,
+    load_resume_query_texts,
+    load_resume_settings,
+    retry_discovery,
+)
 from src.literature_review.storage import (
     CandidateDecisionNotAllowedError,
     LocalArtifactStore,
@@ -33,6 +38,7 @@ from src.literature_review.storage import (
     RunNotFoundError,
     SQLiteWorkflowStore,
 )
+from src.literature_review.version import VERSION
 from src.literature_review.workflow import StageExecutionError
 from src.literature_review.workbench.deletion import ArtifactDeletionManager
 from src.literature_review.workbench.jobs import WorkflowJobManager
@@ -65,8 +71,18 @@ def _port_number(value: str) -> int:
     return port
 
 
+def _query_text(value: str) -> str:
+    normalized = " ".join(value.split())
+    if not normalized or len(normalized) > 300:
+        raise argparse.ArgumentTypeError(
+            "query must contain 1 to 300 non-whitespace characters"
+        )
+    return normalized
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="literature-review")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument(
         "--db",
         type=Path,
@@ -94,6 +110,33 @@ def _parser() -> argparse.ArgumentParser:
         help="registered provider id; repeat or provide multiple values",
     )
     start.add_argument("--max-results", type=int, default=10)
+    start.add_argument(
+        "--query",
+        action="append",
+        type=_query_text,
+        default=[],
+        help="exact scholarly query; repeat up to eight times",
+    )
+
+    retry_discovery_parser = commands.add_parser(
+        "retry-discovery",
+        help="run another literature discovery attempt for an existing run",
+    )
+    retry_discovery_parser.add_argument("run_id")
+    retry_discovery_parser.add_argument(
+        "--providers",
+        nargs="+",
+        action=_ExtendTupleAction,
+        default=("arxiv", "semantic_scholar"),
+        metavar="PROVIDER",
+    )
+    retry_discovery_parser.add_argument("--max-results", type=int, default=10)
+    retry_discovery_parser.add_argument(
+        "--query",
+        action="append",
+        type=_query_text,
+        default=[],
+    )
 
     resume = commands.add_parser("resume", help="resume a stored run")
     resume.add_argument("run_id")
@@ -105,6 +148,12 @@ def _parser() -> argparse.ArgumentParser:
 
     events = commands.add_parser("events", help="show a run event log")
     events.add_argument("run_id")
+
+    attempts = commands.add_parser(
+        "discovery-attempts",
+        help="show saved discovery attempt history",
+    )
+    attempts.add_argument("run_id")
 
     cancel = commands.add_parser("cancel", help="cancel a stored run")
     cancel.add_argument("run_id")
@@ -349,6 +398,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "events":
             _print_json([event.to_dict() for event in store.list_events(args.run_id)])
             return 0
+        if args.command == "discovery-attempts":
+            _print_json(
+                [
+                    attempt.to_dict()
+                    for attempt in store.list_discovery_attempts(args.run_id)
+                ]
+            )
+            return 0
         if args.command == "delete":
             service = WorkbenchService(store, artifact_root=args.artifacts)
             _print_json(service.delete_run(args.run_id))
@@ -427,12 +484,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                         artifact_store,
                         args.run_id,
                     )
+                    query_texts = load_resume_query_texts(
+                        artifact_store,
+                        args.run_id,
+                    )
                     engine = build_engine(
                         store,
                         args.artifacts,
                         discovery_enabled=enabled,
                         providers=providers,
                         max_results=max_results,
+                        query_texts=query_texts,
                     )
                     run = engine.resume(args.run_id)
             finally:
@@ -441,14 +503,43 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "start":
+            if len(args.query) > 8:
+                _print_json(
+                    {"error": "invalid_request", "message": "at most 8 queries are allowed"},
+                    stream=sys.stderr,
+                )
+                return 2
             engine = build_engine(
                 store,
                 args.artifacts,
                 discovery_enabled=args.discover,
                 providers=tuple(args.providers),
                 max_results=args.max_results,
+                query_texts=tuple(args.query),
             )
             run = engine.start(args.topic, args.corpus)
+        elif args.command == "retry-discovery":
+            if len(args.query) > 8:
+                _print_json(
+                    {"error": "invalid_request", "message": "at most 8 queries are allowed"},
+                    stream=sys.stderr,
+                )
+                return 2
+            reservation = ActivityCoordinator.for_artifact_root(
+                args.artifacts
+            ).reserve_resume(args.run_id)
+            try:
+                with reservation.activate():
+                    run = retry_discovery(
+                        store,
+                        args.artifacts,
+                        args.run_id,
+                        providers=tuple(args.providers),
+                        max_results=args.max_results,
+                        query_texts=tuple(args.query),
+                    )
+            finally:
+                reservation.release()
         elif args.command == "cancel":
             engine = build_engine(store, args.artifacts)
             run = engine.cancel(args.run_id)
@@ -536,6 +627,7 @@ if __name__ == "__main__":
 
 def workbench_main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="literature-review-workbench")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("--db", type=Path, default=Path(".review-workflow/workflow.db"))
     parser.add_argument(
         "--artifacts",

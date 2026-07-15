@@ -61,11 +61,20 @@ class ArxivProviderTests(unittest.TestCase):
 
         self.assertEqual(len(transport.calls), 1)
         parsed = parse_qs(urlparse(transport.calls[0][0]).query)
-        self.assertEqual(parsed["search_query"], ['all:"LLM agent \\"memory\\""'])
+        self.assertEqual(
+            parsed["search_query"],
+            ["all:llm AND all:agent AND all:memory"],
+        )
         self.assertEqual(parsed["start"], ["0"])
         self.assertEqual(parsed["max_results"], ["100"])
         self.assertEqual(parsed["sortBy"], ["relevance"])
         self.assertEqual(parsed["sortOrder"], ["descending"])
+
+    def test_search_expression_preserves_unicode_terms(self) -> None:
+        self.assertEqual(
+            ArxivProvider._search_expression("多智能体 记忆 评估"),
+            "all:多智能体 AND all:记忆 AND all:评估",
+        )
 
     def test_throttles_consecutive_uncached_requests(self) -> None:
         now = [10.0]

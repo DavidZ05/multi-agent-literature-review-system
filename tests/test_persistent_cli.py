@@ -18,6 +18,7 @@ from src.literature_review.cli import main
 from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
+    DiscoveryAttempt,
     ResearchRun,
     RunStatus,
     ScreeningRecommendation,
@@ -60,6 +61,18 @@ class PersistentCLITests(unittest.TestCase):
                 code = int(exc.code)
         output = stdout.getvalue().strip()
         return code, json.loads(output) if output else None, stderr.getvalue()
+
+    def test_cli_entry_points_report_package_version(self) -> None:
+        for entry_point, expected in (
+            (main, "literature-review 0.5.1"),
+            (cli.workbench_main, "literature-review-workbench 0.5.1"),
+        ):
+            with self.subTest(expected=expected):
+                stdout = io.StringIO()
+                with redirect_stdout(stdout), self.assertRaises(SystemExit) as raised:
+                    entry_point(["--version"])
+                self.assertEqual(raised.exception.code, 0)
+                self.assertEqual(stdout.getvalue().strip(), expected)
 
     def test_start_status_events_and_list_share_persistent_state(self) -> None:
         code, started, stderr = self._run(
@@ -115,6 +128,24 @@ class PersistentCLITests(unittest.TestCase):
         )
         self.assertTrue(report["agents"]["reviewer"]["protected"])
         self.assertFalse(report["agents"]["writer"]["protected"])
+
+    def test_discovery_attempts_command_returns_persistent_history(self) -> None:
+        store = SQLiteWorkflowStore(self.db_path)
+        store.initialize()
+        run = ResearchRun.create("Discovery history")
+        store.create_run(run)
+        attempt = DiscoveryAttempt.create(
+            run.run_id,
+            ("arxiv",),
+            ("agent memory",),
+            10,
+        )
+        store.put_discovery_attempt(attempt)
+
+        code, payload, stderr = self._run("discovery-attempts", run.run_id)
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload, [attempt.to_dict()])
 
     def test_workbench_command_translates_dedicated_options(self) -> None:
         with patch.object(cli, "main", return_value=0) as run:

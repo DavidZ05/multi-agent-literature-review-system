@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import re
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from src.literature_review.discovery.deduplication import deduplicate_papers
 from src.literature_review.discovery.planner import QueryPlanner
 from src.literature_review.discovery.screening import screen_candidate
-from src.literature_review.models import CandidatePaper, ResearchRun
+from src.literature_review.models import (
+    CandidatePaper,
+    DiscoveryAttempt,
+    ResearchRun,
+    utc_now_iso,
+)
 from src.literature_review.providers.base import SearchProvider
 from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
 
@@ -21,6 +26,8 @@ class DiscoveryOutcome:
     candidates: tuple[CandidatePaper, ...]
     failed_providers: tuple[str, ...]
     output_artifacts: Mapping[str, Any]
+    attempt: DiscoveryAttempt
+    cancelled: bool = False
 
 
 class DiscoveryService:
@@ -28,9 +35,12 @@ class DiscoveryService:
         self,
         planner: QueryPlanner,
         providers: Mapping[str, SearchProvider],
+        *,
+        query_texts: Iterable[str] = (),
     ) -> None:
         self.planner = planner
         self.providers = dict(providers)
+        self.query_texts = tuple(query_texts)
 
     def run(
         self,
@@ -40,7 +50,31 @@ class DiscoveryService:
         cancellation_check: Callable[[], bool] | None = None,
     ) -> DiscoveryOutcome:
         del artifact_store
-        queries = self.planner.plan(run.topic, tuple(self.providers))
+        planned_texts = tuple(self.query_texts) or self.planner.suggest(run.topic)
+        attempt = DiscoveryAttempt.create(
+            run.run_id,
+            tuple(self.providers),
+            planned_texts,
+            self.planner.max_results,
+        )
+        workflow_store.put_discovery_attempt(attempt)
+        workflow_store.append_event(
+            run.run_id,
+            "discovery_attempt_started",
+            {
+                "attempt_id": attempt.attempt_id,
+                "providers": list(attempt.providers),
+                "query_texts": list(attempt.query_texts),
+                "max_results": attempt.max_results,
+            },
+            run.current_stage,
+        )
+        queries = self.planner.plan(
+            run.topic,
+            tuple(self.providers),
+            query_texts=planned_texts,
+            attempt_id=attempt.attempt_id,
+        )
         papers = []
         failed: set[str] = set()
         succeeded: set[str] = set()
@@ -54,7 +88,11 @@ class DiscoveryService:
             workflow_store.append_event(
                 run.run_id,
                 "query_started",
-                {"query_id": query.query_id, "provider": query.provider},
+                {
+                    "query_id": query.query_id,
+                    "attempt_id": attempt.attempt_id,
+                    "provider": query.provider,
+                },
                 run.current_stage,
             )
             try:
@@ -66,6 +104,7 @@ class DiscoveryService:
                     "provider_failed",
                     {
                         "query_id": query.query_id,
+                        "attempt_id": attempt.attempt_id,
                         "provider": query.provider,
                         "error_type": type(exc).__name__,
                         "message": str(exc),
@@ -92,6 +131,7 @@ class DiscoveryService:
                 "query_completed",
                 {
                     "query_id": query.query_id,
+                    "attempt_id": attempt.attempt_id,
                     "provider": query.provider,
                     "result_count": len(result.papers),
                 },
@@ -99,9 +139,26 @@ class DiscoveryService:
             )
 
         if not succeeded and not cancelled:
+            failed_attempt = replace(
+                attempt,
+                status="failed",
+                failed_providers=tuple(sorted(failed)),
+                completed_at=utc_now_iso(),
+            )
+            workflow_store.put_discovery_attempt(failed_attempt)
+            workflow_store.append_event(
+                run.run_id,
+                "discovery_attempt_completed",
+                failed_attempt.to_dict(),
+                run.current_stage,
+            )
             raise AllProvidersFailedError("all literature providers failed")
 
         candidates, ambiguous = deduplicate_papers(papers)
+        existing_ids = {
+            candidate.candidate_id
+            for candidate in workflow_store.list_candidates(run.run_id)
+        }
         screened = []
         for candidate in candidates:
             result = screen_candidate(
@@ -122,7 +179,27 @@ class DiscoveryService:
             )
             workflow_store.upsert_candidate(run.run_id, updated)
             screened.append(updated)
-        artifacts["discovery/candidates.json"] = {
+        completed_attempt = replace(
+            attempt,
+            status=("cancelled" if cancelled else "partial" if failed else "succeeded"),
+            raw_result_count=len(papers),
+            normalized_count=len(papers),
+            deduplicated_count=len(candidates),
+            screened_count=len(screened),
+            new_candidate_count=sum(
+                1 for candidate in screened if candidate.candidate_id not in existing_ids
+            ),
+            failed_providers=tuple(sorted(failed)),
+            completed_at=utc_now_iso(),
+        )
+        workflow_store.put_discovery_attempt(completed_attempt)
+        workflow_store.append_event(
+            run.run_id,
+            "discovery_attempt_completed",
+            completed_attempt.to_dict(),
+            run.current_stage,
+        )
+        candidate_payload = {
             "candidates": [item.to_dict() for item in screened],
             "ambiguous_matches": [
                 {
@@ -133,11 +210,18 @@ class DiscoveryService:
                 for item in ambiguous
             ],
             "failed_providers": sorted(failed),
+            "attempt": completed_attempt.to_dict(),
         }
+        artifacts["discovery/candidates.json"] = candidate_payload
+        artifacts[
+            f"discovery/attempts/{attempt.attempt_id}/summary.json"
+        ] = candidate_payload
         return DiscoveryOutcome(
             tuple(screened),
             tuple(sorted(failed)),
             artifacts,
+            completed_attempt,
+            cancelled,
         )
 
 

@@ -74,12 +74,12 @@ class ScreeningRecommendation(str, Enum):
     EXCLUDE = "exclude"
 
 
-_PROVIDERS = frozenset({"arxiv", "semantic_scholar"})
+_PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 def _validate_provider(provider: str) -> None:
-    if provider not in _PROVIDERS:
-        raise ValueError(f"unknown provider: {provider}")
+    if not isinstance(provider, str) or not _PROVIDER_ID.fullmatch(provider):
+        raise ValueError(f"invalid provider id: {provider}")
 
 
 def _validate_paper_fields(
@@ -103,11 +103,16 @@ class SearchQuery:
     max_results: int
     year_from: int | None
     year_to: int | None
+    attempt_id: str | None = None
 
     def __post_init__(self) -> None:
         _validate_provider(self.provider)
         if not self.query_id.strip() or not self.text.strip():
             raise ValueError("query_id and text must be nonblank")
+        if self.attempt_id is not None and not re.fullmatch(
+            r"attempt_[0-9a-f]{32}", self.attempt_id
+        ):
+            raise ValueError("attempt_id must match attempt_ + 32 lowercase hex characters")
         if self.max_results < 1:
             raise ValueError("max_results must be positive")
         if (
@@ -125,11 +130,119 @@ class SearchQuery:
             "max_results": self.max_results,
             "year_from": self.year_from,
             "year_to": self.year_to,
+            "attempt_id": self.attempt_id,
         }
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SearchQuery:
         return cls(**dict(data))
+
+
+@dataclass(frozen=True)
+class DiscoveryAttempt:
+    attempt_id: str
+    run_id: str
+    status: str
+    providers: tuple[str, ...]
+    query_texts: tuple[str, ...]
+    max_results: int
+    raw_result_count: int
+    normalized_count: int
+    deduplicated_count: int
+    screened_count: int
+    new_candidate_count: int
+    failed_providers: tuple[str, ...]
+    created_at: str
+    completed_at: str | None = None
+
+    _STATUSES = frozenset(
+        {"running", "succeeded", "partial", "failed", "cancelled", "interrupted"}
+    )
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"attempt_[0-9a-f]{32}", self.attempt_id):
+            raise ValueError("attempt_id must match attempt_ + 32 lowercase hex characters")
+        _validate_run_id(self.run_id)
+        if self.status not in self._STATUSES:
+            raise ValueError("invalid discovery attempt status")
+        if not self.providers:
+            raise ValueError("discovery attempt providers must be nonempty")
+        for provider in self.providers:
+            _validate_provider(provider)
+        if any(not query.strip() for query in self.query_texts):
+            raise ValueError("discovery attempt query_texts must be nonblank")
+        if not 1 <= self.max_results <= 50:
+            raise ValueError("max_results must be between 1 and 50")
+        counts = (
+            self.raw_result_count,
+            self.normalized_count,
+            self.deduplicated_count,
+            self.screened_count,
+            self.new_candidate_count,
+        )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in counts
+        ):
+            raise ValueError("discovery attempt counts must be nonnegative integers")
+        for provider in self.failed_providers:
+            _validate_provider(provider)
+        _parse_utc_timestamp(self.created_at, "created_at")
+        if self.completed_at is not None:
+            _parse_utc_timestamp(self.completed_at, "completed_at")
+        object.__setattr__(self, "providers", tuple(self.providers))
+        object.__setattr__(self, "query_texts", tuple(self.query_texts))
+        object.__setattr__(self, "failed_providers", tuple(self.failed_providers))
+
+    @classmethod
+    def create(
+        cls,
+        run_id: str,
+        providers: tuple[str, ...],
+        query_texts: tuple[str, ...],
+        max_results: int,
+    ) -> DiscoveryAttempt:
+        return cls(
+            attempt_id=f"attempt_{uuid4().hex}",
+            run_id=run_id,
+            status="running",
+            providers=providers,
+            query_texts=query_texts,
+            max_results=max_results,
+            raw_result_count=0,
+            normalized_count=0,
+            deduplicated_count=0,
+            screened_count=0,
+            new_candidate_count=0,
+            failed_providers=(),
+            created_at=utc_now_iso(),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "attempt_id": self.attempt_id,
+            "run_id": self.run_id,
+            "status": self.status,
+            "providers": list(self.providers),
+            "query_texts": list(self.query_texts),
+            "max_results": self.max_results,
+            "raw_result_count": self.raw_result_count,
+            "normalized_count": self.normalized_count,
+            "deduplicated_count": self.deduplicated_count,
+            "screened_count": self.screened_count,
+            "new_candidate_count": self.new_candidate_count,
+            "failed_providers": list(self.failed_providers),
+            "created_at": self.created_at,
+            "completed_at": self.completed_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> DiscoveryAttempt:
+        values = dict(data)
+        values["providers"] = tuple(values["providers"])
+        values["query_texts"] = tuple(values.get("query_texts", ()))
+        values["failed_providers"] = tuple(values.get("failed_providers", ()))
+        return cls(**values)
 
 
 @dataclass(frozen=True)

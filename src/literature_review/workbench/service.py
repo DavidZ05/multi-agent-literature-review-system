@@ -7,7 +7,7 @@ import re
 import shlex
 
 from src.literature_review.activity import ActivityCoordinator
-from src.literature_review.discovery import ApprovalService
+from src.literature_review.discovery import ApprovalService, QueryPlanner
 from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
@@ -137,16 +137,19 @@ class WorkbenchService:
         run = self.store.get_run(run_id)
         candidates = self.store.list_candidates(run_id)
         events = self.store.list_events(run_id)
+        attempts = self.store.list_discovery_attempts(run_id)
         return {
             "run": run.to_dict(),
             "candidate_counts": self._candidate_counts(candidates),
             "events": [event.to_dict() for event in events],
+            "discovery_attempts": [attempt.to_dict() for attempt in attempts],
             "candidates": [candidate.to_dict() for candidate in candidates],
             "runtime": self._runtime_state(run, events),
             "discovery_summary": self._discovery_summary(
                 run,
                 candidates,
                 events,
+                attempts,
             ),
         }
 
@@ -460,6 +463,11 @@ class WorkbenchService:
                 if message.startswith("API provider permanent failure"):
                     return "permanent_api_failure"
                 return "workflow_failure"
+            if event_type in {
+                "discovery_retry_completed",
+                "run_completed",
+            }:
+                return None
         return None
 
     def _discovery_summary(
@@ -467,13 +475,17 @@ class WorkbenchService:
         run: ResearchRun,
         candidates: Iterable[CandidatePaper],
         events: Iterable[object],
+        attempts: Iterable[object] = (),
     ) -> dict[str, object]:
         event_list = list(events)
         candidate_list = list(candidates)
+        attempt_list = list(attempts)
+        latest_attempt = attempt_list[-1] if attempt_list else None
+        latest_attempt_id = getattr(latest_attempt, "attempt_id", None)
         provider_stats: dict[str, dict[str, object]] = {}
         total_results = 0
         total_failures = 0
-        discovery_enabled = False
+        discovery_enabled = bool(attempt_list)
         for event in event_list:
             stage = getattr(event, "stage", None)
             event_type = getattr(event, "event_type", "")
@@ -486,6 +498,11 @@ class WorkbenchService:
                 "provider_failed",
             }:
                 continue
+            if latest_attempt_id is not None:
+                if not isinstance(payload, Mapping) or payload.get(
+                    "attempt_id"
+                ) != latest_attempt_id:
+                    continue
             if isinstance(payload, Mapping):
                 provider = str(payload.get("provider", "")).strip()
             else:
@@ -544,6 +561,10 @@ class WorkbenchService:
                 WorkflowStage.SCREENING,
             }:
                 issue = "running"
+            elif run.status == RunStatus.RETRY_WAIT or getattr(
+                latest_attempt, "status", None
+            ) == "failed":
+                issue = "provider_failure"
             elif candidate_count == 0:
                 issue = "zero_candidates"
             elif total_failures:
@@ -560,6 +581,30 @@ class WorkbenchService:
             ),
             "total_results": total_results,
             "total_failures": total_failures,
+            "attempt_count": len(attempt_list),
+            "latest_attempt": (
+                None
+                if latest_attempt is None
+                else latest_attempt.to_dict()  # type: ignore[attr-defined]
+            ),
+            "funnel": (
+                {
+                    "raw_results": total_results,
+                    "normalized": total_results,
+                    "deduplicated": candidate_count,
+                    "screened": candidate_count,
+                    "new_candidates": candidate_count,
+                }
+                if latest_attempt is None
+                else {
+                    "raw_results": latest_attempt.raw_result_count,
+                    "normalized": latest_attempt.normalized_count,
+                    "deduplicated": latest_attempt.deduplicated_count,
+                    "screened": latest_attempt.screened_count,
+                    "new_candidates": latest_attempt.new_candidate_count,
+                }
+            ),
+            "suggested_queries": list(QueryPlanner.suggest(run.topic)),
             "providers": sorted(
                 provider_stats.values(),
                 key=lambda item: str(item["provider"]),
@@ -655,6 +700,8 @@ class WorkbenchService:
         corpus_alignment: Mapping[str, object],
     ) -> list[str]:
         recommendations: list[str] = []
+        if issue == "provider_failure":
+            recommendations.append("retry_discovery_later")
         if issue == "zero_candidates":
             recommendations.extend(
                 [

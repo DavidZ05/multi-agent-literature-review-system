@@ -105,7 +105,7 @@ class DiscoveryModelTests(unittest.TestCase):
 
     def test_invalid_provider_and_missing_identifier_are_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "provider"):
-            SearchQuery("q", "memory", "unknown", 10, None, None)
+            SearchQuery("q", "memory", "Cross-Ref", 10, None, None)
         with self.assertRaisesRegex(ValueError, "stable identifier"):
             CandidatePaper(
                 candidate_id="cand_missing",
@@ -142,6 +142,19 @@ class QueryPlannerTests(unittest.TestCase):
             len({(query.provider, query.text.lower()) for query in queries}),
             8,
         )
+
+    def test_custom_queries_are_exact_deduplicated_and_attempt_scoped(self) -> None:
+        attempt_id = "attempt_0123456789abcdef0123456789abcdef"
+        queries = QueryPlanner(max_results=7).plan(
+            "Ignored topic",
+            ("arxiv",),
+            query_texts=("  agent memory benchmark  ", "agent memory benchmark"),
+            attempt_id=attempt_id,
+        )
+
+        self.assertEqual(len(queries), 1)
+        self.assertEqual(queries[0].text, "agent memory benchmark")
+        self.assertEqual(queries[0].attempt_id, attempt_id)
 
 
 class NormalizationTests(unittest.TestCase):
@@ -318,6 +331,12 @@ class DiscoveryServiceTests(unittest.TestCase):
             )
             event_types = [event.event_type for event in store.list_events(run.run_id)]
             self.assertIn("provider_failed", event_types)
+            attempts = store.list_discovery_attempts(run.run_id)
+            self.assertEqual(len(attempts), 1)
+            self.assertEqual(attempts[0], outcome.attempt)
+            self.assertEqual(attempts[0].status, "partial")
+            self.assertEqual(attempts[0].raw_result_count, 4)
+            self.assertEqual(attempts[0].new_candidate_count, 1)
 
     def test_cancellation_check_stops_between_provider_requests(self) -> None:
         with TemporaryDirectory() as tmp:

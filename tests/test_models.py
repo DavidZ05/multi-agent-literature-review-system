@@ -507,5 +507,21 @@ class StageCheckpointTests(unittest.TestCase):
             )
 
 
+class DiscoveryAttemptTests(unittest.TestCase):
+    def test_from_dict_rejects_non_integer_funnel_count(self) -> None:
+        from src.literature_review.models import DiscoveryAttempt
+
+        payload = DiscoveryAttempt.create(
+            VALID_RUN_ID,
+            ("arxiv",),
+            ("agent memory",),
+            5,
+        ).to_dict()
+        payload["raw_result_count"] = "4"
+
+        with self.assertRaisesRegex(ValueError, "nonnegative integers"):
+            DiscoveryAttempt.from_dict(payload)
+
+
 if __name__ == "__main__":
     unittest.main()

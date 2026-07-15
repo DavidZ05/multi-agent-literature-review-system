@@ -56,3 +56,26 @@ verified seed corpus.
 This policy favors transparent research control over hidden automation. The
 system can still complete quickly, but only after the user has seen why no new
 literature was added.
+
+## Discovery Attempts and Retry
+
+Every discovery execution is stored as a separate attempt under the same
+research run. An attempt records its providers, exact queries, maximum results,
+timestamps, failure state, and a retrieval funnel. Raw provider artifacts and
+the attempt summary are stored under
+`discovery/attempts/<attempt_id>/`.
+
+Retry is allowed while the run is waiting at corpus approval or waiting to
+retry the original discovery stage. It uses the same per-run execution lock as
+resume and deletion, so two retries cannot mutate one candidate pool at the
+same time. Retry temporarily returns the run to discovery, then restores the
+approval gate. Existing candidates and append-only human decisions are merged,
+not replaced. A paper already present in the run is not counted as a new
+candidate. If the backend exits during retry, startup recovery marks the attempt
+and Job interrupted, restores the previous gate, and appends an audit event.
+
+The default query planner is domain-neutral and produces topic, survey,
+evaluation, and reliability variants. Users may replace these with up to eight
+exact scholarly queries in either the CLI or Workbench. arXiv converts query
+text to a bounded keyword conjunction instead of requiring one long exact
+phrase; Semantic Scholar receives the normalized query text directly.

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Literature Review Workbench</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/styles.css">
   <script id="workbench-config" type="application/json">__WORKBENCH_CONFIG__</script>
   <script src="/static/app.js" defer></script>
@@ -84,10 +85,15 @@
           <section class="discovery-panel" id="discovery-panel" aria-labelledby="discovery-summary-title" hidden>
             <div class="discovery-panel-head">
               <h3 id="discovery-summary-title" data-i18n="discoverySummaryTitle">Discovery summary</h3>
-              <span id="discovery-summary-status"></span>
+              <div class="discovery-panel-actions">
+                <span id="discovery-summary-status"></span>
+                <button class="wb-btn compact" id="retry-discovery-button" type="button" data-i18n="retryDiscovery">Retry discovery</button>
+              </div>
             </div>
             <p id="discovery-summary-message"></p>
+            <dl class="discovery-funnel" id="discovery-funnel"></dl>
             <div class="discovery-provider-list" id="discovery-provider-list"></div>
+            <div class="discovery-attempts" id="discovery-attempts"></div>
             <ul class="discovery-recommendations" id="discovery-recommendations"></ul>
           </section>
         </header>
@@ -191,9 +197,35 @@
       </fieldset>
       <label for="new-run-max-results" data-i18n="maxResults">Maximum results per query</label>
       <input class="field number-field" id="new-run-max-results" name="max_results" type="number" value="10" min="1" max="50" required>
+      <label for="new-run-queries" data-i18n="customQueries">Custom queries</label>
+      <textarea class="field mono" id="new-run-queries" name="queries" rows="4" maxlength="2407" data-i18n-placeholder="customQueriesPlaceholder"></textarea>
+      <p class="field-hint" data-i18n="customQueriesHint">Optional. Enter one exact scholarly query per line; leave blank to use four generated queries.</p>
       <div class="dialog-actions">
         <button class="wb-btn" type="button" data-close-dialog="new-run-dialog" data-i18n="close">Close</button>
         <button class="wb-btn primary" id="start-run-button" type="submit" data-i18n="startRun">Start run</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="retry-discovery-dialog" aria-labelledby="retry-discovery-heading">
+    <form class="dialog-form" id="retry-discovery-form">
+      <div class="dialog-header">
+        <h2 id="retry-discovery-heading" data-i18n="retryDiscovery">Retry discovery</h2>
+        <button class="icon-button" type="button" data-close-dialog="retry-discovery-dialog" aria-label="Close" data-i18n-aria="close">×</button>
+      </div>
+      <p class="dialog-intro" data-i18n="retryDiscoveryHint">Runs another discovery attempt in this research run. Existing candidates and decisions are preserved.</p>
+      <fieldset class="provider-fields">
+        <legend data-i18n="providers">Providers</legend>
+        <div class="provider-options" id="retry-provider-options"></div>
+      </fieldset>
+      <label for="retry-max-results" data-i18n="maxResults">Maximum results per query</label>
+      <input class="field number-field" id="retry-max-results" name="max_results" type="number" value="10" min="1" max="50" required>
+      <label for="retry-queries" data-i18n="customQueries">Custom queries</label>
+      <textarea class="field mono" id="retry-queries" name="queries" rows="5" maxlength="2407" data-i18n-placeholder="customQueriesPlaceholder"></textarea>
+      <p class="field-hint" data-i18n="retryQueryHint">Edit the generated suggestions or enter one exact query per line.</p>
+      <div class="dialog-actions">
+        <button class="wb-btn" type="button" data-close-dialog="retry-discovery-dialog" data-i18n="close">Close</button>
+        <button class="wb-btn primary" type="submit" data-i18n="runDiscoveryAttempt">Run discovery attempt</button>
       </div>
     </form>
   </dialog>
