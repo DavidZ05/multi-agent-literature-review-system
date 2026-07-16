@@ -64,8 +64,8 @@ class PersistentCLITests(unittest.TestCase):
 
     def test_cli_entry_points_report_package_version(self) -> None:
         for entry_point, expected in (
-            (main, "literature-review 0.5.1"),
-            (cli.workbench_main, "literature-review-workbench 0.5.1"),
+            (main, "literature-review 0.7.0"),
+            (cli.workbench_main, "literature-review-workbench 0.7.0"),
         ):
             with self.subTest(expected=expected):
                 stdout = io.StringIO()
@@ -500,8 +500,10 @@ class PersistentCLITests(unittest.TestCase):
         store = SQLiteWorkflowStore(self.db_path)
         run = ResearchRun.create("Missing settings")
         store.create_run(run)
-        with self.assertRaises(FileNotFoundError):
-            self._run("resume", run.run_id)
+        code, output, stderr = self._run("resume", run.run_id)
+        self.assertEqual(code, 2)
+        self.assertIsNone(output)
+        self.assertIn("invalid_request", stderr)
         artifact_deletion = ActivityCoordinator.for_artifact_root(
             self.artifact_path
         ).reserve_deletion(run.run_id)

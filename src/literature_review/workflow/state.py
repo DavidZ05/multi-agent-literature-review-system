@@ -10,7 +10,11 @@ class InvalidTransitionError(ValueError):
 ALLOWED_TRANSITIONS: dict[WorkflowStage, frozenset[WorkflowStage]] = {
     WorkflowStage.CREATED: frozenset({WorkflowStage.PLANNING}),
     WorkflowStage.PLANNING: frozenset(
-        {WorkflowStage.DISCOVERING, WorkflowStage.DRAFTING}
+        {
+            WorkflowStage.DISCOVERING,
+            WorkflowStage.ACQUIRING_DOCUMENTS,
+            WorkflowStage.DRAFTING,
+        }
     ),
     WorkflowStage.DISCOVERING: frozenset({WorkflowStage.SCREENING}),
     WorkflowStage.SCREENING: frozenset(
@@ -19,9 +23,19 @@ ALLOWED_TRANSITIONS: dict[WorkflowStage, frozenset[WorkflowStage]] = {
             WorkflowStage.DRAFTING,
         }
     ),
-    WorkflowStage.AWAITING_CORPUS_APPROVAL: frozenset({WorkflowStage.DRAFTING}),
+    WorkflowStage.AWAITING_CORPUS_APPROVAL: frozenset(
+        {WorkflowStage.ACQUIRING_DOCUMENTS, WorkflowStage.DRAFTING}
+    ),
+    WorkflowStage.ACQUIRING_DOCUMENTS: frozenset(
+        {WorkflowStage.INDEXING_EVIDENCE}
+    ),
+    WorkflowStage.INDEXING_EVIDENCE: frozenset({WorkflowStage.DRAFTING}),
     WorkflowStage.DRAFTING: frozenset(
-        {WorkflowStage.REVIEWING, WorkflowStage.COMPLETED}
+        {
+            WorkflowStage.REVIEWING,
+            WorkflowStage.CLAIM_VERIFICATION,
+            WorkflowStage.COMPLETED,
+        }
     ),
     WorkflowStage.REVIEWING: frozenset(
         {WorkflowStage.REVISING, WorkflowStage.POLISHING}
@@ -30,6 +44,19 @@ ALLOWED_TRANSITIONS: dict[WorkflowStage, frozenset[WorkflowStage]] = {
     WorkflowStage.POLISHING: frozenset({WorkflowStage.FINAL_VERIFICATION}),
     WorkflowStage.FINAL_VERIFICATION: frozenset(
         {WorkflowStage.COMPLETED, WorkflowStage.REVISING}
+    ),
+    WorkflowStage.CLAIM_VERIFICATION: frozenset(
+        {
+            WorkflowStage.AWAITING_EVIDENCE_REVIEW,
+            WorkflowStage.COMPLETED,
+        }
+    ),
+    WorkflowStage.AWAITING_EVIDENCE_REVIEW: frozenset(
+        {
+            WorkflowStage.DRAFTING,
+            WorkflowStage.CLAIM_VERIFICATION,
+            WorkflowStage.COMPLETED,
+        }
     ),
     WorkflowStage.COMPLETED: frozenset(),
 }

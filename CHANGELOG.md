@@ -2,6 +2,44 @@
 
 All notable changes to this project are documented here.
 
+## 0.7.0 - 2026-07-15
+
+### Added
+
+- Opt-in `--full-text` stages for HTTPS PDF acquisition, local PDF import,
+  page-aware parsing, deterministic evidence chunks, atomic claims, and
+  citation-scoped claim verification.
+- SQLite schema version 6 for documents, evidence chunks, versioned claims,
+  verification results, and append-only human evidence decisions.
+- A human evidence gate with `require_revision` for unsupported claims and
+  narrowly scoped `accept_risk` decisions when full text is unavailable.
+- Workbench claim-evidence inspection, source snippets with page numbers, local
+  PDF import, evidence decisions, and audit export controls.
+- Reproducible audit ZIP export with stable entry metadata and a SHA-256 file
+  manifest.
+- End-to-end regression coverage proving evidence feedback reaches the next
+  Writer run and invalidates the previous drafting checkpoint.
+
+### Changed
+
+- Full-text runs now execute `acquiring_documents`, `indexing_evidence`, and
+  post-polish `claim_verification` before completion.
+- Writer revision control artifacts include human decision IDs and source draft
+  versions, while prior claim versions remain available for audit.
+- Local PDF import immediately reverifies the latest claim version and replaces
+  stale verification results in one SQLite transaction.
+- The artifact store now supports atomically written binary artifacts using the
+  same path-containment and checksum rules as text and JSON.
+
+### Safety Notes
+
+- The deterministic verifier is a conservative passage-alignment gate, not a
+  substitute for expert factual review. Retrieval never crosses citation keys.
+- Risk acceptance cannot override missing citations, contradictions, partial
+  support, or evidence not found; it is limited to unavailable full text.
+- PDF acquisition accepts HTTPS sources with a PDF signature and does not
+  bypass paywalls.
+
 ## 0.5.1 - 2026-07-14
 
 ### Added

@@ -8,6 +8,8 @@ import shlex
 
 from src.literature_review.activity import ActivityCoordinator
 from src.literature_review.discovery import ApprovalService, QueryPlanner
+from src.literature_review.documents.service import DocumentImportService
+from src.literature_review.exporting import export_audit_bundle
 from src.literature_review.models import (
     CandidatePaper,
     CandidateStatus,
@@ -23,6 +25,10 @@ from src.literature_review.storage import (
     SQLiteWorkflowStore,
 )
 from src.literature_review.workbench.deletion import ArtifactDeletionManager
+from src.literature_review.verification import (
+    EvidenceReviewDecision,
+    VerificationStatus,
+)
 
 
 class PendingCandidatesError(RuntimeError):
@@ -138,7 +144,7 @@ class WorkbenchService:
         candidates = self.store.list_candidates(run_id)
         events = self.store.list_events(run_id)
         attempts = self.store.list_discovery_attempts(run_id)
-        return {
+        detail: dict[str, object] = {
             "run": run.to_dict(),
             "candidate_counts": self._candidate_counts(candidates),
             "events": [event.to_dict() for event in events],
@@ -152,6 +158,105 @@ class WorkbenchService:
                 attempts,
             ),
         }
+        evidence = self._evidence_detail(run_id)
+        outputs = self._output_detail(run_id)
+        if evidence["enabled"]:
+            detail["evidence"] = evidence
+        if outputs["survey_available"]:
+            detail["outputs"] = outputs
+        return detail
+
+    def decide_evidence(
+        self,
+        run_id: str,
+        claim_id: str,
+        action: str,
+        reason: str,
+    ) -> dict[str, object]:
+        run = self.store.get_run(run_id)
+        if run.current_stage != WorkflowStage.AWAITING_EVIDENCE_REVIEW:
+            raise ValueError("evidence decisions require the evidence review gate")
+        if not reason.strip():
+            raise ValueError("decision reason must be nonblank")
+        blocking = self.store.list_claim_verifications(
+            run_id,
+            claim_id=claim_id,
+            blocking_only=True,
+        )
+        if not blocking:
+            raise ValueError("claim has no blocking verification result")
+        if action == "accept_risk" and any(
+            item.status != VerificationStatus.FULL_TEXT_UNAVAILABLE
+            for item in blocking
+        ):
+            raise ValueError("risk acceptance requires unavailable full text")
+        decision = EvidenceReviewDecision.create(
+            run_id,
+            claim_id,
+            action,
+            reason.strip(),
+            "human-workbench",
+        )
+        self.store.put_evidence_review_decision(decision)
+        return {
+            "decision": decision.to_dict(),
+            "evidence": self._evidence_detail(run_id),
+            "equivalent_command": self._equivalent_command(
+                "evidence-decide",
+                run_id,
+                claim_id,
+                f"--action={action}",
+                f"--reason={reason.strip()}",
+            ),
+        }
+
+    def import_pdf(
+        self,
+        run_id: str,
+        citation_key: str,
+        pdf_path: str,
+    ) -> dict[str, object]:
+        document = DocumentImportService(
+            self.store,
+            LocalArtifactStore(self.artifact_root),
+        ).import_pdf(run_id, citation_key, Path(pdf_path))
+        return {
+            "document": document.to_dict(),
+            "evidence": self._evidence_detail(run_id),
+            "equivalent_command": self._equivalent_command(
+                f"--db={self.store.path.expanduser().resolve()}",
+                f"--artifacts={self.artifact_root}",
+                "import-pdf",
+                run_id,
+                citation_key,
+                str(Path(pdf_path).expanduser().resolve()),
+            ),
+        }
+
+    def export_run(self, run_id: str, *, include_pdfs: bool = True) -> dict[str, object]:
+        output_path = (
+            self.artifact_root
+            / "runs"
+            / run_id
+            / "exports"
+            / f"{run_id}-audit.zip"
+        )
+        result = export_audit_bundle(
+            self.store,
+            LocalArtifactStore(self.artifact_root),
+            run_id,
+            output_path,
+            include_pdfs=include_pdfs,
+        )
+        result["equivalent_command"] = self._equivalent_command(
+            f"--db={self.store.path.expanduser().resolve()}",
+            f"--artifacts={self.artifact_root}",
+            "export",
+            run_id,
+            f"--output={output_path}",
+            *(() if include_pdfs else ("--no-pdfs",)),
+        )
+        return result
 
     def list_candidates(
         self,
@@ -334,6 +439,73 @@ class WorkbenchService:
             "equivalent_command": equivalent_command,
         }
 
+    def _evidence_detail(self, run_id: str) -> dict[str, object]:
+        documents = self.store.list_documents(run_id)
+        all_claims = self.store.list_claims(run_id)
+        latest_version = max(
+            (claim.draft_version for claim in all_claims),
+            default=0,
+        )
+        claims = [
+            claim for claim in all_claims if claim.draft_version == latest_version
+        ]
+        verifications = self.store.list_claim_verifications(run_id)
+        decisions = self.store.list_evidence_review_decisions(run_id)
+        chunks_by_id = {
+            chunk.chunk_id: chunk
+            for chunk in self.store.list_evidence_chunks(run_id)
+        }
+        verifications_by_claim: dict[str, list[dict[str, object]]] = {}
+        for verification in verifications:
+            serialized = verification.to_dict()
+            serialized["evidence"] = [
+                {
+                    **chunks_by_id[chunk_id].to_dict(),
+                    "text": chunks_by_id[chunk_id].text[:1200],
+                }
+                for chunk_id in verification.evidence_chunk_ids
+                if chunk_id in chunks_by_id
+            ]
+            verifications_by_claim.setdefault(verification.claim_id, []).append(
+                serialized
+            )
+        decisions_by_claim = {
+            decision.claim_id: decision.to_dict() for decision in decisions
+        }
+        claim_rows = []
+        for claim in claims:
+            results = verifications_by_claim.get(claim.claim_id, [])
+            claim_rows.append(
+                {
+                    **claim.to_dict(),
+                    "verifications": results,
+                    "blocking": any(bool(item["blocking"]) for item in results),
+                    "decision": decisions_by_claim.get(claim.claim_id),
+                }
+            )
+        return {
+            "enabled": bool(documents or claims),
+            "document_count": len(documents),
+            "parsed_document_count": sum(
+                item.status.value in {"parsed", "low_quality"} for item in documents
+            ),
+            "claim_count": len(claims),
+            "draft_version": latest_version,
+            "blocking_claim_count": sum(row["blocking"] for row in claim_rows),
+            "documents": [item.to_dict() for item in documents],
+            "claims": claim_rows,
+        }
+
+    def _output_detail(self, run_id: str) -> dict[str, object]:
+        artifacts = LocalArtifactStore(self.artifact_root)
+        survey_path = "final/survey.md"
+        available = artifacts.exists(run_id, survey_path)
+        survey = artifacts.read_text(run_id, survey_path) if available else ""
+        return {
+            "survey_available": available,
+            "survey_markdown": survey,
+        }
+
     @classmethod
     def _equivalent_command(cls, *arguments: str) -> str:
         return shlex.join([*cls._COMMAND_PREFIX, *arguments])
@@ -432,6 +604,10 @@ class WorkbenchService:
             "discovering": "literature_discovery",
             "screening": "screening_agent",
             "awaiting_corpus_approval": "human_approval",
+            "acquiring_documents": "document_acquisition",
+            "indexing_evidence": "evidence_indexing",
+            "claim_verification": "claim_verification",
+            "awaiting_evidence_review": "human_evidence_review",
             "completed": "completed",
         }
         agent_loop_stages = {

@@ -21,6 +21,7 @@ class Orchestrator:
         run_id: str | None = None,
         api_client: Any | None = None,
         agent_factory: AgentFactory | None = None,
+        initial_review_feedback: dict[str, Any] | None = None,
     ) -> None:
         self.corpus_path = corpus_path
         self.output_dir = output_dir
@@ -28,6 +29,7 @@ class Orchestrator:
         self.run_id = run_id
         self.api_client = api_client
         self.agent_factory = agent_factory or build_agent_factory()
+        self.initial_review_feedback = initial_review_feedback
         create = self.agent_factory.create
         self.search_agent = create("search", self.runtime_config, api_client)
         self.writer_agent = create("writer", self.runtime_config, api_client)
@@ -66,7 +68,7 @@ class Orchestrator:
         draft = ""
         review_report: dict[str, Any] = {}
         revision_log = []
-        review_feedback: dict[str, Any] | None = None
+        review_feedback: dict[str, Any] | None = self.initial_review_feedback
         for attempt in range(max_revision_loops + 1):
             draft = self._run_writer(search_report, review_feedback)
             (intermediate_dir / f"writer_draft_v{attempt + 1}.md").write_text(

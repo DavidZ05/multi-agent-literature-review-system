@@ -32,8 +32,12 @@ from src.literature_review.storage import (
 )
 from src.literature_review.workflow import (
     ApprovalGateHandler,
+    ClaimVerificationHandler,
+    DocumentAcquisitionHandler,
     DiscoveryHandler,
     DraftingHandler,
+    EvidenceIndexingHandler,
+    EvidenceReviewGateHandler,
     PersistentWorkflowEngine,
     PlanningHandler,
     ScreeningHandler,
@@ -44,6 +48,7 @@ def build_engine(
     artifact_root: Path,
     *,
     discovery_enabled: bool = False,
+    full_text_enabled: bool = False,
     providers: tuple[str, ...] = ("arxiv", "semantic_scholar"),
     max_results: int = 10,
     query_texts: tuple[str, ...] = (),
@@ -58,13 +63,19 @@ def build_engine(
     runtime_config = AgentRuntimeConfig.from_env(environment)
     if runtime_config.active_backend == "api" and api_client is None:
         api_client = OpenAIChatClient()
+    drafting_handler = DraftingHandler(
+        runtime_config,
+        api_client=api_client,
+        agent_factory=agent_factory,
+    )
+    if full_text_enabled:
+        drafting_handler.enable_claim_verification()
     handlers = {
-        WorkflowStage.PLANNING: PlanningHandler(discovery_enabled=discovery_enabled),
-        WorkflowStage.DRAFTING: DraftingHandler(
-            runtime_config,
-            api_client=api_client,
-            agent_factory=agent_factory,
+        WorkflowStage.PLANNING: PlanningHandler(
+            discovery_enabled=discovery_enabled,
+            full_text_enabled=full_text_enabled,
         ),
+        WorkflowStage.DRAFTING: drafting_handler,
     }
     workflow_config = runtime_config.public_dict()
     selected_provider_plugins = [
@@ -75,6 +86,7 @@ def build_engine(
     workflow_config.update(
         {
             "discovery_enabled": discovery_enabled,
+            "full_text_enabled": full_text_enabled,
             "discovery_providers": list(providers),
             "discovery_max_results": max_results,
             "discovery_query_texts": list(query_texts),
@@ -101,7 +113,19 @@ def build_engine(
                     )
                 ),
                 WorkflowStage.SCREENING: ScreeningHandler(),
-                WorkflowStage.AWAITING_CORPUS_APPROVAL: ApprovalGateHandler(approval),
+                WorkflowStage.AWAITING_CORPUS_APPROVAL: ApprovalGateHandler(
+                    approval,
+                    full_text_enabled=full_text_enabled,
+                ),
+            }
+        )
+    if full_text_enabled:
+        handlers.update(
+            {
+                WorkflowStage.ACQUIRING_DOCUMENTS: DocumentAcquisitionHandler(),
+                WorkflowStage.INDEXING_EVIDENCE: EvidenceIndexingHandler(),
+                WorkflowStage.CLAIM_VERIFICATION: ClaimVerificationHandler(),
+                WorkflowStage.AWAITING_EVIDENCE_REVIEW: EvidenceReviewGateHandler(),
             }
         )
     return PersistentWorkflowEngine(
@@ -177,6 +201,25 @@ def load_resume_query_texts(
     ):
         raise TypeError("stored discovery_query_texts must be a list of strings")
     return tuple(dict.fromkeys(value.strip() for value in values))
+
+
+def load_resume_full_text(
+    artifact_store: LocalArtifactStore,
+    run_id: str,
+) -> bool:
+    try:
+        request = artifact_store.read_json(run_id, "inputs/research_request.json")
+    except FileNotFoundError:
+        return False
+    if not isinstance(request, dict):
+        raise TypeError("stored research request must be an object")
+    config = request.get("runtime_config", {})
+    if not isinstance(config, dict):
+        raise TypeError("stored runtime_config must be an object")
+    enabled = config.get("full_text_enabled", False)
+    if not isinstance(enabled, bool):
+        raise TypeError("stored full_text_enabled must be a boolean")
+    return enabled
 
 
 def retry_discovery(
@@ -324,6 +367,7 @@ def retry_discovery(
 __all__ = [
     "build_engine",
     "load_resume_query_texts",
+    "load_resume_full_text",
     "load_resume_settings",
     "retry_discovery",
 ]

@@ -53,11 +53,15 @@ class WorkflowStage(str, Enum):
     DISCOVERING = "discovering"
     SCREENING = "screening"
     AWAITING_CORPUS_APPROVAL = "awaiting_corpus_approval"
+    ACQUIRING_DOCUMENTS = "acquiring_documents"
+    INDEXING_EVIDENCE = "indexing_evidence"
     DRAFTING = "drafting"
     REVIEWING = "reviewing"
     REVISING = "revising"
     POLISHING = "polishing"
     FINAL_VERIFICATION = "final_verification"
+    CLAIM_VERIFICATION = "claim_verification"
+    AWAITING_EVIDENCE_REVIEW = "awaiting_evidence_review"
     COMPLETED = "completed"
 
 

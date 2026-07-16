@@ -79,3 +79,73 @@ evaluation, and reliability variants. Users may replace these with up to eight
 exact scholarly queries in either the CLI or Workbench. arXiv converts query
 text to a bounded keyword conjunction instead of requiring one long exact
 phrase; Semantic Scholar receives the normalized query text directly.
+
+## Full-Text Evidence Path
+
+Full-text verification is an opt-in extension to the durable workflow:
+
+```mermaid
+flowchart LR
+    A["Approved corpus"] --> B["Acquire PDFs"]
+    B --> C["Parse pages and score quality"]
+    C --> D["Build stable evidence chunks"]
+    D --> E["Writer and expert review loop"]
+    E --> F["Polish and citation verification"]
+    F --> G["Extract atomic claims"]
+    G --> H["Citation-scoped retrieval"]
+    H --> I{"Claim evidence gate"}
+    I -->|accepted| J["Completed"]
+    I -->|human revision decision| E
+    I -->|full text unavailable only| K["Documented risk acceptance"]
+    K --> J
+```
+
+`DocumentRecord` stores acquisition method, source URL, run-relative path,
+SHA-256, parser version, page count, extraction quality, and failure code.
+`EvidenceChunk` IDs are derived from the document checksum, page range,
+character offsets, and chunking configuration. Reprocessing unchanged input is
+stable, while changing the PDF or chunking policy changes the evidence identity.
+
+PDF acquisition is limited to HTTPS and validates the PDF signature. It does
+not bypass access controls. An unavailable document remains in the manifest so
+the final verifier emits `full_text_unavailable` instead of pretending the
+source was checked. A user may import a locally available PDF for the same
+citation key; import reads only up to the configured size limit, immediately
+parses and indexes it, and transactionally replaces the latest claim
+verification results using the same contracts.
+
+## Claim Verification Contract
+
+The final polished Markdown is split into versioned `AtomicClaim` records with
+section and paragraph positions. Factual and synthesis claims require citation
+keys. Retrieval is hard-scoped to evidence chunks whose citation key matches
+the claim citation; a passage from another paper cannot satisfy the result.
+
+The deterministic verifier emits `supported`, `partially_supported`,
+`contradicted`, `not_found`, `full_text_unavailable`, or `missing_citation`.
+It uses material-term coverage, phrase overlap, and a conservative polarity
+check. This is an auditable screening gate, not a claim of expert-level natural
+language inference. A model-backed semantic verifier may later implement the
+same result contract, but cannot change citation scope or bypass blocking
+statuses.
+
+All statuses except `supported` block automatic completion. Human
+`accept_risk` is valid only if every blocking result for that claim is
+`full_text_unavailable`. All other failures require revision. The gate writes
+claim feedback plus the human decision IDs into
+`evidence/revision_feedback.json`. That control artifact is part of Drafting's
+input fingerprint, ensuring the next Writer run receives the feedback and an
+old checkpoint is not reused.
+
+Claims are versioned across revisions. The Workbench and active gate show the
+latest version; earlier claims, verification results, and decisions remain in
+SQLite and the audit export.
+
+## Audit Export
+
+The export command creates a deterministic ZIP with fixed entry metadata,
+sorted paths, run artifacts, source PDFs unless excluded, and
+`audit/manifest.json`. The manifest contains workflow events, document state,
+claims, verification results, human decisions, and SHA-256 hashes for every
+included artifact. This supports review and comparison without treating the ZIP
+as a new source of truth.

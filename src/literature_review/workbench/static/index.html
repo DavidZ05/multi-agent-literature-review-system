@@ -18,6 +18,9 @@
           <span class="lang-zh">中文</span><span class="language-divider">/</span><span class="lang-en">EN</span>
         </button>
         <button class="wb-btn" id="events-button" type="button" data-i18n="events" disabled>Events</button>
+        <button class="wb-btn" id="preview-run-button" type="button" data-i18n="previewSurvey" disabled>Preview survey</button>
+        <button class="wb-btn" id="download-survey-button" type="button" data-i18n="downloadSurvey" disabled>Download Markdown</button>
+        <button class="wb-btn" id="export-run-button" type="button" data-i18n="exportRun" disabled>Export audit ZIP</button>
         <button class="wb-btn" id="resume-run-button" type="button" data-i18n="resumeRun" disabled>Resume</button>
         <button class="wb-btn" id="close-discovery-button" type="button" data-i18n="closeDiscovery" disabled>Close discovery</button>
         <button class="wb-btn danger" id="cancel-run-button" type="button" data-i18n="cancelRun" disabled>Cancel run</button>
@@ -96,6 +99,27 @@
             <div class="discovery-attempts" id="discovery-attempts"></div>
             <ul class="discovery-recommendations" id="discovery-recommendations"></ul>
           </section>
+          <section class="evidence-panel" id="evidence-panel" aria-labelledby="evidence-heading" hidden>
+            <div class="evidence-panel-head">
+              <div>
+                <h3 id="evidence-heading" data-i18n="evidenceReview">Claim evidence review</h3>
+                <p class="muted" id="evidence-summary"></p>
+              </div>
+              <div class="evidence-metrics" id="evidence-metrics"></div>
+            </div>
+            <div class="table-wrap evidence-table-wrap" tabindex="0">
+              <table class="candidate-table evidence-table">
+                <thead><tr>
+                  <th scope="col" data-i18n="claim">Claim</th>
+                  <th scope="col" data-i18n="citation">Citation</th>
+                  <th scope="col" data-i18n="status">Status</th>
+                  <th scope="col" data-i18n="pages">Pages</th>
+                </tr></thead>
+                <tbody id="evidence-body"></tbody>
+              </table>
+              <div class="table-state" id="evidence-empty" data-i18n="noEvidenceClaims" hidden>No claim evidence is available yet.</div>
+            </div>
+          </section>
         </header>
 
         <section aria-labelledby="candidates-heading">
@@ -169,6 +193,25 @@
             </div>
           </form>
         </div>
+        <div id="evidence-detail" hidden>
+          <h2 id="evidence-claim-title" data-i18n="claimEvidence">Claim evidence</h2>
+          <p id="evidence-claim-text"></p>
+          <div class="detail-meta" id="evidence-claim-meta"></div>
+          <div id="evidence-results"></div>
+          <form id="evidence-decision-form" hidden>
+            <label for="evidence-decision-reason" data-i18n="decisionReason">Decision reason</label>
+            <textarea class="field" id="evidence-decision-reason" rows="3" required></textarea>
+            <div class="decision-actions">
+              <button class="decision" id="require-revision-button" type="submit" data-i18n="requireRevision">Require revision</button>
+              <button class="decision approve" id="accept-risk-button" type="button" data-i18n="acceptRisk">Accept unavailable-text risk</button>
+            </div>
+          </form>
+          <form id="pdf-import-form" hidden>
+            <label for="pdf-import-path" data-i18n="pdfPath">Local PDF path</label>
+            <input class="field mono" id="pdf-import-path" autocomplete="off">
+            <button class="wb-btn" id="import-pdf-button" type="submit" data-i18n="importPdf">Import and index PDF</button>
+          </form>
+        </div>
         <div class="command-panel" id="command-panel" hidden>
           <span data-i18n="equivalentCli">Equivalent CLI:</span>
           <code id="equivalent-command"></code>
@@ -190,6 +233,10 @@
       <label class="check-row" for="new-run-discover">
         <input id="new-run-discover" name="discover" type="checkbox" checked>
         <span data-i18n="enableDiscovery">Discover additional literature</span>
+      </label>
+      <label class="check-row" for="new-run-full-text">
+        <input id="new-run-full-text" name="full_text" type="checkbox">
+        <span data-i18n="enableFullText">Download PDFs and verify claims against full text</span>
       </label>
       <fieldset class="provider-fields">
         <legend data-i18n="providers">Providers</legend>
@@ -239,6 +286,19 @@
       <div class="events-list" id="events-list"></div>
       <div class="dialog-actions">
         <button class="wb-btn" type="button" data-close-dialog="events-dialog" data-i18n="close">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="survey-preview-dialog" aria-labelledby="survey-preview-heading">
+    <div class="dialog-form survey-preview-dialog">
+      <div class="dialog-header">
+        <h2 id="survey-preview-heading" data-i18n="previewSurvey">Preview survey</h2>
+        <button class="icon-button" type="button" data-close-dialog="survey-preview-dialog" aria-label="Close" data-i18n-aria="close">×</button>
+      </div>
+      <pre id="survey-preview"></pre>
+      <div class="dialog-actions">
+        <button class="wb-btn" type="button" data-close-dialog="survey-preview-dialog" data-i18n="close">Close</button>
       </div>
     </div>
   </dialog>

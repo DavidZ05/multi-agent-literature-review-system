@@ -398,7 +398,44 @@ class WriterAgent(RuntimeAwareAgent):
             "## References",
             *self._references(all_papers),
         ]
-        return "\n".join(sections) + "\n"
+        draft = "\n".join(sections) + "\n"
+        return self._apply_evidence_feedback(draft, review_feedback)
+
+    @staticmethod
+    def _apply_evidence_feedback(
+        draft: str,
+        review_feedback: dict[str, Any] | None,
+    ) -> str:
+        if not isinstance(review_feedback, dict):
+            return draft
+        issues = review_feedback.get("issues", [])
+        if not isinstance(issues, list):
+            return draft
+        revised = draft
+        table_keys: set[str] = set()
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            claim = issue.get("claim")
+            if isinstance(claim, str) and claim.strip() and claim in revised:
+                revised = revised.replace(claim, "")
+                continue
+            section = str(issue.get("section", ""))
+            citation_key = issue.get("citation_key")
+            if "table" in section.lower() and isinstance(citation_key, str):
+                table_keys.add(citation_key)
+        if table_keys:
+            revised = "\n".join(
+                line
+                for line in revised.splitlines()
+                if not (
+                    line.lstrip().startswith("|")
+                    and any(f"[{key}]" in line for key in table_keys)
+                )
+            ) + "\n"
+        revised = re.sub(r"[ \t]{2,}", " ", revised)
+        revised = re.sub(r"\n{3,}", "\n\n", revised)
+        return revised
 
     def _run_api(
         self,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,14 +14,27 @@ from src.literature_review.discovery.service import (
     AllProvidersFailedError,
     DiscoveryService,
 )
+from src.literature_review.corpus import load_papers
+from src.literature_review.documents import (
+    DocumentAcquirer,
+    DocumentStatus,
+    EvidenceIndexer,
+    PDFParser,
+)
 from src.literature_review.models import CandidateStatus
 from src.literature_review.models import WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
 from src.literature_review.plugins import AgentFactory
 from src.literature_review.workflow.engine import (
     RetryableStageError,
+    StageWaitingError,
     StageContext,
     StageResult,
+)
+from src.literature_review.verification import (
+    ClaimExtractor,
+    ClaimVerifier,
+    VerificationStatus,
 )
 
 
@@ -36,8 +50,14 @@ class QualityGateRejectedError(RuntimeError):
 
 
 class PlanningHandler:
-    def __init__(self, *, discovery_enabled: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        discovery_enabled: bool = False,
+        full_text_enabled: bool = False,
+    ) -> None:
         self.discovery_enabled = discovery_enabled
+        self.full_text_enabled = full_text_enabled
 
     def __call__(self, context: StageContext) -> StageResult:
         request = {
@@ -49,7 +69,11 @@ class PlanningHandler:
             next_stage=(
                 WorkflowStage.DISCOVERING
                 if self.discovery_enabled
-                else WorkflowStage.DRAFTING
+                else (
+                    WorkflowStage.ACQUIRING_DOCUMENTS
+                    if self.full_text_enabled
+                    else WorkflowStage.DRAFTING
+                )
             ),
             output_artifacts={"inputs/research_request.json": request},
         )
@@ -114,8 +138,14 @@ class ScreeningHandler:
 
 
 class ApprovalGateHandler:
-    def __init__(self, approval_service: ApprovalService) -> None:
+    def __init__(
+        self,
+        approval_service: ApprovalService,
+        *,
+        full_text_enabled: bool = False,
+    ) -> None:
         self.approval_service = approval_service
+        self.full_text_enabled = full_text_enabled
 
     def __call__(self, context: StageContext) -> StageResult:
         pending = context.workflow_store.list_candidates(
@@ -129,10 +159,115 @@ class ApprovalGateHandler:
             context.corpus_path,
         )
         return StageResult(
-            next_stage=WorkflowStage.DRAFTING,
+            next_stage=(
+                WorkflowStage.ACQUIRING_DOCUMENTS
+                if self.full_text_enabled
+                else WorkflowStage.DRAFTING
+            ),
             output_artifacts={
                 "discovery/approved_corpus.json": records,
             },
+        )
+
+
+class DocumentAcquisitionHandler:
+    def __init__(self, acquirer: DocumentAcquirer | None = None) -> None:
+        self.acquirer = acquirer or DocumentAcquirer()
+
+    def __call__(self, context: StageContext) -> StageResult:
+        corpus_path = _materialize_corpus(context)
+        papers = load_papers(corpus_path)
+        outputs: dict[str, Any] = {}
+        manifest = []
+        for paper in papers:
+            if context.is_cancelled():
+                break
+            result = self.acquirer.acquire(
+                context.run.run_id,
+                paper,
+                context.artifact_store,
+            )
+            context.workflow_store.put_document(result.document)
+            manifest.append(result.document.to_dict())
+            if result.downloaded and result.document.relative_path:
+                outputs[result.document.relative_path] = context.artifact_store.read_bytes(
+                    context.run.run_id,
+                    result.document.relative_path,
+                )
+        outputs["evidence/document_manifest.json"] = {
+            "document_count": len(manifest),
+            "acquired_count": sum(
+                item["status"] == DocumentStatus.ACQUIRED.value for item in manifest
+            ),
+            "documents": manifest,
+        }
+        return StageResult(
+            next_stage=WorkflowStage.INDEXING_EVIDENCE,
+            output_artifacts=outputs,
+        )
+
+
+class EvidenceIndexingHandler:
+    def __init__(
+        self,
+        parser: PDFParser | None = None,
+        indexer: EvidenceIndexer | None = None,
+    ) -> None:
+        self.parser = parser or PDFParser()
+        self.indexer = indexer or EvidenceIndexer()
+
+    def __call__(self, context: StageContext) -> StageResult:
+        outputs: dict[str, Any] = {}
+        summaries = []
+        for document in context.workflow_store.list_documents(context.run.run_id):
+            if context.is_cancelled():
+                break
+            if document.status != DocumentStatus.ACQUIRED or not document.relative_path:
+                summaries.append(document.to_dict())
+                continue
+            try:
+                parsed = self.parser.parse(
+                    document,
+                    context.artifact_store.path_for(
+                        context.run.run_id,
+                        document.relative_path,
+                    ),
+                )
+                chunks = self.indexer.build(parsed)
+                context.workflow_store.put_document(parsed.document)
+                context.workflow_store.replace_evidence_chunks(
+                    context.run.run_id,
+                    parsed.document.document_id,
+                    chunks,
+                )
+                outputs[
+                    f"evidence/parsed/{parsed.document.citation_key}.json"
+                ] = parsed.to_dict()
+                summaries.append(
+                    {
+                        **parsed.document.to_dict(),
+                        "chunk_count": len(chunks),
+                        "quality_warnings": list(parsed.quality_warnings),
+                    }
+                )
+            except Exception as exc:
+                failed = replace(
+                    document,
+                    status=DocumentStatus.FAILED,
+                    error_code=f"parse_failed:{type(exc).__name__}",
+                )
+                context.workflow_store.put_document(failed)
+                summaries.append(failed.to_dict())
+        all_chunks = context.workflow_store.list_evidence_chunks(context.run.run_id)
+        outputs["evidence/index_manifest.json"] = {
+            "document_count": len(summaries),
+            "chunk_count": len(all_chunks),
+            "documents": summaries,
+            "chunks": [chunk.to_dict() for chunk in all_chunks],
+        }
+        return StageResult(
+            next_stage=WorkflowStage.DRAFTING,
+            output_artifacts=outputs,
         )
 
 
@@ -157,6 +292,11 @@ class DraftingHandler:
         self.api_client = api_client
         self.orchestrator_factory = orchestrator_factory
         self.agent_factory = agent_factory
+        self.claim_verification_enabled = False
+
+    def enable_claim_verification(self) -> DraftingHandler:
+        self.claim_verification_enabled = True
+        return self
 
     def __call__(self, context: StageContext) -> StageResult:
         with TemporaryDirectory(prefix=f"{context.run.run_id}-") as temporary:
@@ -175,6 +315,12 @@ class DraftingHandler:
                 "runtime_config": self.runtime_config,
                 "run_id": context.run.run_id,
             }
+            feedback_path = "evidence/revision_feedback.json"
+            if context.artifact_store.exists(context.run.run_id, feedback_path):
+                kwargs["initial_review_feedback"] = context.artifact_store.read_json(
+                    context.run.run_id,
+                    feedback_path,
+                )
             if self.api_client is not None:
                 kwargs["api_client"] = self.api_client
             if self.agent_factory is not None:
@@ -222,9 +368,157 @@ class DraftingHandler:
                 )
 
         return StageResult(
-            next_stage=WorkflowStage.COMPLETED,
+            next_stage=(
+                WorkflowStage.CLAIM_VERIFICATION
+                if self.claim_verification_enabled
+                else WorkflowStage.COMPLETED
+            ),
             output_artifacts=artifacts,
         )
+
+
+class ClaimVerificationHandler:
+    def __init__(
+        self,
+        extractor: ClaimExtractor | None = None,
+        verifier: ClaimVerifier | None = None,
+    ) -> None:
+        self.extractor = extractor or ClaimExtractor()
+        self.verifier = verifier or ClaimVerifier()
+
+    def __call__(self, context: StageContext) -> StageResult:
+        survey = context.artifact_store.read_text(
+            context.run.run_id,
+            "final/survey.md",
+        )
+        prior_claims = context.workflow_store.list_claims(context.run.run_id)
+        draft_version = max(
+            (claim.draft_version for claim in prior_claims),
+            default=0,
+        ) + 1
+        claims = self.extractor.extract(
+            context.run.run_id,
+            survey,
+            draft_version=draft_version,
+        )
+        documents = tuple(
+            context.workflow_store.list_documents(context.run.run_id)
+        )
+        chunks = tuple(
+            context.workflow_store.list_evidence_chunks(context.run.run_id)
+        )
+        verifications = self.verifier.verify(claims, documents, chunks)
+        context.workflow_store.replace_claims(
+            context.run.run_id,
+            draft_version,
+            claims,
+        )
+        context.workflow_store.put_claim_verifications(verifications)
+        report = self.verifier.report(claims, verifications)
+        feedback = self.verifier.feedback(claims, verifications)
+        return StageResult(
+            next_stage=(
+                WorkflowStage.COMPLETED
+                if report["accepted"]
+                else WorkflowStage.AWAITING_EVIDENCE_REVIEW
+            ),
+            output_artifacts={
+                "evidence/claim_verification.json": report,
+                "evidence/latest_feedback.json": feedback,
+            },
+            waiting_reason=(
+                None
+                if report["accepted"]
+                else "claim-level evidence review required"
+            ),
+        )
+
+
+class EvidenceReviewGateHandler:
+    def __call__(self, context: StageContext) -> StageResult:
+        claims = context.workflow_store.list_claims(context.run.run_id)
+        latest_version = max(
+            (claim.draft_version for claim in claims),
+            default=0,
+        )
+        latest_claim_ids = {
+            claim.claim_id for claim in claims if claim.draft_version == latest_version
+        }
+        verifications = [
+            item
+            for item in context.workflow_store.list_claim_verifications(
+                context.run.run_id
+            )
+            if item.claim_id in latest_claim_ids
+        ]
+        blocking = [item for item in verifications if item.blocking]
+        decisions = context.workflow_store.list_evidence_review_decisions(
+            context.run.run_id
+        )
+        decisions_by_claim = {decision.claim_id: decision for decision in decisions}
+        unresolved = [
+            item for item in blocking if item.claim_id not in decisions_by_claim
+        ]
+        if unresolved:
+            raise StageWaitingError(
+                f"{len({item.claim_id for item in unresolved})} claim decisions remain"
+            )
+        invalid_accepts = [
+            item
+            for item in blocking
+            if decisions_by_claim[item.claim_id].action == "accept_risk"
+            and item.status != VerificationStatus.FULL_TEXT_UNAVAILABLE
+        ]
+        if invalid_accepts:
+            raise ValueError(
+                "risk acceptance is allowed only when cited full text is unavailable"
+            )
+        require_revision = any(
+            decisions_by_claim[item.claim_id].action == "require_revision"
+            for item in blocking
+        )
+        if require_revision:
+            feedback = context.artifact_store.read_json(
+                context.run.run_id,
+                "evidence/latest_feedback.json",
+            )
+            revision_decisions = [
+                decision
+                for decision in decisions_by_claim.values()
+                if decision.action == "require_revision"
+                and decision.claim_id in latest_claim_ids
+            ]
+            feedback = {
+                **feedback,
+                "revision_request_ids": sorted(
+                    decision.decision_id for decision in revision_decisions
+                ),
+                "source_draft_version": latest_version,
+            }
+            return StageResult(
+                next_stage=WorkflowStage.DRAFTING,
+                output_artifacts={"evidence/revision_feedback.json": feedback},
+            )
+        return StageResult(
+            next_stage=WorkflowStage.COMPLETED,
+            output_artifacts={
+                "evidence/final_review.json": {
+                    "status": (
+                        "accepted_with_documented_risk"
+                        if blocking
+                        else "accepted_after_document_refresh"
+                    ),
+                    "decisions": [decision.to_dict() for decision in decisions],
+                }
+            },
+        )
+
+
+def _materialize_corpus(context: StageContext) -> Path:
+    approved_path = "discovery/approved_corpus.json"
+    if not context.artifact_store.exists(context.run.run_id, approved_path):
+        return context.corpus_path
+    return context.artifact_store.path_for(context.run.run_id, approved_path)
 
 
 def _api_error_message(exc: APIClientError, *, retryable: bool) -> str:
@@ -235,8 +529,12 @@ def _api_error_message(exc: APIClientError, *, retryable: bool) -> str:
 
 __all__ = [
     "ApprovalGateHandler",
+    "ClaimVerificationHandler",
+    "DocumentAcquisitionHandler",
     "DiscoveryHandler",
     "DraftingHandler",
+    "EvidenceIndexingHandler",
+    "EvidenceReviewGateHandler",
     "OrchestratorFactory",
     "OrchestratorRunner",
     "PlanningHandler",

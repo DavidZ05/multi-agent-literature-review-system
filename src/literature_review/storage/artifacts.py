@@ -78,6 +78,13 @@ class LocalArtifactStore:
     ) -> ArtifactRecord:
         return self._write_bytes(run_id, relative_path, content.encode("utf-8"))
 
+    def write_bytes(
+        self, run_id: str, relative_path: str, content: bytes
+    ) -> ArtifactRecord:
+        if not isinstance(content, bytes):
+            raise TypeError("binary artifact content must be bytes")
+        return self._write_bytes(run_id, relative_path, content)
+
     def write_json(self, run_id: str, relative_path: str, data: Any) -> ArtifactRecord:
         content = json.dumps(data, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
         return self.write_text(run_id, relative_path, content)
@@ -85,11 +92,17 @@ class LocalArtifactStore:
     def read_text(self, run_id: str, relative_path: str) -> str:
         return self._target(run_id, relative_path).read_text(encoding="utf-8")
 
+    def read_bytes(self, run_id: str, relative_path: str) -> bytes:
+        return self._target(run_id, relative_path).read_bytes()
+
     def read_json(self, run_id: str, relative_path: str) -> Any:
         return json.loads(self.read_text(run_id, relative_path))
 
     def exists(self, run_id: str, relative_path: str) -> bool:
         return self._target(run_id, relative_path).is_file()
+
+    def path_for(self, run_id: str, relative_path: str) -> Path:
+        return self._target(run_id, relative_path)
 
     def hash_file(self, run_id: str, relative_path: str) -> str:
         target = self._target(run_id, relative_path)

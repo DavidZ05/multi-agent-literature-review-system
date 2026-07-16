@@ -42,7 +42,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         self.store.initialize()
         with sqlite3.connect(self.path) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-        self.assertEqual(version, 5)
+        self.assertEqual(version, 6)
 
     def test_version_one_database_migrates_without_losing_data(self) -> None:
         legacy_path = Path(self.tmp.name) / "legacy.db"
@@ -98,7 +98,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             checkpoint,
         )
         with sqlite3.connect(legacy_path) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 5)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 6)
 
     def test_version_three_database_adds_durable_jobs(self) -> None:
         legacy_path = Path(self.tmp.name) / "version-three.db"
@@ -113,7 +113,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             table = connection.execute(
                 "SELECT name FROM sqlite_master WHERE name='workflow_jobs'"
             ).fetchone()
-        self.assertEqual(version, 5)
+        self.assertEqual(version, 6)
         self.assertEqual(table, ("workflow_jobs",))
 
     def test_version_four_database_adds_discovery_attempts(self) -> None:
@@ -129,8 +129,34 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             table = connection.execute(
                 "SELECT name FROM sqlite_master WHERE name='discovery_attempts'"
             ).fetchone()
-        self.assertEqual(version, 5)
+        self.assertEqual(version, 6)
         self.assertEqual(table, ("discovery_attempts",))
+
+    def test_version_five_database_adds_evidence_audit_tables(self) -> None:
+        legacy_path = Path(self.tmp.name) / "version-five.db"
+        with sqlite3.connect(legacy_path) as connection:
+            connection.execute("PRAGMA user_version = 5")
+
+        legacy = SQLiteWorkflowStore(legacy_path)
+        legacy.initialize()
+
+        expected = {
+            "documents",
+            "evidence_chunks",
+            "atomic_claims",
+            "claim_verifications",
+            "evidence_review_decisions",
+        }
+        with sqlite3.connect(legacy_path) as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+        self.assertEqual(version, 6)
+        self.assertTrue(expected <= tables)
 
     def test_discovery_attempts_round_trip_in_creation_order(self) -> None:
         self.store.create_run(self.run)
@@ -463,11 +489,11 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
     def test_future_schema_is_rejected_without_change(self) -> None:
         future = Path(self.tmp.name) / "future.db"
         with sqlite3.connect(future) as connection:
-            connection.execute("PRAGMA user_version = 6")
+            connection.execute("PRAGMA user_version = 7")
         with self.assertRaises(UnsupportedSchemaVersionError):
             SQLiteWorkflowStore(future).initialize()
         with sqlite3.connect(future) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 6)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 7)
 
 
 class LocalArtifactStoreTests(unittest.TestCase):
@@ -497,6 +523,20 @@ class LocalArtifactStoreTests(unittest.TestCase):
         self.store.write_json(self.run_id, "state/run.json", {"value": 2})
         self.assertEqual(
             self.store.read_json(self.run_id, "state/run.json"), {"value": 2}
+        )
+
+    def test_binary_round_trip_uses_the_same_path_guards(self) -> None:
+        content = b"%PDF-1.7\n\x00binary"
+        record = self.store.write_bytes(
+            self.run_id,
+            "documents/paper.pdf",
+            content,
+        )
+
+        self.assertEqual(self.store.read_bytes(self.run_id, record.relative_path), content)
+        self.assertEqual(
+            self.store.path_for(self.run_id, record.relative_path),
+            record.absolute_path,
         )
 
     def test_paths_cannot_escape_run_directory(self) -> None:

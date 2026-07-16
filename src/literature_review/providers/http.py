@@ -35,6 +35,7 @@ class HttpResponse:
     status: int
     body: bytes
     headers: Mapping[str, str]
+    final_url: str | None = None
 
 
 class HttpTransport(Protocol):
@@ -91,6 +92,11 @@ class UrllibHttpTransport:
                             str(key): str(value)
                             for key, value in response.headers.items()
                         },
+                        final_url=(
+                            str(response.geturl())
+                            if callable(getattr(response, "geturl", None))
+                            else url
+                        ),
                     )
             except HTTPError as exc:
                 if exc.code not in {429, 503} or attempt == self.max_attempts:

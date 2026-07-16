@@ -118,20 +118,21 @@ class ApprovalService:
             details = details_by_candidate[item.candidate_id]
             citation_key = self._citation_key(item, used_keys)
             used_keys.add(citation_key)
-            records.append(
-                {
-                    "citation_key": citation_key,
-                    "title": item.title,
-                    "authors": list(item.authors),
-                    "year": item.year,
-                    "venue": item.venue or "Unknown venue",
-                    "url": item.source_urls[0],
-                    "category": details["category"],
-                    "contribution": details["contribution"],
-                    "evidence": ("metadata verified; full-text verification pending"),
-                    "tags": details["tags"],
-                }
-            )
+            record = {
+                "citation_key": citation_key,
+                "title": item.title,
+                "authors": list(item.authors),
+                "year": item.year,
+                "venue": item.venue or "Unknown venue",
+                "url": item.source_urls[0],
+                "category": details["category"],
+                "contribution": details["contribution"],
+                "evidence": "metadata verified; full-text verification pending",
+                "tags": details["tags"],
+            }
+            if item.open_access_pdf_url:
+                record["open_access_pdf_url"] = item.open_access_pdf_url
+            records.append(record)
         with TemporaryDirectory() as temporary:
             validation_path = Path(temporary) / "approved_corpus.json"
             validation_path.write_text(

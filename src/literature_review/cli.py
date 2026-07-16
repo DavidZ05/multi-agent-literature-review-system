@@ -17,6 +17,8 @@ from src.literature_review.activity import (
 from src.literature_review.config import AgentConfigurationError, AgentRuntimeConfig
 from src.literature_review.corpus import load_papers
 from src.literature_review.discovery import ApprovalService
+from src.literature_review.documents.service import DocumentImportService
+from src.literature_review.exporting import export_audit_bundle
 from src.literature_review.models import CandidateStatus, WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
 from src.literature_review.plugins import (
@@ -27,6 +29,7 @@ from src.literature_review.plugins import (
 )
 from src.literature_review.runtime import (
     build_engine,
+    load_resume_full_text,
     load_resume_query_texts,
     load_resume_settings,
     retry_discovery,
@@ -39,6 +42,10 @@ from src.literature_review.storage import (
     SQLiteWorkflowStore,
 )
 from src.literature_review.version import VERSION
+from src.literature_review.verification import (
+    EvidenceReviewDecision,
+    VerificationStatus,
+)
 from src.literature_review.workflow import StageExecutionError
 from src.literature_review.workbench.deletion import ArtifactDeletionManager
 from src.literature_review.workbench.jobs import WorkflowJobManager
@@ -102,6 +109,11 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--corpus", required=True, type=Path)
     start.add_argument("--discover", action="store_true")
     start.add_argument(
+        "--full-text",
+        action="store_true",
+        help="download or import PDFs and run claim-level evidence verification",
+    )
+    start.add_argument(
         "--providers",
         nargs="+",
         action=_ExtendTupleAction,
@@ -154,6 +166,44 @@ def _parser() -> argparse.ArgumentParser:
         help="show saved discovery attempt history",
     )
     attempts.add_argument("run_id")
+
+    documents = commands.add_parser("documents", help="list full-text document state")
+    documents.add_argument("run_id")
+
+    claims = commands.add_parser("claims", help="list extracted atomic claims")
+    claims.add_argument("run_id")
+
+    evidence = commands.add_parser(
+        "evidence",
+        help="show claim-level verification results",
+    )
+    evidence.add_argument("run_id")
+
+    evidence_decide = commands.add_parser(
+        "evidence-decide",
+        help="record a claim evidence review decision",
+    )
+    evidence_decide.add_argument("run_id")
+    evidence_decide.add_argument("claim_id")
+    evidence_decide.add_argument(
+        "--action",
+        choices=("accept_risk", "require_revision"),
+        required=True,
+    )
+    evidence_decide.add_argument("--reason", required=True)
+
+    import_pdf = commands.add_parser(
+        "import-pdf",
+        help="import and index a local PDF for one citation key",
+    )
+    import_pdf.add_argument("run_id")
+    import_pdf.add_argument("citation_key")
+    import_pdf.add_argument("pdf_path", type=Path)
+
+    export = commands.add_parser("export", help="create a reproducible audit ZIP")
+    export.add_argument("run_id")
+    export.add_argument("--output", required=True, type=Path)
+    export.add_argument("--no-pdfs", action="store_true")
 
     cancel = commands.add_parser("cancel", help="cancel a stored run")
     cancel.add_argument("run_id")
@@ -406,6 +456,74 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ]
             )
             return 0
+        if args.command == "documents":
+            _print_json(
+                [item.to_dict() for item in store.list_documents(args.run_id)]
+            )
+            return 0
+        if args.command == "claims":
+            _print_json([item.to_dict() for item in store.list_claims(args.run_id)])
+            return 0
+        if args.command == "evidence":
+            _print_json(
+                [
+                    item.to_dict()
+                    for item in store.list_claim_verifications(args.run_id)
+                ]
+            )
+            return 0
+        if args.command == "evidence-decide":
+            run = store.get_run(args.run_id)
+            if run.current_stage != WorkflowStage.AWAITING_EVIDENCE_REVIEW:
+                raise ValueError("evidence decisions require the evidence review gate")
+            if not args.reason.strip():
+                raise ValueError("decision reason must be nonblank")
+            claim_results = [
+                item
+                for item in store.list_claim_verifications(args.run_id)
+                if item.claim_id == args.claim_id and item.blocking
+            ]
+            if not claim_results:
+                raise ValueError("claim has no blocking verification result")
+            if args.action == "accept_risk" and any(
+                item.status != VerificationStatus.FULL_TEXT_UNAVAILABLE
+                for item in claim_results
+            ):
+                raise ValueError(
+                    "accept_risk is allowed only for unavailable full text"
+                )
+            decision = EvidenceReviewDecision.create(
+                args.run_id,
+                args.claim_id,
+                args.action,
+                args.reason.strip(),
+                "human-cli",
+            )
+            store.put_evidence_review_decision(decision)
+            _print_json(decision.to_dict())
+            return 0
+        if args.command == "import-pdf":
+            document = DocumentImportService(
+                store,
+                LocalArtifactStore(args.artifacts),
+            ).import_pdf(
+                args.run_id,
+                args.citation_key,
+                args.pdf_path,
+            )
+            _print_json(document.to_dict())
+            return 0
+        if args.command == "export":
+            _print_json(
+                export_audit_bundle(
+                    store,
+                    LocalArtifactStore(args.artifacts),
+                    args.run_id,
+                    args.output,
+                    include_pdfs=not args.no_pdfs,
+                )
+            )
+            return 0
         if args.command == "delete":
             service = WorkbenchService(store, artifact_root=args.artifacts)
             _print_json(service.delete_run(args.run_id))
@@ -488,6 +606,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         artifact_store,
                         args.run_id,
                     )
+                    full_text_enabled = load_resume_full_text(
+                        artifact_store,
+                        args.run_id,
+                    )
                     engine = build_engine(
                         store,
                         args.artifacts,
@@ -495,6 +617,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         providers=providers,
                         max_results=max_results,
                         query_texts=query_texts,
+                        full_text_enabled=full_text_enabled,
                     )
                     run = engine.resume(args.run_id)
             finally:
@@ -513,6 +636,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 store,
                 args.artifacts,
                 discovery_enabled=args.discover,
+                full_text_enabled=args.full_text,
                 providers=tuple(args.providers),
                 max_results=args.max_results,
                 query_texts=tuple(args.query),
@@ -606,6 +730,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (ProviderPluginError, AgentPluginError) as exc:
         _print_json(
             {"error": "plugin_configuration_error", "message": str(exc)},
+            stream=sys.stderr,
+        )
+        return 2
+    except (FileNotFoundError, ValueError) as exc:
+        _print_json(
+            {"error": "invalid_request", "message": str(exc)},
             stream=sys.stderr,
         )
         return 2

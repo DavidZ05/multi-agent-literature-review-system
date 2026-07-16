@@ -96,6 +96,10 @@ class RetryableStageError(RuntimeError):
     pass
 
 
+class StageWaitingError(RuntimeError):
+    pass
+
+
 class PersistentWorkflowEngine:
     _TERMINAL_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.CANCELLED})
 
@@ -273,6 +277,25 @@ class PersistentWorkflowEngine:
                     stage,
                 )
                 return retrying
+            except StageWaitingError as exc:
+                waiting = replace(
+                    run,
+                    status=RunStatus.WAITING,
+                    updated_at=utc_now_iso(),
+                )
+                if not self.workflow_store.compare_and_update_run(
+                    waiting,
+                    expected_status=run.status,
+                    expected_stage=run.current_stage,
+                ):
+                    return self.workflow_store.get_run(run_id)
+                self.workflow_store.append_event(
+                    run_id,
+                    "run_waiting",
+                    {"reason": str(exc)},
+                    stage,
+                )
+                return waiting
             except Exception as exc:
                 self._fail(run, exc)
                 raise StageExecutionError(f"{stage.value} stage failed: {exc}") from exc
@@ -470,8 +493,19 @@ class PersistentWorkflowEngine:
                 "corpus_sha256": self._hash_path(corpus_path),
                 "runtime_config": dict(self.runtime_config),
                 "upstream_artifact_hashes": upstream_hashes,
+                "control_artifact_hashes": self._control_artifact_hashes(run),
             }
         )
+
+    def _control_artifact_hashes(self, run: ResearchRun) -> dict[str, str]:
+        paths = ()
+        if run.current_stage == WorkflowStage.DRAFTING:
+            paths = ("evidence/revision_feedback.json",)
+        return {
+            path: self.artifact_store.hash_file(run.run_id, path)
+            for path in paths
+            if self.artifact_store.exists(run.run_id, path)
+        }
 
     def _checkpoint_is_reusable(
         self,
@@ -500,6 +534,8 @@ class PersistentWorkflowEngine:
         for relative_path, content in outputs.items():
             if isinstance(content, str):
                 record = self.artifact_store.write_text(run_id, relative_path, content)
+            elif isinstance(content, bytes):
+                record = self.artifact_store.write_bytes(run_id, relative_path, content)
             else:
                 record = self.artifact_store.write_json(run_id, relative_path, content)
             records.append(record)
@@ -520,6 +556,7 @@ class PersistentWorkflowEngine:
 __all__ = [
     "PersistentWorkflowEngine",
     "RetryableStageError",
+    "StageWaitingError",
     "StageContext",
     "StageExecutionError",
     "StageHandler",

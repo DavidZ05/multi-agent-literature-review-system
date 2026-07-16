@@ -26,6 +26,7 @@ from src.literature_review.models import (
 from src.literature_review.plugins import build_provider_registry
 from src.literature_review.runtime import (
     build_engine,
+    load_resume_full_text,
     load_resume_query_texts,
     load_resume_settings,
     retry_discovery,
@@ -51,6 +52,7 @@ ResumeSettingsLoader = Callable[
     tuple[bool, tuple[str, ...], int],
 ]
 ResumeQueryLoader = Callable[[LocalArtifactStore, str], tuple[str, ...]]
+ResumeFullTextLoader = Callable[[LocalArtifactStore, str], bool]
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,7 @@ class StartRunRequest:
     topic: str
     corpus_path: Path
     discovery_enabled: bool = False
+    full_text_enabled: bool = False
     providers: tuple[str, ...] = ("arxiv", "semantic_scholar")
     max_results: int = 10
     query_texts: tuple[str, ...] = ()
@@ -74,6 +77,8 @@ class StartRunRequest:
             raise ValueError("corpus_path must be an existing file")
         if not isinstance(self.discovery_enabled, bool):
             raise TypeError("discovery_enabled must be a boolean")
+        if not isinstance(self.full_text_enabled, bool):
+            raise TypeError("full_text_enabled must be a boolean")
 
         providers = self._normalize_providers(self.providers)
         invalid = [provider for provider in providers if not _PROVIDER_ID.fullmatch(provider)]
@@ -226,6 +231,7 @@ class WorkflowJobManager:
         engine_builder: EngineBuilder = build_engine,
         resume_settings_loader: ResumeSettingsLoader = load_resume_settings,
         resume_query_loader: ResumeQueryLoader = load_resume_query_texts,
+        resume_full_text_loader: ResumeFullTextLoader = load_resume_full_text,
         executor: Executor | None = None,
         max_workers: int = 2,
         max_retained_jobs: int = 200,
@@ -240,6 +246,7 @@ class WorkflowJobManager:
         self._engine_builder = engine_builder
         self._resume_settings_loader = resume_settings_loader
         self._resume_query_loader = resume_query_loader
+        self._resume_full_text_loader = resume_full_text_loader
         options = (
             build_provider_registry().options()
             if provider_options is None
@@ -332,6 +339,7 @@ class WorkflowJobManager:
             topic=request.topic,
             corpus_path=request.corpus_path,
             discovery_enabled=request.discovery_enabled,
+            full_text_enabled=request.full_text_enabled,
             providers=request.providers,
             max_results=request.max_results,
             query_texts=request.query_texts,
@@ -349,6 +357,7 @@ class WorkflowJobManager:
                     self.store,
                     self.artifact_root,
                     discovery_enabled=request.discovery_enabled,
+                    full_text_enabled=request.full_text_enabled,
                     providers=request.providers,
                     max_results=request.max_results,
                     query_texts=request.query_texts,
@@ -459,11 +468,14 @@ class WorkflowJobManager:
             run_id,
         )
         query_texts = self._resume_query_loader(artifact_store, run_id)
+        full_text_enabled = self._resume_full_text_loader(artifact_store, run_id)
         kwargs: dict[str, object] = {
             "discovery_enabled": enabled,
             "providers": providers,
             "max_results": max_results,
         }
+        if full_text_enabled:
+            kwargs["full_text_enabled"] = True
         if query_texts:
             kwargs["query_texts"] = query_texts
         engine = self._engine_builder(self.store, self.artifact_root, **kwargs)
@@ -645,6 +657,8 @@ class WorkflowJobManager:
         ]
         if request.discovery_enabled:
             arguments.append("--discover")
+        if request.full_text_enabled:
+            arguments.append("--full-text")
         arguments.extend(f"--providers={provider}" for provider in request.providers)
         arguments.append(f"--max-results={request.max_results}")
         arguments.extend(f"--query={query}" for query in request.query_texts)

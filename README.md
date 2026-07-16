@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/DavidZ05/multi-agent-literature-review-system/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidZ05/multi-agent-literature-review-system/actions/workflows/ci.yml)
 
-A local-first workflow for running literature reviews with multiple agents. It can discover candidate papers, pause for human approval, draft a survey, run expert review, revise, polish, and verify citations before producing final artifacts.
+A local-first workflow for running literature reviews with multiple agents. It can discover candidate papers, pause for human approval, draft a survey, run expert review, revise, polish, verify citations, and optionally check claims against page-aware PDF evidence before producing final artifacts.
 
 The default mode is deterministic and works offline from the checked-in corpus. API-backed writing and review agents are optional and OpenAI-compatible, but the citation gates stay deterministic.
 
@@ -63,7 +63,7 @@ The workbench serves a loopback-only site at `http://127.0.0.1:8765/`. It reads 
 - `.review-workflow/workflow.db`
 - `.review-workflow/artifacts/`
 
-The UI can create runs, inspect status/events, approve or reject discovered candidates, close discovery, resume, cancel, and delete terminal runs. Every mutation shows the equivalent CLI command. The interface follows the browser language on first use, includes a Chinese/English toggle, and remembers the last manual language choice.
+The UI can create runs, inspect status/events, approve or reject discovered candidates, review claim evidence, import a local PDF by path, export an audit ZIP, resume, cancel, and delete terminal runs. Every mutation shows the equivalent CLI command. The interface follows the browser language on first use, includes a Chinese/English toggle, and remembers the last manual language choice.
 
 The selected run is stored in the URL and restored on reload. If no saved run
 exists, the newest stored run is selected. Active queued/running Jobs are
@@ -250,6 +250,85 @@ SEMANTIC_SCHOLAR_API_KEY=
 
 Provider responses are cached in SQLite for 24 hours. arXiv calls are spaced by at least three seconds, and Semantic Scholar calls use conservative throttling. If every provider fails, the run enters `retry_wait` and can be resumed later. If some providers succeed and others fail, the run remains inspectable: the Workbench reports partial failures and lets the user decide whether to retry discovery, adjust the topic, configure `SEMANTIC_SCHOLAR_API_KEY`, or continue with approved/seed material.
 
+## Full-Text Evidence Verification
+
+Full-text verification is opt-in because it downloads PDFs and applies a much
+stricter completion gate:
+
+```bash
+literature-review start \
+  --topic "Memory-Augmented LLM Agents" \
+  --corpus data/papers.json \
+  --full-text
+```
+
+It can be combined with `--discover`. Approved literature is merged into the
+corpus before PDF acquisition starts.
+
+```text
+acquiring_documents -> indexing_evidence -> drafting
+-> claim_verification -> completed | awaiting_evidence_review
+```
+
+- arXiv abstract URLs are converted to official arXiv PDF URLs.
+- Other sources must expose an HTTPS PDF directly. HTML responses and files
+  without a PDF signature are rejected.
+- PDFs are stored per run with SHA-256 checksums. `pdfplumber` extracts text by
+  page, records extraction quality, and produces stable evidence chunks.
+- The polished survey is split into versioned atomic claims. Retrieval is
+  restricted to chunks from each claim's own citation key.
+- Missing citations, contradictions, partial support, and evidence not found
+  are blocking. `accept_risk` is available only when full text is unavailable.
+
+Inspect a waiting run:
+
+```bash
+literature-review documents RUN_ID
+literature-review claims RUN_ID
+literature-review evidence RUN_ID
+```
+
+Import a legally obtained local PDF when automatic acquisition is unavailable:
+
+```bash
+literature-review import-pdf RUN_ID CITATION_KEY /path/to/paper.pdf
+```
+
+Import is bounded by the same PDF size limit as automatic acquisition. The
+file is parsed and indexed immediately, and the latest draft claims are
+reverified in place so the CLI and Workbench show the refreshed evidence state
+without retaining a stale `full_text_unavailable` result.
+
+Record a decision, then resume:
+
+```bash
+literature-review evidence-decide RUN_ID CLAIM_ID \
+  --action require_revision \
+  --reason "The cited passage does not support the broad claim"
+
+literature-review resume RUN_ID
+```
+
+For an unavailable PDF only, `--action accept_risk` records a visible human
+exception. It cannot override other verification failures. A revision decision
+is written into the next Writer input and changes its checkpoint fingerprint,
+so the previous draft cannot be silently reused.
+
+Export a reproducible audit bundle containing the survey, artifacts, PDFs,
+events, claims, evidence decisions, and a file checksum manifest:
+
+```bash
+literature-review export RUN_ID --output RUN_ID-audit.zip
+```
+
+Use `--no-pdfs` when the bundle should omit source documents. Only download or
+redistribute PDFs you are entitled to use.
+
+The deterministic verifier is intentionally conservative. A `supported` result
+means a citation-scoped passage contains the material terms of a claim; it is
+not a guarantee that an expert would judge the claim scientifically correct.
+High-stakes or central conclusions still require reading the cited pages.
+
 ## Plugins
 
 Installed provider and Agent plugins are discovered through standard Python
@@ -295,7 +374,9 @@ multi-agent-literature-review-system/
 │   ├── memory_review_pipeline.py
 │   └── literature_review/
 │       ├── api/
+│       ├── documents/
 │       ├── discovery/
+│       ├── verification/
 │       ├── job_state.py
 │       ├── plugins/
 │       ├── providers/
@@ -319,7 +400,7 @@ only a compatibility wrapper for older module commands and imports.
 
 ## Anti-Hallucination Design
 
-The Writer can only cite keys present in the approved corpus. The Citation Auditor rejects unknown citation keys and checks lightweight claim-source alignment. The Review Synthesizer feeds blocking findings back into Writer. Polish is followed by Final Verification, which rejects both added and removed citations. A persistent run reaches `completed` only when the orchestrator quality gate returns `accepted`; exhausted revision loops leave the run failed with diagnostic artifacts under `quality_gate/`. This keeps provenance inspectable even when model-backed agents are enabled.
+The Writer can only cite keys present in the approved corpus. The Citation Auditor rejects unknown citation keys and checks lightweight metadata alignment. The Review Synthesizer feeds blocking findings back into Writer. Polish is followed by Final Verification, which rejects both added and removed citations. With `--full-text`, the polished survey is then checked against citation-scoped PDF passages and cannot complete with an unresolved blocking claim. A persistent run reaches `completed` only after its enabled quality gates accept it or an allowed full-text-unavailable risk is explicitly documented.
 
 ## Troubleshooting
 
@@ -329,6 +410,8 @@ The Writer can only cite keys present in the approved corpus. The Citation Audit
 - Semantic Scholar quota: anonymous access is limited. Add `SEMANTIC_SCHOLAR_API_KEY` if you need steadier quota.
 - SSL errors: HTTP clients use `certifi` by default. If your environment overrides certificates, check `SSL_CERT_FILE` and local proxy settings.
 - Workbench will not open: run `literature-review ui --no-browser`, then open the printed loopback URL manually.
+- `awaiting_evidence_review`: inspect `literature-review evidence RUN_ID`, import missing PDFs or record claim decisions, then resume.
+- Poor PDF extraction: scanned PDFs may be marked `low_quality`; OCR is not included in v0.7.
 
 ## Development
 

@@ -405,6 +405,73 @@ dialog::backdrop { background: rgba(23, 32, 51, .42); }
 .delete-run-summary code { white-space: normal; }
 .delete-run-unaffected { color: var(--muted); }
 
+.evidence-panel {
+  margin-top: 18px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.evidence-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.evidence-panel-head h3 { margin: 0; font-size: 14px; }
+.evidence-panel-head p { margin: 4px 0 0; font-size: 11px; }
+.evidence-metrics {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.evidence-table-wrap { max-height: 320px; overflow: auto; }
+.evidence-table th:nth-child(1) { width: 52%; }
+.evidence-table th:nth-child(2) { width: 20%; }
+.evidence-table th:nth-child(3) { width: 20%; }
+.evidence-table th:nth-child(4) { width: 8%; }
+.evidence-table th:nth-child(2), .evidence-table td:nth-child(2),
+.evidence-table th:nth-child(3), .evidence-table td:nth-child(3) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.evidence-row.blocking td:nth-child(3) { color: var(--danger); font-weight: 700; }
+.evidence-result {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.evidence-result h3 { margin: 0 0 6px; font-size: 12px; text-transform: capitalize; }
+.evidence-result p { margin: 0 0 8px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.evidence-result blockquote {
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-soft);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.evidence-result small { color: var(--muted); font-size: 10px; }
+#evidence-decision-form, #pdf-import-form { display: grid; gap: 8px; margin-top: 18px; }
+.survey-preview-dialog { width: min(900px, 88vw); }
+.survey-preview-dialog pre {
+  max-height: 68vh;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .wb-btn:focus-visible, .decision:focus-visible, .filter:focus-visible, .icon-button:focus-visible,
 .run-button:focus-visible, .field:focus-visible, .candidate-row:focus-visible, .table-wrap:focus-visible,
 .text-button:focus-visible {

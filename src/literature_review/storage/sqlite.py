@@ -22,6 +22,12 @@ from src.literature_review.models import (
     WorkflowStage,
     utc_now_iso,
 )
+from src.literature_review.documents.models import DocumentRecord, EvidenceChunk
+from src.literature_review.verification.models import (
+    AtomicClaim,
+    ClaimVerification,
+    EvidenceReviewDecision,
+)
 from src.literature_review.storage.jobs import SQLiteJobRepositoryMixin
 
 
@@ -70,7 +76,7 @@ class CandidateDecisionNotAllowedError(WorkflowStoreError):
 
 
 class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
-    SCHEMA_VERSION = 5
+    SCHEMA_VERSION = 6
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -178,7 +184,61 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
                     );
                     CREATE INDEX discovery_attempts_run_created_idx
                         ON discovery_attempts(run_id, created_at);
-                    PRAGMA user_version = 5;
+                    CREATE TABLE documents (
+                        document_id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                        citation_key TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        sha256 TEXT,
+                        payload_json TEXT NOT NULL,
+                        UNIQUE(run_id, citation_key)
+                    );
+                    CREATE INDEX documents_run_status_idx
+                        ON documents(run_id, status);
+                    CREATE TABLE evidence_chunks (
+                        chunk_id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                        document_id TEXT NOT NULL REFERENCES documents(document_id)
+                            ON DELETE CASCADE,
+                        citation_key TEXT NOT NULL,
+                        page_start INTEGER NOT NULL,
+                        payload_json TEXT NOT NULL
+                    );
+                    CREATE INDEX evidence_chunks_run_citation_idx
+                        ON evidence_chunks(run_id, citation_key, page_start);
+                    CREATE TABLE atomic_claims (
+                        claim_id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                        draft_version INTEGER NOT NULL,
+                        claim_type TEXT NOT NULL,
+                        payload_json TEXT NOT NULL
+                    );
+                    CREATE INDEX atomic_claims_run_version_idx
+                        ON atomic_claims(run_id, draft_version);
+                    CREATE TABLE claim_verifications (
+                        verification_id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                        claim_id TEXT NOT NULL REFERENCES atomic_claims(claim_id)
+                            ON DELETE CASCADE,
+                        citation_key TEXT,
+                        status TEXT NOT NULL,
+                        blocking INTEGER NOT NULL,
+                        payload_json TEXT NOT NULL
+                    );
+                    CREATE INDEX claim_verifications_run_claim_idx
+                        ON claim_verifications(run_id, claim_id);
+                    CREATE TABLE evidence_review_decisions (
+                        decision_id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                        claim_id TEXT NOT NULL REFERENCES atomic_claims(claim_id)
+                            ON DELETE CASCADE,
+                        action TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        payload_json TEXT NOT NULL
+                    );
+                    CREATE INDEX evidence_decisions_run_claim_idx
+                        ON evidence_review_decisions(run_id, claim_id, created_at);
+                    PRAGMA user_version = 6;
                     """
                     )
                 return
@@ -263,6 +323,68 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
                         CREATE INDEX discovery_attempts_run_created_idx
                             ON discovery_attempts(run_id, created_at);
                         PRAGMA user_version = 5;
+                        """
+                    )
+                version = 5
+            if version == 5:
+                with connection:
+                    connection.executescript(
+                        """
+                        CREATE TABLE documents (
+                            document_id TEXT PRIMARY KEY,
+                            run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                            citation_key TEXT NOT NULL,
+                            status TEXT NOT NULL,
+                            sha256 TEXT,
+                            payload_json TEXT NOT NULL,
+                            UNIQUE(run_id, citation_key)
+                        );
+                        CREATE INDEX documents_run_status_idx
+                            ON documents(run_id, status);
+                        CREATE TABLE evidence_chunks (
+                            chunk_id TEXT PRIMARY KEY,
+                            run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                            document_id TEXT NOT NULL REFERENCES documents(document_id)
+                                ON DELETE CASCADE,
+                            citation_key TEXT NOT NULL,
+                            page_start INTEGER NOT NULL,
+                            payload_json TEXT NOT NULL
+                        );
+                        CREATE INDEX evidence_chunks_run_citation_idx
+                            ON evidence_chunks(run_id, citation_key, page_start);
+                        CREATE TABLE atomic_claims (
+                            claim_id TEXT PRIMARY KEY,
+                            run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                            draft_version INTEGER NOT NULL,
+                            claim_type TEXT NOT NULL,
+                            payload_json TEXT NOT NULL
+                        );
+                        CREATE INDEX atomic_claims_run_version_idx
+                            ON atomic_claims(run_id, draft_version);
+                        CREATE TABLE claim_verifications (
+                            verification_id TEXT PRIMARY KEY,
+                            run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                            claim_id TEXT NOT NULL REFERENCES atomic_claims(claim_id)
+                                ON DELETE CASCADE,
+                            citation_key TEXT,
+                            status TEXT NOT NULL,
+                            blocking INTEGER NOT NULL,
+                            payload_json TEXT NOT NULL
+                        );
+                        CREATE INDEX claim_verifications_run_claim_idx
+                            ON claim_verifications(run_id, claim_id);
+                        CREATE TABLE evidence_review_decisions (
+                            decision_id TEXT PRIMARY KEY,
+                            run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                            claim_id TEXT NOT NULL REFERENCES atomic_claims(claim_id)
+                                ON DELETE CASCADE,
+                            action TEXT NOT NULL,
+                            created_at TEXT NOT NULL,
+                            payload_json TEXT NOT NULL
+                        );
+                        CREATE INDEX evidence_decisions_run_claim_idx
+                            ON evidence_review_decisions(run_id, claim_id, created_at);
+                        PRAGMA user_version = 6;
                         """
                     )
 
@@ -571,6 +693,293 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
             )
             finished += 1
         return finished
+
+    def put_document(self, document: DocumentRecord) -> None:
+        self._require_run(document.run_id)
+        with self._connection() as connection, connection:
+            connection.execute(
+                """DELETE FROM documents
+                WHERE run_id=? AND citation_key=? AND document_id<>?""",
+                (document.run_id, document.citation_key, document.document_id),
+            )
+            connection.execute(
+                """INSERT INTO documents
+                (document_id,run_id,citation_key,status,sha256,payload_json)
+                VALUES (?,?,?,?,?,?)
+                ON CONFLICT(document_id) DO UPDATE SET
+                status=excluded.status,sha256=excluded.sha256,
+                payload_json=excluded.payload_json""",
+                (
+                    document.document_id,
+                    document.run_id,
+                    document.citation_key,
+                    document.status.value,
+                    document.sha256,
+                    json.dumps(document.to_dict(), sort_keys=True),
+                ),
+            )
+
+    def get_document(self, run_id: str, citation_key: str) -> DocumentRecord | None:
+        self._require_run(run_id)
+        with self._connection() as connection:
+            row = connection.execute(
+                """SELECT payload_json FROM documents
+                WHERE run_id=? AND citation_key=?""",
+                (run_id, citation_key),
+            ).fetchone()
+        if row is None:
+            return None
+        return DocumentRecord.from_dict(json.loads(row[0]))
+
+    def list_documents(self, run_id: str) -> list[DocumentRecord]:
+        self._require_run(run_id)
+        with self._connection() as connection:
+            rows = connection.execute(
+                """SELECT payload_json FROM documents
+                WHERE run_id=? ORDER BY citation_key,document_id""",
+                (run_id,),
+            ).fetchall()
+        return [DocumentRecord.from_dict(json.loads(row[0])) for row in rows]
+
+    def replace_evidence_chunks(
+        self,
+        run_id: str,
+        document_id: str,
+        chunks: list[EvidenceChunk] | tuple[EvidenceChunk, ...],
+    ) -> None:
+        self._require_run(run_id)
+        if any(
+            chunk.run_id != run_id or chunk.document_id != document_id
+            for chunk in chunks
+        ):
+            raise ValueError("evidence chunks must match run_id and document_id")
+        with self._connection() as connection, connection:
+            document = connection.execute(
+                "SELECT 1 FROM documents WHERE document_id=? AND run_id=?",
+                (document_id, run_id),
+            ).fetchone()
+            if document is None:
+                raise KeyError(document_id)
+            connection.execute(
+                "DELETE FROM evidence_chunks WHERE document_id=?",
+                (document_id,),
+            )
+            connection.executemany(
+                """INSERT INTO evidence_chunks
+                (chunk_id,run_id,document_id,citation_key,page_start,payload_json)
+                VALUES (?,?,?,?,?,?)""",
+                [
+                    (
+                        chunk.chunk_id,
+                        chunk.run_id,
+                        chunk.document_id,
+                        chunk.citation_key,
+                        chunk.page_start,
+                        json.dumps(chunk.to_dict(), sort_keys=True),
+                    )
+                    for chunk in chunks
+                ],
+            )
+
+    def list_evidence_chunks(
+        self,
+        run_id: str,
+        *,
+        citation_key: str | None = None,
+    ) -> list[EvidenceChunk]:
+        self._require_run(run_id)
+        query = "SELECT payload_json FROM evidence_chunks WHERE run_id=?"
+        parameters: tuple[str, ...] = (run_id,)
+        if citation_key is not None:
+            query += " AND citation_key=?"
+            parameters += (citation_key,)
+        query += " ORDER BY citation_key,page_start,chunk_id"
+        with self._connection() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [EvidenceChunk.from_dict(json.loads(row[0])) for row in rows]
+
+    def replace_claims(
+        self,
+        run_id: str,
+        draft_version: int,
+        claims: list[AtomicClaim] | tuple[AtomicClaim, ...],
+    ) -> None:
+        self._require_run(run_id)
+        if any(
+            claim.run_id != run_id or claim.draft_version != draft_version
+            for claim in claims
+        ):
+            raise ValueError("claims must match run_id and draft_version")
+        with self._connection() as connection, connection:
+            connection.execute(
+                "DELETE FROM atomic_claims WHERE run_id=? AND draft_version=?",
+                (run_id, draft_version),
+            )
+            connection.executemany(
+                """INSERT INTO atomic_claims
+                (claim_id,run_id,draft_version,claim_type,payload_json)
+                VALUES (?,?,?,?,?)""",
+                [
+                    (
+                        claim.claim_id,
+                        claim.run_id,
+                        claim.draft_version,
+                        claim.claim_type.value,
+                        json.dumps(claim.to_dict(), sort_keys=True),
+                    )
+                    for claim in claims
+                ],
+            )
+
+    def list_claims(
+        self,
+        run_id: str,
+        *,
+        draft_version: int | None = None,
+    ) -> list[AtomicClaim]:
+        self._require_run(run_id)
+        query = "SELECT payload_json FROM atomic_claims WHERE run_id=?"
+        parameters: tuple[object, ...] = (run_id,)
+        if draft_version is not None:
+            query += " AND draft_version=?"
+            parameters += (draft_version,)
+        query += " ORDER BY draft_version,claim_id"
+        with self._connection() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [AtomicClaim.from_dict(json.loads(row[0])) for row in rows]
+
+    def put_claim_verifications(
+        self,
+        verifications: list[ClaimVerification] | tuple[ClaimVerification, ...],
+    ) -> None:
+        if not verifications:
+            return
+        run_id = verifications[0].run_id
+        self._require_run(run_id)
+        if any(item.run_id != run_id for item in verifications):
+            raise ValueError("claim verifications must belong to one run")
+        with self._connection() as connection, connection:
+            connection.executemany(
+                """INSERT INTO claim_verifications
+                (verification_id,run_id,claim_id,citation_key,status,blocking,payload_json)
+                VALUES (?,?,?,?,?,?,?)
+                ON CONFLICT(verification_id) DO UPDATE SET
+                status=excluded.status,blocking=excluded.blocking,
+                payload_json=excluded.payload_json""",
+                [
+                    (
+                        item.verification_id,
+                        item.run_id,
+                        item.claim_id,
+                        item.citation_key,
+                        item.status.value,
+                        int(item.blocking),
+                        json.dumps(item.to_dict(), sort_keys=True),
+                    )
+                    for item in verifications
+                ],
+            )
+
+    def replace_claim_verifications(
+        self,
+        run_id: str,
+        claim_ids: list[str] | tuple[str, ...],
+        verifications: list[ClaimVerification] | tuple[ClaimVerification, ...],
+    ) -> None:
+        self._require_run(run_id)
+        unique_claim_ids = tuple(dict.fromkeys(claim_ids))
+        if any(
+            item.run_id != run_id or item.claim_id not in unique_claim_ids
+            for item in verifications
+        ):
+            raise ValueError(
+                "claim verifications must match the supplied run and claims"
+            )
+        if not unique_claim_ids:
+            if verifications:
+                raise ValueError("claim_ids cannot be empty when results are supplied")
+            return
+        placeholders = ",".join("?" for _ in unique_claim_ids)
+        with self._connection() as connection, connection:
+            rows = connection.execute(
+                f"""SELECT claim_id FROM atomic_claims
+                WHERE run_id=? AND claim_id IN ({placeholders})""",
+                (run_id, *unique_claim_ids),
+            ).fetchall()
+            if {row["claim_id"] for row in rows} != set(unique_claim_ids):
+                raise ValueError("every claim_id must belong to the supplied run")
+            connection.execute(
+                f"""DELETE FROM claim_verifications
+                WHERE run_id=? AND claim_id IN ({placeholders})""",
+                (run_id, *unique_claim_ids),
+            )
+            connection.executemany(
+                """INSERT INTO claim_verifications
+                (verification_id,run_id,claim_id,citation_key,status,blocking,payload_json)
+                VALUES (?,?,?,?,?,?,?)""",
+                [
+                    (
+                        item.verification_id,
+                        item.run_id,
+                        item.claim_id,
+                        item.citation_key,
+                        item.status.value,
+                        int(item.blocking),
+                        json.dumps(item.to_dict(), sort_keys=True),
+                    )
+                    for item in verifications
+                ],
+            )
+
+    def list_claim_verifications(
+        self,
+        run_id: str,
+        *,
+        claim_id: str | None = None,
+        blocking_only: bool = False,
+    ) -> list[ClaimVerification]:
+        self._require_run(run_id)
+        query = "SELECT payload_json FROM claim_verifications WHERE run_id=?"
+        parameters: tuple[object, ...] = (run_id,)
+        if claim_id is not None:
+            query += " AND claim_id=?"
+            parameters += (claim_id,)
+        if blocking_only:
+            query += " AND blocking=1"
+        query += " ORDER BY claim_id,citation_key,verification_id"
+        with self._connection() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [ClaimVerification.from_dict(json.loads(row[0])) for row in rows]
+
+    def put_evidence_review_decision(self, decision: EvidenceReviewDecision) -> None:
+        self._require_run(decision.run_id)
+        with self._connection() as connection, connection:
+            connection.execute(
+                """INSERT INTO evidence_review_decisions
+                (decision_id,run_id,claim_id,action,created_at,payload_json)
+                VALUES (?,?,?,?,?,?)""",
+                (
+                    decision.decision_id,
+                    decision.run_id,
+                    decision.claim_id,
+                    decision.action,
+                    decision.created_at,
+                    json.dumps(decision.to_dict(), sort_keys=True),
+                ),
+            )
+
+    def list_evidence_review_decisions(
+        self,
+        run_id: str,
+    ) -> list[EvidenceReviewDecision]:
+        self._require_run(run_id)
+        with self._connection() as connection:
+            rows = connection.execute(
+                """SELECT payload_json FROM evidence_review_decisions
+                WHERE run_id=? ORDER BY created_at,decision_id""",
+                (run_id,),
+            ).fetchall()
+        return [EvidenceReviewDecision.from_dict(json.loads(row[0])) for row in rows]
 
     def upsert_candidate(
         self,

@@ -521,6 +521,7 @@ class WorkflowJobManagerTests(unittest.TestCase):
         request = self._request(
             topic="-memory agents",
             query_texts=("agent memory benchmark",),
+            full_text_enabled=True,
         )
 
         accepted = manager.submit_start(request)
@@ -536,12 +537,14 @@ class WorkflowJobManagerTests(unittest.TestCase):
         self.assertEqual(tuple(parsed.providers), request.providers)
         self.assertEqual(parsed.max_results, request.max_results)
         self.assertEqual(tuple(parsed.query), request.query_texts)
+        self.assertTrue(parsed.full_text)
         self.assertEqual(tokens[3], f"--db={self.store.path}")
         self.assertEqual(tokens[4], f"--artifacts={self.artifact_root.resolve()}")
         self.assertEqual(tokens[5], "start")
         self.assertIn(f"--topic={request.topic}", tokens)
         self.assertIn(f"--corpus={request.corpus_path}", tokens)
         self.assertIn(f"--max-results={request.max_results}", tokens)
+        self.assertIn("--full-text", tokens)
 
     def test_resume_command_replays_configured_persistence_paths(self) -> None:
         executor = ManualExecutor()

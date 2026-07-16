@@ -28,7 +28,7 @@ class PackagingTests(unittest.TestCase):
     def test_public_project_files_are_ready_for_distribution(self) -> None:
         required_files = {
             "LICENSE": "MIT License",
-            "CHANGELOG.md": "0.5.1",
+            "CHANGELOG.md": "0.7.0",
             "CONTRIBUTING.md": "Contributing",
             "SECURITY.md": "Security",
         }
@@ -47,6 +47,7 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(project["name"], "multi-agent-literature-review-system")
         self.assertEqual(project["requires-python"], ">=3.11")
         self.assertIn("certifi>=2024.2.2", project["dependencies"])
+        self.assertIn("pdfplumber>=0.11,<1", project["dependencies"])
         self.assertEqual(
             project["scripts"]["literature-review"],
             "src.literature_review.cli:main",

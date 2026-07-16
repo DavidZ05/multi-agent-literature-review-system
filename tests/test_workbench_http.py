@@ -19,7 +19,7 @@ from src.literature_review.models import (
     WorkflowStage,
     utc_now_iso,
 )
-from src.literature_review.storage import SQLiteWorkflowStore
+from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
 from src.literature_review.workbench import (
     RunDeletionConflictError,
     RunNotDeletableError,
@@ -284,6 +284,47 @@ class WorkbenchHTTPTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(payload, expected)
                 self.assert_json_headers(headers)
+
+    def test_survey_and_audit_downloads_use_fixed_run_artifacts(self) -> None:
+        artifacts = LocalArtifactStore(self.manager.artifact_root)
+        artifacts.write_text(
+            self.run.run_id,
+            "final/survey.md",
+            "# Verified survey\n",
+        )
+
+        export_status, _, export_payload = self.request(
+            "POST",
+            f"/api/runs/{self.run.run_id}/export",
+            {"include_pdfs": False},
+            headers=self.mutation_headers(),
+        )
+        survey_status, survey_headers, survey_body = self.request_bytes(
+            "GET",
+            f"/api/runs/{self.run.run_id}/download/survey",
+        )
+        audit_status, audit_headers, audit_body = self.request_bytes(
+            "GET",
+            f"/api/runs/{self.run.run_id}/download/audit",
+        )
+        missing_status, _, _ = self.request_bytes(
+            "GET",
+            f"/api/runs/{self.run.run_id}/download/unknown",
+        )
+
+        self.assertEqual(export_status, 200)
+        self.assertFalse(export_payload["include_pdfs"])
+        self.assertEqual(survey_status, 200)
+        self.assertEqual(survey_body, b"# Verified survey\n")
+        self.assertEqual(
+            survey_headers["content-type"],
+            "text/markdown; charset=utf-8",
+        )
+        self.assertIn("attachment", survey_headers["content-disposition"])
+        self.assertEqual(audit_status, 200)
+        self.assertEqual(audit_headers["content-type"], "application/zip")
+        self.assertTrue(audit_body.startswith(b"PK"))
+        self.assertEqual(missing_status, 404)
 
     def test_candidate_status_filter_rejects_invalid_value(self) -> None:
         status, _, payload = self.request(
@@ -961,7 +1002,8 @@ class WorkbenchHTTPTests(unittest.TestCase):
                     headers["content-security-policy"],
                     (
                         "default-src 'self'; script-src 'self'; style-src 'self'; "
-                        "connect-src 'self'; object-src 'none'; base-uri 'none'; "
+                        "connect-src 'self'; img-src 'self' data:; "
+                        "object-src 'none'; base-uri 'none'; "
                         "frame-ancestors 'none'"
                     ),
                 )

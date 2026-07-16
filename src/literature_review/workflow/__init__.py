@@ -2,6 +2,7 @@ from src.literature_review.workflow.checkpoints import fingerprint_inputs
 from src.literature_review.workflow.engine import (
     PersistentWorkflowEngine,
     RetryableStageError,
+    StageWaitingError,
     StageContext,
     StageExecutionError,
     StageHandler,
@@ -10,8 +11,12 @@ from src.literature_review.workflow.engine import (
 )
 from src.literature_review.workflow.handlers import (
     ApprovalGateHandler,
+    ClaimVerificationHandler,
+    DocumentAcquisitionHandler,
     DiscoveryHandler,
     DraftingHandler,
+    EvidenceIndexingHandler,
+    EvidenceReviewGateHandler,
     PlanningHandler,
     QualityGateRejectedError,
     ScreeningHandler,
@@ -26,11 +31,16 @@ from src.literature_review.workflow.state import (
 __all__ = [
     "ALLOWED_TRANSITIONS",
     "ApprovalGateHandler",
+    "ClaimVerificationHandler",
+    "DocumentAcquisitionHandler",
     "InvalidTransitionError",
     "DraftingHandler",
+    "EvidenceIndexingHandler",
+    "EvidenceReviewGateHandler",
     "DiscoveryHandler",
     "PersistentWorkflowEngine",
     "RetryableStageError",
+    "StageWaitingError",
     "PlanningHandler",
     "QualityGateRejectedError",
     "ScreeningHandler",

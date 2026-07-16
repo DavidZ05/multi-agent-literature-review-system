@@ -14,6 +14,7 @@ from src.literature_review.models import CandidateStatus
 from src.literature_review.storage import (
     CandidateDecisionNotAllowedError,
     CandidateNotFoundError,
+    LocalArtifactStore,
     RunNotFoundError,
 )
 from src.literature_review.workbench.jobs import (
@@ -40,7 +41,7 @@ _STATIC_ASSETS = {
 }
 _CONTENT_SECURITY_POLICY = (
     "default-src 'self'; script-src 'self'; style-src 'self'; "
-    "connect-src 'self'; object-src 'none'; base-uri 'none'; "
+    "connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; "
     "frame-ancestors 'none'"
 )
 _CONFIG_MARKER = b"__WORKBENCH_CONFIG__"
@@ -133,6 +134,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         request_path = urlsplit(self.path).path
         if request_path in _STATIC_ASSETS:
             self._serve_static(request_path)
+            return
+        if self._serve_run_download():
             return
         self._handle(self._dispatch_get)
 
@@ -303,7 +306,15 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
             len(segments) == 4
             and segments[:2] == ["api", "runs"]
             and segments[3]
-            in {"resume", "cancel", "close-discovery", "retry-discovery"}
+            in {
+                "resume",
+                "cancel",
+                "close-discovery",
+                "retry-discovery",
+                "evidence-decision",
+                "import-pdf",
+                "export",
+            }
         ):
             body = self._read_json_body()
             return self._run_action(segments[2], segments[3], body)
@@ -339,12 +350,14 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
 
     def _start_run(self, body: Mapping[str, object]) -> dict[str, object]:
         required = {"topic", "corpus_path", "discover", "providers", "max_results"}
-        if set(body) not in {frozenset(required), frozenset(required | {"queries"})}:
+        optional = {"queries", "full_text"}
+        if not required <= set(body) or set(body) - required - optional:
             raise _APIError(400, "invalid_request", "Request validation failed.")
         request = StartRunRequest(
             topic=body["topic"],  # type: ignore[arg-type]
             corpus_path=body["corpus_path"],  # type: ignore[arg-type]
             discovery_enabled=body["discover"],  # type: ignore[arg-type]
+            full_text_enabled=body.get("full_text", False),  # type: ignore[arg-type]
             providers=body["providers"],  # type: ignore[arg-type]
             max_results=body["max_results"],  # type: ignore[arg-type]
             query_texts=body.get("queries", ()),  # type: ignore[arg-type]
@@ -376,6 +389,30 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         if action == "close-discovery":
             self._require_fields(body, set())
             return 200, self.server.workbench_service.close_discovery(run_id)
+        if action == "evidence-decision":
+            self._require_fields(body, {"claim_id", "action", "reason"})
+            return 200, self.server.workbench_service.decide_evidence(
+                run_id,
+                self._string_field(body, "claim_id"),
+                self._string_field(body, "action"),
+                self._string_field(body, "reason"),
+            )
+        if action == "import-pdf":
+            self._require_fields(body, {"citation_key", "pdf_path"})
+            return 200, self.server.workbench_service.import_pdf(
+                run_id,
+                self._string_field(body, "citation_key"),
+                self._string_field(body, "pdf_path"),
+            )
+        if action == "export":
+            self._require_fields(body, {"include_pdfs"})
+            include_pdfs = body["include_pdfs"]
+            if not isinstance(include_pdfs, bool):
+                raise ValueError("include_pdfs must be a boolean")
+            return 200, self.server.workbench_service.export_run(
+                run_id,
+                include_pdfs=include_pdfs,
+            )
         raise _APIError(404, "not_found", "The requested resource was not found.")
 
     def _candidate_action(
@@ -618,6 +655,50 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.end_headers()
         self.wfile.write(body)
+
+    def _serve_run_download(self) -> bool:
+        try:
+            segments, query = self._request_target()
+        except _APIError:
+            return False
+        if (
+            len(segments) != 5
+            or segments[:2] != ["api", "runs"]
+            or segments[3] != "download"
+            or query
+            or segments[4] not in {"survey", "audit"}
+        ):
+            return False
+        run_id = segments[2]
+        try:
+            self.server.workbench_service.store.get_run(run_id)
+            artifact_store = LocalArtifactStore(
+                self.server.workbench_service.artifact_root
+            )
+            if segments[4] == "survey":
+                path = artifact_store.path_for(run_id, "final/survey.md")
+                content_type = "text/markdown; charset=utf-8"
+                filename = f"{run_id}-survey.md"
+            else:
+                path = artifact_store.path_for(
+                    run_id,
+                    f"exports/{run_id}-audit.zip",
+                )
+                content_type = "application/zip"
+                filename = f"{run_id}-audit.zip"
+            body = path.read_bytes()
+        except (FileNotFoundError, RunNotFoundError, ValueError):
+            self._send_not_found()
+            return True
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+        return True
 
     def _inject_workbench_config(self, template: bytes) -> bytes:
         if template.count(_CONFIG_MARKER) != 1:

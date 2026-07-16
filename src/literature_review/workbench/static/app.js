@@ -4,7 +4,8 @@
   const messages = {
     "en": {
       brand: "Literature Review Workbench", workbenchActions: "Workbench actions",
-      events: "Events", resumeRun: "Resume", closeDiscovery: "Close discovery",
+      events: "Events", previewSurvey: "Preview survey", downloadSurvey: "Download Markdown",
+      exportRun: "Export audit ZIP", resumeRun: "Resume", closeDiscovery: "Close discovery",
       cancelRun: "Cancel run", deleteRun: "Delete run", newRun: "New discovery run",
       researchRuns: "Research runs",
       localStorage: "Local storage", database: "Database", artifacts: "Artifacts",
@@ -17,6 +18,10 @@
       executor_literature_discovery: "Literature discovery",
       executor_screening_agent: "Screening agent",
       executor_human_approval: "Human approval",
+      executor_document_acquisition: "PDF acquisition",
+      executor_evidence_indexing: "Evidence indexing",
+      executor_claim_verification: "Claim verification",
+      executor_human_evidence_review: "Human evidence review",
       executor_model_agent_loop: "Model-backed agent loop",
       executor_deterministic_agent_loop: "Deterministic agent loop",
       executor_workflow_engine: "Workflow engine", executor_completed: "Completed",
@@ -83,7 +88,18 @@
       deleteRunScope: "SQLite history and run artifacts will be removed.",
       deleteRunUnaffected: "The seed corpus and shared provider cache are unaffected.",
       enableDiscovery: "Discover additional literature", providers: "Providers",
+      enableFullText: "Download PDFs and verify claims against full text",
       maxResults: "Maximum results per query", startRun: "Start run",
+      evidenceReview: "Claim evidence review", claim: "Claim", citation: "Citation", pages: "Pages",
+      claimEvidence: "Claim evidence", noEvidenceClaims: "No claim evidence is available yet.",
+      evidenceSummary: "{documents} documents · {claims} claims · {blocking} blocking",
+      verification_supported: "Supported", verification_partially_supported: "Partially supported",
+      verification_contradicted: "Contradicted", verification_not_found: "Not found",
+      verification_full_text_unavailable: "Full text unavailable",
+      verification_missing_citation: "Missing citation", noCitation: "No citation",
+      requireRevision: "Require revision", acceptRisk: "Accept unavailable-text risk",
+      pdfPath: "Local PDF path", importPdf: "Import and index PDF", exportReady: "Audit ZIP created locally.",
+      evidenceDecisionSaved: "Evidence decision saved.", pdfImported: "PDF imported and indexed.",
       pending: "Pending", recommended: "Recommended", approved: "Approved", all: "All sources",
       rejected: "Rejected", deferred: "Deferred", include: "Include", review: "Review", exclude: "Exclude",
       waiting: "Waiting", active: "Active", paused: "Paused", retry_wait: "Retry wait",
@@ -118,7 +134,8 @@
     },
     "zh-CN": {
       brand: "文献综述工作台", workbenchActions: "工作台操作",
-      events: "事件记录", resumeRun: "继续运行", closeDiscovery: "关闭检索",
+      events: "事件记录", previewSurvey: "预览综述", downloadSurvey: "下载 Markdown",
+      exportRun: "导出审计 ZIP", resumeRun: "继续运行", closeDiscovery: "关闭检索",
       cancelRun: "取消运行", deleteRun: "删除运行", newRun: "新建文献检索",
       researchRuns: "研究任务",
       localStorage: "本地存储", database: "数据库", artifacts: "产物目录",
@@ -131,6 +148,10 @@
       executor_literature_discovery: "文献检索",
       executor_screening_agent: "筛选 Agent",
       executor_human_approval: "人工审批",
+      executor_document_acquisition: "PDF 获取",
+      executor_evidence_indexing: "证据索引",
+      executor_claim_verification: "论断核验",
+      executor_human_evidence_review: "人工证据审查",
       executor_model_agent_loop: "模型 Agent 回环",
       executor_deterministic_agent_loop: "确定性 Agent 回环",
       executor_workflow_engine: "工作流引擎", executor_completed: "已完成",
@@ -197,7 +218,18 @@
       deleteRunScope: "SQLite 历史记录和运行产物将被删除。",
       deleteRunUnaffected: "种子语料库和共享检索平台缓存不受影响。",
       enableDiscovery: "检索更多文献", providers: "检索平台",
+      enableFullText: "下载 PDF，并按全文证据核验论断",
       maxResults: "每条查询的最大结果数", startRun: "开始运行",
+      evidenceReview: "论断证据审查", claim: "论断", citation: "引用", pages: "页码",
+      claimEvidence: "论断证据", noEvidenceClaims: "尚无可审查的论断证据。",
+      evidenceSummary: "{documents} 份文档 · {claims} 条论断 · {blocking} 条阻塞",
+      verification_supported: "已支持", verification_partially_supported: "部分支持",
+      verification_contradicted: "相互矛盾", verification_not_found: "未找到支持证据",
+      verification_full_text_unavailable: "全文不可得",
+      verification_missing_citation: "缺少引用", noCitation: "无引用",
+      requireRevision: "要求修订", acceptRisk: "接受全文不可得风险",
+      pdfPath: "本地 PDF 路径", importPdf: "导入并索引 PDF", exportReady: "审计 ZIP 已生成到本地。",
+      evidenceDecisionSaved: "证据决定已保存。", pdfImported: "PDF 已导入并完成索引。",
       pending: "待处理", recommended: "推荐", approved: "已批准", all: "全部来源",
       rejected: "已拒绝", deferred: "暂缓", include: "纳入", review: "复核", exclude: "排除",
       waiting: "等待中", active: "运行中", paused: "已暂停", retry_wait: "等待重试",
@@ -259,6 +291,7 @@
     candidates: [],
     selectedRunId: storedSelectedRunId(),
     selectedCandidateId: null,
+    selectedClaimId: null,
     filter: "pending",
     detailState: "empty",
     detailError: "",
@@ -291,10 +324,10 @@
   const stageGroups = [
     ["created", "planning"],
     ["discovering", "screening"],
-    ["awaiting_corpus_approval"],
-    ["drafting", "reviewing"],
-    ["revising", "polishing"],
-    ["final_verification", "completed"]
+    ["awaiting_corpus_approval", "acquiring_documents", "indexing_evidence"],
+    ["drafting", "reviewing", "revising", "polishing", "final_verification"],
+    ["claim_verification", "awaiting_evidence_review"],
+    ["completed"]
   ];
 
   function byId(id) {
@@ -526,6 +559,7 @@
     state.selectedRunId = runId;
     storeSelectedRunId(runId);
     state.selectedCandidateId = null;
+    state.selectedClaimId = null;
     state.detail = null;
     state.candidates = [];
     state.detailState = runId ? "loading" : "empty";
@@ -681,6 +715,11 @@
       state.detail = detail;
       state.detailState = "ready";
       state.detailError = "";
+      const evidenceClaims = detail.evidence && Array.isArray(detail.evidence.claims)
+        ? detail.evidence.claims : [];
+      if (!evidenceClaims.some((claim) => claim.claim_id === state.selectedClaimId)) {
+        state.selectedClaimId = null;
+      }
       renderAll();
       await loadCandidates(runId, state.filter, generation, { preserveSelection: true });
       scheduleRunPoll();
@@ -741,6 +780,7 @@
     renderRuns();
     renderRunDetail();
     renderDiscoverySummary();
+    renderEvidence();
     renderCandidates();
     renderCandidateDetail();
     updateActions();
@@ -977,6 +1017,67 @@
     };
   }
 
+  function evidenceClaims() {
+    return state.detail && state.detail.evidence && Array.isArray(state.detail.evidence.claims)
+      ? state.detail.evidence.claims : [];
+  }
+
+  function selectedClaim() {
+    return evidenceClaims().find((claim) => claim.claim_id === state.selectedClaimId) || null;
+  }
+
+  function renderEvidence() {
+    const evidence = state.detail && state.detail.evidence;
+    const panel = byId("evidence-panel");
+    panel.hidden = !evidence || !evidence.enabled;
+    if (panel.hidden) return;
+    byId("evidence-summary").textContent = t("evidenceSummary", {
+      documents: Number(evidence.document_count || 0),
+      claims: Number(evidence.claim_count || 0),
+      blocking: Number(evidence.blocking_claim_count || 0)
+    });
+    const metrics = byId("evidence-metrics");
+    metrics.textContent = `${Number(evidence.parsed_document_count || 0)}/${Number(evidence.document_count || 0)}`;
+    const body = byId("evidence-body");
+    body.replaceChildren();
+    const claims = evidenceClaims();
+    byId("evidence-empty").hidden = claims.length !== 0;
+    claims.forEach((claim) => {
+      const results = Array.isArray(claim.verifications) ? claim.verifications : [];
+      const primary = results.find((item) => item.blocking) || results[0] || {};
+      const row = document.createElement("tr");
+      row.className = "candidate-row evidence-row";
+      row.tabIndex = 0;
+      row.classList.toggle("selected", claim.claim_id === state.selectedClaimId);
+      row.classList.toggle("blocking", Boolean(claim.blocking));
+      row.append(
+        labeledCell(claim.text, "claim"),
+        labeledCell(primary.citation_key || (claim.citation_keys || []).join(", ") || "—", "citation"),
+        labeledCell(
+          primary.status
+            ? t(`verification_${primary.status}`)
+            : String(claim.claim_type || "—").replaceAll("_", " "),
+          "status"
+        ),
+        labeledCell((primary.evidence_pages || []).join(", ") || "—", "pages")
+      );
+      const select = () => {
+        state.selectedClaimId = claim.claim_id;
+        state.selectedCandidateId = null;
+        renderEvidence();
+        renderCandidateDetail();
+      };
+      row.addEventListener("click", select);
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          select();
+        }
+      });
+      body.append(row);
+    });
+  }
+
   function hasDiscoveryActivity() {
     const summary = discoverySummary();
     if (summary.enabled) return true;
@@ -1036,6 +1137,7 @@
         resetCandidateForm();
       }
       state.selectedCandidateId = candidate.candidate_id;
+      state.selectedClaimId = null;
       renderCandidates();
       renderCandidateDetail();
     };
@@ -1075,20 +1177,26 @@
 
   function renderCandidateDetail() {
     const candidate = selectedCandidate();
+    const claim = selectedClaim();
     const run = state.detail && state.detail.run;
     const approvalGateOpen = Boolean(
       run
       && run.status === "waiting"
       && run.current_stage === "awaiting_corpus_approval"
     );
-    byId("candidate-empty").hidden = Boolean(candidate);
-    byId("candidate-content").hidden = !candidate;
+    byId("candidate-empty").hidden = Boolean(candidate || claim);
+    byId("candidate-content").hidden = !candidate || Boolean(claim);
+    byId("evidence-detail").hidden = !claim;
     byId("approval-form").querySelectorAll("input, textarea, button").forEach((control) => {
       control.disabled = state.pending
         || !candidate
         || candidate.status !== "pending"
         || !approvalGateOpen;
     });
+    if (claim) {
+      renderClaimDetail(claim, run);
+      return;
+    }
     if (!candidate) {
       const title = byId("candidate-state-title");
       const message = byId("candidate-state-message");
@@ -1110,6 +1218,48 @@
     byId("candidate-abstract").textContent = candidate.abstract || t("noAbstract");
     byId("candidate-recommendation").textContent = `${t(candidate.recommendation)} · ${Number(candidate.relevance_score || 0).toFixed(2)}`;
     renderIdentifiers(candidate);
+  }
+
+  function renderClaimDetail(claim, run) {
+    byId("evidence-claim-text").textContent = claim.text;
+    byId("evidence-claim-meta").textContent = `${claim.section} · ${String(claim.claim_type).replaceAll("_", " ")}`;
+    const container = byId("evidence-results");
+    container.replaceChildren();
+    const results = Array.isArray(claim.verifications) ? claim.verifications : [];
+    results.forEach((result) => {
+      const section = document.createElement("section");
+      section.className = `evidence-result ${result.blocking ? "blocking" : "supported"}`;
+      const heading = document.createElement("h3");
+      heading.textContent = `${result.citation_key || t("noCitation")} · ${t(`verification_${result.status}`)}`;
+      const reason = document.createElement("p");
+      reason.textContent = result.reason;
+      section.append(heading, reason);
+      (result.evidence || []).forEach((passage) => {
+        const quote = document.createElement("blockquote");
+        quote.textContent = passage.text;
+        const pages = document.createElement("small");
+        pages.textContent = `${t("pages")} ${passage.page_start}${passage.page_end !== passage.page_start ? `–${passage.page_end}` : ""}`;
+        section.append(quote, pages);
+      });
+      container.append(section);
+    });
+    const gateOpen = Boolean(run && run.status === "waiting" && run.current_stage === "awaiting_evidence_review");
+    const decisionForm = byId("evidence-decision-form");
+    decisionForm.hidden = !claim.blocking || !gateOpen || Boolean(claim.decision);
+    decisionForm.querySelectorAll("textarea, button").forEach((control) => {
+      control.disabled = state.pending || decisionForm.hidden;
+    });
+    const canAcceptRisk = results.filter((result) => result.blocking).every(
+      (result) => result.status === "full_text_unavailable"
+    );
+    byId("accept-risk-button").hidden = !canAcceptRisk;
+    const unavailable = results.find((result) => result.status === "full_text_unavailable" && result.citation_key);
+    const importForm = byId("pdf-import-form");
+    importForm.hidden = !gateOpen || !unavailable;
+    importForm.dataset.citationKey = unavailable ? unavailable.citation_key : "";
+    importForm.querySelectorAll("input, button").forEach((control) => {
+      control.disabled = state.pending || importForm.hidden;
+    });
   }
 
   function renderIdentifiers(candidate) {
@@ -1152,10 +1302,18 @@
       ? t("continueSeedCorpus")
       : t("closeDiscovery");
     byId("events-button").disabled = !hasRun || mutationPending;
+    const hasSurvey = Boolean(state.detail && state.detail.outputs && state.detail.outputs.survey_available);
+    byId("preview-run-button").disabled = !hasSurvey || mutationPending;
+    byId("download-survey-button").disabled = !hasSurvey || mutationPending;
+    byId("export-run-button").disabled = !hasRun || mutationPending;
     byId("cancel-run-button").disabled = !hasRun || mutationPending || terminalRunStatuses.has(run && run.status);
     byId("delete-run-button").disabled =
       !hasRun || mutationPending || !deletableRunStatuses.has(run && run.status);
     byId("resume-run-button").disabled = !hasRun || mutationPending || ["active", "completed", "cancelled"].includes(run && run.status);
+    const unresolvedEvidence = hasRun
+      && run.current_stage === "awaiting_evidence_review"
+      && evidenceClaims().some((claim) => claim.blocking && !claim.decision);
+    if (unresolvedEvidence) byId("resume-run-button").disabled = true;
     byId("close-discovery-button").disabled = !hasRun || mutationPending || run.current_stage !== "awaiting_corpus_approval";
     const canRetryDiscovery = hasRun && (
       (run.status === "waiting" && run.current_stage === "awaiting_corpus_approval")
@@ -1214,6 +1372,7 @@
     if (state.pending) return;
     state.pending = true;
     updateActions();
+    renderEvidence();
     renderCandidateDetail();
     showFeedback("");
     try {
@@ -1223,6 +1382,7 @@
     } finally {
       state.pending = false;
       updateActions();
+      renderEvidence();
       renderCandidateDetail();
     }
   }
@@ -1290,6 +1450,79 @@
     });
   }
 
+  async function decideEvidence(action) {
+    const claim = selectedClaim();
+    const runId = state.selectedRunId;
+    if (!claim || !runId) return;
+    const reason = byId("evidence-decision-reason").value.trim();
+    if (!reason) {
+      showFeedback(t("reasonRequired"), true);
+      byId("evidence-decision-reason").focus();
+      return;
+    }
+    await withPending(async () => {
+      const payload = await api(
+        `/api/runs/${encodeURIComponent(runId)}/evidence-decision`,
+        { method: "POST", body: { claim_id: claim.claim_id, action, reason } }
+      );
+      showCommand(payload);
+      showFeedback(t("evidenceDecisionSaved"));
+      byId("evidence-decision-reason").value = "";
+      await refreshRunDetail(runId);
+    });
+  }
+
+  async function importEvidencePdf(event) {
+    event.preventDefault();
+    const runId = state.selectedRunId;
+    const form = byId("pdf-import-form");
+    const citationKey = form.dataset.citationKey;
+    const pdfPath = byId("pdf-import-path").value.trim();
+    if (!runId || !citationKey || !pdfPath) return;
+    await withPending(async () => {
+      const payload = await api(
+        `/api/runs/${encodeURIComponent(runId)}/import-pdf`,
+        { method: "POST", body: { citation_key: citationKey, pdf_path: pdfPath } }
+      );
+      showCommand(payload);
+      showFeedback(t("pdfImported"));
+      byId("pdf-import-path").value = "";
+      await refreshRunDetail(runId);
+    });
+  }
+
+  async function exportRun() {
+    const runId = state.selectedRunId;
+    if (!runId) return;
+    await withPending(async () => {
+      const payload = await api(
+        `/api/runs/${encodeURIComponent(runId)}/export`,
+        { method: "POST", body: { include_pdfs: true } }
+      );
+      showCommand(payload);
+      showFeedback(`${t("exportReady")} ${payload.output_path || ""}`);
+      downloadRunArtifact("audit");
+    });
+  }
+
+  function downloadRunArtifact(kind) {
+    const runId = state.selectedRunId;
+    if (!runId || !["survey", "audit"].includes(kind)) return;
+    const link = document.createElement("a");
+    link.href = `/api/runs/${encodeURIComponent(runId)}/download/${kind}`;
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+    link.remove();
+  }
+
+  function previewSurvey() {
+    const outputs = state.detail && state.detail.outputs;
+    if (!outputs || !outputs.survey_available) return;
+    byId("survey-preview").textContent = outputs.survey_markdown || "";
+    openDialog("survey-preview-dialog");
+  }
+
   async function startRun(event) {
     event.preventDefault();
     const discover = byId("new-run-discover").checked;
@@ -1307,6 +1540,7 @@
       topic: byId("new-run-topic").value,
       corpus_path: byId("new-run-corpus").value,
       discover,
+      full_text: byId("new-run-full-text").checked,
       providers,
       max_results: Number(byId("new-run-max-results").value),
       queries
@@ -1608,6 +1842,9 @@
     byId("new-run-button").addEventListener("click", () => openDialog("new-run-dialog"));
     byId("empty-new-run-button").addEventListener("click", () => openDialog("new-run-dialog"));
     byId("events-button").addEventListener("click", openEvents);
+    byId("preview-run-button").addEventListener("click", previewSurvey);
+    byId("download-survey-button").addEventListener("click", () => downloadRunArtifact("survey"));
+    byId("export-run-button").addEventListener("click", exportRun);
     byId("resume-run-button").addEventListener("click", () => mutateRun("resume", "jobQueued"));
     byId("retry-discovery-button").addEventListener("click", openRetryDiscoveryDialog);
     byId("cancel-run-button").addEventListener("click", () => mutateRun("cancel", "runCancelled"));
@@ -1627,6 +1864,12 @@
       event.preventDefault();
       decideCandidate("approve");
     });
+    byId("evidence-decision-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      decideEvidence("require_revision");
+    });
+    byId("accept-risk-button").addEventListener("click", () => decideEvidence("accept_risk"));
+    byId("pdf-import-form").addEventListener("submit", importEvidencePdf);
     byId("defer-button").addEventListener("click", () => decideCandidate("defer"));
     byId("reject-button").addEventListener("click", () => decideCandidate("reject"));
     byId("candidate-filters").addEventListener("click", (event) => {
