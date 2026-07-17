@@ -35,6 +35,7 @@ from src.literature_review.verification import (
     ClaimExtractor,
     ClaimVerifier,
     VerificationStatus,
+    active_evidence_decisions,
 )
 
 
@@ -392,15 +393,39 @@ class ClaimVerificationHandler:
             "final/survey.md",
         )
         prior_claims = context.workflow_store.list_claims(context.run.run_id)
-        draft_version = max(
+        latest_version = max(
             (claim.draft_version for claim in prior_claims),
             default=0,
-        ) + 1
-        claims = self.extractor.extract(
+        )
+        candidate_version = max(1, latest_version)
+        candidate_claims = self.extractor.extract(
             context.run.run_id,
             survey,
-            draft_version=draft_version,
+            draft_version=candidate_version,
         )
+        latest_claims = tuple(
+            claim
+            for claim in prior_claims
+            if claim.draft_version == latest_version
+        )
+        if latest_claims and _claim_content_signature(
+            latest_claims
+        ) == _claim_content_signature(candidate_claims):
+            draft_version = latest_version
+            claims = latest_claims
+            claims_are_reused = True
+        else:
+            draft_version = latest_version + 1
+            claims_are_reused = False
+            claims = (
+                candidate_claims
+                if draft_version == candidate_version
+                else self.extractor.extract(
+                    context.run.run_id,
+                    survey,
+                    draft_version=draft_version,
+                )
+            )
         documents = tuple(
             context.workflow_store.list_documents(context.run.run_id)
         )
@@ -408,11 +433,12 @@ class ClaimVerificationHandler:
             context.workflow_store.list_evidence_chunks(context.run.run_id)
         )
         verifications = self.verifier.verify(claims, documents, chunks)
-        context.workflow_store.replace_claims(
-            context.run.run_id,
-            draft_version,
-            claims,
-        )
+        if not claims_are_reused:
+            context.workflow_store.replace_claims(
+                context.run.run_id,
+                draft_version,
+                claims,
+            )
         context.workflow_store.put_claim_verifications(verifications)
         report = self.verifier.report(claims, verifications)
         feedback = self.verifier.feedback(claims, verifications)
@@ -455,7 +481,7 @@ class EvidenceReviewGateHandler:
         decisions = context.workflow_store.list_evidence_review_decisions(
             context.run.run_id
         )
-        decisions_by_claim = {decision.claim_id: decision for decision in decisions}
+        decisions_by_claim = active_evidence_decisions(verifications, decisions)
         unresolved = [
             item for item in blocking if item.claim_id not in decisions_by_claim
         ]
@@ -508,10 +534,30 @@ class EvidenceReviewGateHandler:
                         if blocking
                         else "accepted_after_document_refresh"
                     ),
-                    "decisions": [decision.to_dict() for decision in decisions],
+                    "decisions": [
+                        decision.to_dict() for decision in decisions_by_claim.values()
+                    ],
+                    "decision_history": [
+                        decision.to_dict() for decision in decisions
+                    ],
                 }
             },
         )
+
+
+def _claim_content_signature(claims: tuple[Any, ...]) -> tuple[tuple[Any, ...], ...]:
+    return tuple(
+        (
+            claim.text,
+            claim.claim_type.value,
+            claim.citation_keys,
+            claim.section,
+            claim.paragraph_index,
+            claim.sentence_index,
+            claim.requires_citation,
+        )
+        for claim in claims
+    )
 
 
 def _materialize_corpus(context: StageContext) -> Path:

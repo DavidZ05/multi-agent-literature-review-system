@@ -27,6 +27,8 @@ from src.literature_review.workflow import (
     EvidenceReviewGateHandler,
     PersistentWorkflowEngine,
     PlanningHandler,
+    StageContext,
+    StageWaitingError,
 )
 
 
@@ -166,11 +168,12 @@ class EvidenceWorkflowTests(unittest.TestCase):
 
         self.assertEqual(waiting.current_stage, WorkflowStage.AWAITING_EVIDENCE_REVIEW)
         self.assertEqual(len(FeedbackAwareOrchestrator.feedback), 1)
-        blocking_claim_ids = {
-            item.claim_id
+        blocking_results = [
+            item
             for item in self.store.list_claim_verifications(waiting.run_id)
             if item.blocking
-        }
+        ]
+        blocking_claim_ids = {item.claim_id for item in blocking_results}
         self.assertTrue(blocking_claim_ids)
         for claim_id in blocking_claim_ids:
             self.store.put_evidence_review_decision(
@@ -180,6 +183,11 @@ class EvidenceWorkflowTests(unittest.TestCase):
                     "require_revision",
                     "The cited PDF does not support this claim.",
                     "test",
+                    verification_fingerprints=tuple(
+                        item.fingerprint
+                        for item in blocking_results
+                        if item.claim_id == claim_id
+                    ),
                 )
             )
 
@@ -245,6 +253,75 @@ class EvidenceWorkflowTests(unittest.TestCase):
             final_review["status"],
             "accepted_after_document_refresh",
         )
+
+    def test_claim_verification_replay_reuses_the_same_draft_version(self) -> None:
+        engine = self.engine()
+        waiting = engine.start("Agent memory", self.corpus)
+        handler = ClaimVerificationHandler()
+        context = StageContext(
+            run=waiting,
+            artifact_store=self.artifacts,
+            workflow_store=self.store,
+            corpus_path=self.corpus,
+            runtime_config={"full_text_enabled": True},
+            _cancellation_check=lambda: False,
+        )
+
+        handler(context)
+
+        versions = {
+            claim.draft_version
+            for claim in self.store.list_claims(waiting.run_id)
+        }
+        self.assertEqual(versions, {1})
+
+    def test_stale_risk_decision_returns_to_human_review(self) -> None:
+        engine = self.engine()
+        waiting = engine.start("Agent memory", self.corpus)
+        old_result = next(
+            item
+            for item in self.store.list_claim_verifications(waiting.run_id)
+            if item.blocking
+        )
+        self.store.put_evidence_review_decision(
+            EvidenceReviewDecision.create(
+                waiting.run_id,
+                old_result.claim_id,
+                "accept_risk",
+                "The previous evidence state was unavailable.",
+                "test",
+                verification_fingerprints=(old_result.fingerprint,),
+            )
+        )
+        refreshed = ClaimVerification.create(
+            run_id=waiting.run_id,
+            claim_id=old_result.claim_id,
+            citation_key=old_result.citation_key,
+            status=VerificationStatus.NOT_FOUND,
+            evidence_chunk_ids=(),
+            evidence_pages=(),
+            reason="The refreshed PDF does not support the claim.",
+            confidence=0.8,
+            verifier="deterministic",
+            blocking=True,
+            fingerprint="f" * 64,
+        )
+        self.store.replace_claim_verifications(
+            waiting.run_id,
+            (old_result.claim_id,),
+            (refreshed,),
+        )
+        context = StageContext(
+            run=waiting,
+            artifact_store=self.artifacts,
+            workflow_store=self.store,
+            corpus_path=self.corpus,
+            runtime_config={"full_text_enabled": True},
+            _cancellation_check=lambda: False,
+        )
+
+        with self.assertRaises(StageWaitingError):
+            EvidenceReviewGateHandler()(context)
 
 
 if __name__ == "__main__":

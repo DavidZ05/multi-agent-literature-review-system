@@ -6,7 +6,7 @@ import ssl
 import time
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPSHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 import certifi
 
@@ -46,6 +46,31 @@ class HttpTransport(Protocol):
     ) -> HttpResponse: ...
 
 
+class _ValidatingRedirectHandler(HTTPRedirectHandler):
+    def __init__(self, validator: Callable[[str], None]) -> None:
+        super().__init__()
+        self.validator = validator
+
+    def redirect_request(
+        self,
+        request,
+        file_pointer,
+        code,
+        message,
+        headers,
+        new_url,
+    ):
+        self.validator(str(new_url))
+        return super().redirect_request(
+            request,
+            file_pointer,
+            code,
+            message,
+            headers,
+            new_url,
+        )
+
+
 class UrllibHttpTransport:
     USER_AGENT = "multi-agent-literature-review-system/0.2 (+local-research-workflow)"
 
@@ -57,21 +82,29 @@ class UrllibHttpTransport:
         timeout_seconds: float = 30,
         max_attempts: int = 3,
         max_response_bytes: int = 10 * 1024 * 1024,
+        url_validator: Callable[[str], None] | None = None,
     ) -> None:
         if opener is None:
             context = ssl.create_default_context(cafile=certifi.where())
-            opener = build_opener(HTTPSHandler(context=context))
+            handlers = []
+            if url_validator is not None:
+                handlers.append(_ValidatingRedirectHandler(url_validator))
+            handlers.append(HTTPSHandler(context=context))
+            opener = build_opener(*handlers)
         self.opener = opener
         self.sleeper = sleeper
         self.timeout_seconds = timeout_seconds
         self.max_attempts = max_attempts
         self.max_response_bytes = max_response_bytes
+        self.url_validator = url_validator
 
     def get(
         self,
         url: str,
         headers: Mapping[str, str],
     ) -> HttpResponse:
+        if self.url_validator is not None:
+            self.url_validator(url)
         request_headers = {"User-Agent": self.USER_AGENT, **dict(headers)}
         for attempt in range(1, self.max_attempts + 1):
             request = Request(url, headers=request_headers, method="GET")

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import re
 
+from src.literature_review.citations import CITATION_PATTERN
 from src.literature_review.verification.models import AtomicClaim, ClaimType
 
 
-_CITATION = re.compile(r"\[([a-z][a-z0-9_-]{2,})\]")
+_CITATION = CITATION_PATTERN
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9`*])")
 _FACTUAL_CUES = re.compile(
     r"\b(?:is|are|was|were|has|have|shows?|reports?|introduces?|"

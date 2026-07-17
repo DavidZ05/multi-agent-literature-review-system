@@ -120,6 +120,55 @@ class WorkbenchEvidenceTests(unittest.TestCase):
                 "Accept anyway.",
             )
 
+    def test_refreshed_verification_supersedes_the_previous_decision(self) -> None:
+        self.service.decide_evidence(
+            self.run.run_id,
+            self.claim.claim_id,
+            "accept_risk",
+            "The PDF is currently unavailable.",
+        )
+        mismatch = ClaimVerification.create(
+            run_id=self.run.run_id,
+            claim_id=self.claim.claim_id,
+            citation_key="memorypaper",
+            status=VerificationStatus.NOT_FOUND,
+            evidence_chunk_ids=(),
+            evidence_pages=(),
+            reason="The imported PDF does not support the claim.",
+            confidence=0.8,
+            verifier="deterministic",
+            blocking=True,
+            fingerprint="b" * 64,
+        )
+        self.store.replace_claim_verifications(
+            self.run.run_id,
+            (self.claim.claim_id,),
+            (mismatch,),
+        )
+
+        detail = self.service.get_run_detail(self.run.run_id)
+        claim = detail["evidence"]["claims"][0]
+
+        self.assertIsNone(claim["decision"])
+        self.assertEqual(len(claim["decision_history"]), 1)
+
+    def test_evidence_decision_requires_a_waiting_run(self) -> None:
+        self.store.update_run(
+            replace(
+                self.run,
+                status=RunStatus.ACTIVE,
+                updated_at=utc_now_iso(),
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "review gate"):
+            self.service.decide_evidence(
+                self.run.run_id,
+                self.claim.claim_id,
+                "accept_risk",
+                "Concurrent decision.",
+            )
+
     def test_evidence_decision_is_rejected_outside_the_review_gate(self) -> None:
         self.store.update_run(
             replace(

@@ -28,6 +28,7 @@ from src.literature_review.workbench.deletion import ArtifactDeletionManager
 from src.literature_review.verification import (
     EvidenceReviewDecision,
     VerificationStatus,
+    active_evidence_decisions,
 )
 
 
@@ -173,31 +174,42 @@ class WorkbenchService:
         action: str,
         reason: str,
     ) -> dict[str, object]:
-        run = self.store.get_run(run_id)
-        if run.current_stage != WorkflowStage.AWAITING_EVIDENCE_REVIEW:
-            raise ValueError("evidence decisions require the evidence review gate")
         if not reason.strip():
             raise ValueError("decision reason must be nonblank")
-        blocking = self.store.list_claim_verifications(
-            run_id,
-            claim_id=claim_id,
-            blocking_only=True,
-        )
-        if not blocking:
-            raise ValueError("claim has no blocking verification result")
-        if action == "accept_risk" and any(
-            item.status != VerificationStatus.FULL_TEXT_UNAVAILABLE
-            for item in blocking
-        ):
-            raise ValueError("risk acceptance requires unavailable full text")
-        decision = EvidenceReviewDecision.create(
-            run_id,
-            claim_id,
-            action,
-            reason.strip(),
-            "human-workbench",
-        )
-        self.store.put_evidence_review_decision(decision)
+        with self._activity.resume_execution(run_id):
+            run = self.store.get_run(run_id)
+            if (
+                run.status != RunStatus.WAITING
+                or run.current_stage != WorkflowStage.AWAITING_EVIDENCE_REVIEW
+            ):
+                raise ValueError(
+                    "evidence decisions require the evidence review gate"
+                )
+            blocking = self.store.list_claim_verifications(
+                run_id,
+                claim_id=claim_id,
+                blocking_only=True,
+            )
+            if not blocking:
+                raise ValueError("claim has no blocking verification result")
+            if action == "accept_risk" and any(
+                item.status != VerificationStatus.FULL_TEXT_UNAVAILABLE
+                for item in blocking
+            ):
+                raise ValueError(
+                    "risk acceptance requires unavailable full text"
+                )
+            decision = EvidenceReviewDecision.create(
+                run_id,
+                claim_id,
+                action,
+                reason.strip(),
+                "human-workbench",
+                verification_fingerprints=tuple(
+                    item.fingerprint for item in blocking
+                ),
+            )
+            self.store.put_evidence_review_decision(decision)
         return {
             "decision": decision.to_dict(),
             "evidence": self._evidence_detail(run_id),
@@ -278,15 +290,16 @@ class WorkbenchService:
         tags: Iterable[str],
     ) -> dict[str, object]:
         tag_values = tuple(tags)
-        decision = self.approval_service.approve(
-            run_id,
-            candidate_id,
-            reason=reason,
-            category=category,
-            contribution=contribution,
-            tags=tag_values,
-            actor="workbench",
-        )
+        with self._activity.resume_execution(run_id):
+            decision = self.approval_service.approve(
+                run_id,
+                candidate_id,
+                reason=reason,
+                category=category,
+                contribution=contribution,
+                tags=tag_values,
+                actor="workbench",
+            )
         return self._decision_payload(
             run_id,
             candidate_id,
@@ -308,12 +321,13 @@ class WorkbenchService:
         candidate_id: str,
         reason: str,
     ) -> dict[str, object]:
-        decision = self.approval_service.reject(
-            run_id,
-            candidate_id,
-            reason=reason,
-            actor="workbench",
-        )
+        with self._activity.resume_execution(run_id):
+            decision = self.approval_service.reject(
+                run_id,
+                candidate_id,
+                reason=reason,
+                actor="workbench",
+            )
         return self._decision_payload(
             run_id,
             candidate_id,
@@ -332,12 +346,13 @@ class WorkbenchService:
         candidate_id: str,
         reason: str,
     ) -> dict[str, object]:
-        decision = self.approval_service.defer(
-            run_id,
-            candidate_id,
-            reason=reason,
-            actor="workbench",
-        )
+        with self._activity.resume_execution(run_id):
+            decision = self.approval_service.defer(
+                run_id,
+                candidate_id,
+                reason=reason,
+                actor="workbench",
+            )
         return self._decision_payload(
             run_id,
             candidate_id,
@@ -351,11 +366,15 @@ class WorkbenchService:
         )
 
     def close_discovery(self, run_id: str) -> dict[str, object]:
-        pending_count = len(
-            self.store.list_candidates(run_id, status=CandidateStatus.PENDING)
-        )
-        if pending_count:
-            raise PendingCandidatesError(run_id, pending_count)
+        with self._activity.resume_execution(run_id):
+            pending_count = len(
+                self.store.list_candidates(
+                    run_id,
+                    status=CandidateStatus.PENDING,
+                )
+            )
+            if pending_count:
+                raise PendingCandidatesError(run_id, pending_count)
         return {
             "run_id": run_id,
             "status": "ready_to_resume",
@@ -469,9 +488,16 @@ class WorkbenchService:
             verifications_by_claim.setdefault(verification.claim_id, []).append(
                 serialized
             )
+        active_decisions = active_evidence_decisions(verifications, decisions)
         decisions_by_claim = {
-            decision.claim_id: decision.to_dict() for decision in decisions
+            claim_id: decision.to_dict()
+            for claim_id, decision in active_decisions.items()
         }
+        decision_history_by_claim: dict[str, list[dict[str, object]]] = {}
+        for decision in decisions:
+            decision_history_by_claim.setdefault(decision.claim_id, []).append(
+                decision.to_dict()
+            )
         claim_rows = []
         for claim in claims:
             results = verifications_by_claim.get(claim.claim_id, [])
@@ -481,6 +507,10 @@ class WorkbenchService:
                     "verifications": results,
                     "blocking": any(bool(item["blocking"]) for item in results),
                     "decision": decisions_by_claim.get(claim.claim_id),
+                    "decision_history": decision_history_by_claim.get(
+                        claim.claim_id,
+                        [],
+                    ),
                 }
             )
         return {

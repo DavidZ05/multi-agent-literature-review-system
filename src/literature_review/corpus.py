@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.literature_review.citations import validate_citation_key
+
 
 PROJECT_TITLE = (
     "Memory-Augmented LLM Agents: Mechanisms, Evaluation, and Reliability "
@@ -43,7 +45,7 @@ def load_papers(path: Path) -> list[dict[str, Any]]:
         missing = REQUIRED_FIELDS - set(paper)
         if missing:
             raise ValueError(f"{paper.get('title', '<unknown>')} missing {sorted(missing)}")
-        key = paper["citation_key"]
+        key = validate_citation_key(paper["citation_key"])
         if key in seen:
             raise ValueError(f"duplicate citation_key: {key}")
         seen.add(key)

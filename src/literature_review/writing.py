@@ -5,6 +5,7 @@ from typing import Any
 
 from src.literature_review.api import APIResponseError, load_prompt
 from src.literature_review.base import RuntimeAwareAgent
+from src.literature_review.citations import CITATION_PATTERN, citation_keys
 from src.literature_review.corpus import (
     PROJECT_TITLE,
     citation_label,
@@ -13,7 +14,7 @@ from src.literature_review.corpus import (
 
 __all__ = ["PolishAgent", "WriterAgent"]
 
-_CITATION_PATTERN = re.compile(r"\[([a-z][a-z0-9]+(?:[a-z0-9])?)\]")
+_CITATION_PATTERN = CITATION_PATTERN
 
 
 class WriterAgent(RuntimeAwareAgent):
@@ -571,13 +572,7 @@ def _markdown_from_response(response: dict[str, Any]) -> str:
 
 
 def _citation_keys(markdown: str) -> list[str]:
-    keys = []
-    seen = set()
-    for key in _CITATION_PATTERN.findall(markdown):
-        if key not in seen:
-            seen.add(key)
-            keys.append(key)
-    return keys
+    return citation_keys(markdown)
 
 
 def _reject_unknown_citations(

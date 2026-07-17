@@ -8,6 +8,7 @@ import re
 from typing import Any, Mapping
 from uuid import uuid4
 
+from src.literature_review.citations import validate_citation_key
 from src.literature_review.models import utc_now_iso
 
 
@@ -73,8 +74,8 @@ class AtomicClaim:
             raise ValueError("claim positions must be nonnegative")
         if not isinstance(self.requires_citation, bool):
             raise TypeError("requires_citation must be a bool")
-        if any(not key.strip() for key in self.citation_keys):
-            raise ValueError("citation_keys must be nonblank")
+        for key in self.citation_keys:
+            validate_citation_key(key)
         object.__setattr__(self, "citation_keys", tuple(dict.fromkeys(self.citation_keys)))
 
     @classmethod
@@ -228,6 +229,7 @@ class EvidenceReviewDecision:
     reason: str
     actor: str
     created_at: str
+    verification_fingerprints: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _DECISION_ID.fullmatch(self.decision_id):
@@ -238,7 +240,19 @@ class EvidenceReviewDecision:
             raise ValueError("invalid evidence review action")
         if not self.reason.strip() or not self.actor.strip():
             raise ValueError("decision reason and actor must be nonblank")
+        if any(
+            not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+            for fingerprint in self.verification_fingerprints
+        ):
+            raise ValueError(
+                "verification_fingerprints must contain lowercase SHA-256 values"
+            )
         _validate_utc_timestamp(self.created_at, "created_at")
+        object.__setattr__(
+            self,
+            "verification_fingerprints",
+            tuple(sorted(set(self.verification_fingerprints))),
+        )
 
     @classmethod
     def create(
@@ -248,7 +262,11 @@ class EvidenceReviewDecision:
         action: str,
         reason: str,
         actor: str,
+        *,
+        verification_fingerprints: tuple[str, ...],
     ) -> EvidenceReviewDecision:
+        if not verification_fingerprints:
+            raise ValueError("evidence decisions require verification fingerprints")
         return cls(
             decision_id=f"evidence_decision_{uuid4().hex}",
             run_id=run_id,
@@ -257,14 +275,45 @@ class EvidenceReviewDecision:
             reason=reason,
             actor=actor,
             created_at=utc_now_iso(),
+            verification_fingerprints=verification_fingerprints,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return dict(self.__dict__)
+        data = dict(self.__dict__)
+        data["verification_fingerprints"] = list(self.verification_fingerprints)
+        return data
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> EvidenceReviewDecision:
-        return cls(**dict(data))
+        values = dict(data)
+        values["verification_fingerprints"] = tuple(
+            values.get("verification_fingerprints", ())
+        )
+        return cls(**values)
+
+    def applies_to(self, verification_fingerprints: tuple[str, ...]) -> bool:
+        return bool(self.verification_fingerprints) and (
+            self.verification_fingerprints
+            == tuple(sorted(set(verification_fingerprints)))
+        )
+
+
+def active_evidence_decisions(
+    verifications: list[ClaimVerification] | tuple[ClaimVerification, ...],
+    decisions: list[EvidenceReviewDecision] | tuple[EvidenceReviewDecision, ...],
+) -> dict[str, EvidenceReviewDecision]:
+    blocking_fingerprints: dict[str, list[str]] = {}
+    for verification in verifications:
+        if verification.blocking:
+            blocking_fingerprints.setdefault(verification.claim_id, []).append(
+                verification.fingerprint
+            )
+    active: dict[str, EvidenceReviewDecision] = {}
+    for decision in decisions:
+        fingerprints = tuple(blocking_fingerprints.get(decision.claim_id, ()))
+        if decision.applies_to(fingerprints):
+            active[decision.claim_id] = decision
+    return active
 
 
 __all__ = [
@@ -273,4 +322,5 @@ __all__ = [
     "ClaimVerification",
     "EvidenceReviewDecision",
     "VerificationStatus",
+    "active_evidence_decisions",
 ]

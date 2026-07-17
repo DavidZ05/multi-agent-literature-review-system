@@ -127,7 +127,7 @@ class APIWritingAgentTests(unittest.TestCase):
 
     def test_writer_api_rejects_unknown_citation(self) -> None:
         client = FakeClient(
-            [{"markdown": "Bad citation [fake2026paper].", "change_summary": "none"}]
+            [{"markdown": "Bad citation [fake_2026].", "change_summary": "none"}]
         )
         agent = WriterAgent(api_runtime(), api_client=client)
 

@@ -457,6 +457,15 @@ dialog::backdrop { background: rgba(23, 32, 51, .42); }
   line-height: 1.55;
 }
 .evidence-result small { color: var(--muted); font-size: 10px; }
+.evidence-history-note {
+  margin: 12px 0 0;
+  padding: 9px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
 #evidence-decision-form, #pdf-import-form { display: grid; gap: 8px; margin-top: 18px; }
 .survey-preview-dialog { width: min(900px, 88vw); }
 .survey-preview-dialog pre {

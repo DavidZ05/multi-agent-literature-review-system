@@ -273,6 +273,8 @@ acquiring_documents -> indexing_evidence -> drafting
 - arXiv abstract URLs are converted to official arXiv PDF URLs.
 - Other sources must expose an HTTPS PDF directly. HTML responses and files
   without a PDF signature are rejected.
+- PDF hosts and every redirect target are checked before download. Hostnames
+  resolving to localhost or non-public addresses are rejected.
 - PDFs are stored per run with SHA-256 checksums. `pdfplumber` extracts text by
   page, records extraction quality, and produces stable evidence chunks.
 - The polished survey is split into versioned atomic claims. Retrieval is
@@ -296,8 +298,10 @@ literature-review import-pdf RUN_ID CITATION_KEY /path/to/paper.pdf
 
 Import is bounded by the same PDF size limit as automatic acquisition. The
 file is parsed and indexed immediately, and the latest draft claims are
-reverified in place so the CLI and Workbench show the refreshed evidence state
-without retaining a stale `full_text_unavailable` result.
+reverified in place. Document and evidence manifests are refreshed so the CLI,
+Workbench, and audit export resolve the same current evidence chunks. When an
+already parsed PDF is replaced, its prior file and chunks are archived inside
+the run so earlier claim versions remain resolvable in later audit exports.
 
 Record a decision, then resume:
 
@@ -310,12 +314,17 @@ literature-review resume RUN_ID
 ```
 
 For an unavailable PDF only, `--action accept_risk` records a visible human
-exception. It cannot override other verification failures. A revision decision
-is written into the next Writer input and changes its checkpoint fingerprint,
-so the previous draft cannot be silently reused.
+exception. Each decision is bound to the exact verification fingerprints that
+the human reviewed. If a PDF or verification result changes, the old decision
+remains visible as history but no longer resolves the current gate. It cannot
+override other verification failures. A revision decision is written into the
+next Writer input and changes its checkpoint fingerprint, so the previous draft
+cannot be silently reused.
 
 Export a reproducible audit bundle containing the survey, artifacts, PDFs,
-events, claims, evidence decisions, and a file checksum manifest:
+events, discovery attempts, candidates, corpus decisions, documents, evidence
+chunks, claims, verification results, evidence decisions, and a file checksum
+manifest:
 
 ```bash
 literature-review export RUN_ID --output RUN_ID-audit.zip
@@ -400,7 +409,16 @@ only a compatibility wrapper for older module commands and imports.
 
 ## Anti-Hallucination Design
 
-The Writer can only cite keys present in the approved corpus. The Citation Auditor rejects unknown citation keys and checks lightweight metadata alignment. The Review Synthesizer feeds blocking findings back into Writer. Polish is followed by Final Verification, which rejects both added and removed citations. With `--full-text`, the polished survey is then checked against citation-scoped PDF passages and cannot complete with an unresolved blocking claim. A persistent run reaches `completed` only after its enabled quality gates accept it or an allowed full-text-unavailable risk is explicitly documented.
+The Writer can only cite keys present in the approved corpus. Corpus validation,
+Writer allowlists, the Citation Auditor, Final Verification, and claim extraction
+share one citation-key grammar. The Citation Auditor rejects unknown citation
+keys and checks lightweight metadata alignment. The Review Synthesizer feeds
+blocking findings back into Writer. Polish is followed by Final Verification,
+which rejects both added and removed citations. With `--full-text`, the polished
+survey is then checked against citation-scoped PDF passages and cannot complete
+with an unresolved blocking claim. A persistent run reaches `completed` only
+after its enabled quality gates accept it or an allowed full-text-unavailable
+risk is explicitly documented.
 
 ## Troubleshooting
 
@@ -411,7 +429,7 @@ The Writer can only cite keys present in the approved corpus. The Citation Audit
 - SSL errors: HTTP clients use `certifi` by default. If your environment overrides certificates, check `SSL_CERT_FILE` and local proxy settings.
 - Workbench will not open: run `literature-review ui --no-browser`, then open the printed loopback URL manually.
 - `awaiting_evidence_review`: inspect `literature-review evidence RUN_ID`, import missing PDFs or record claim decisions, then resume.
-- Poor PDF extraction: scanned PDFs may be marked `low_quality`; OCR is not included in v0.7.
+- Poor PDF extraction: scanned PDFs may be marked `low_quality`; OCR is not included in v0.7.1.
 
 ## Development
 

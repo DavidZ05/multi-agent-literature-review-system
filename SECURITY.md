@@ -8,7 +8,8 @@ Security fixes are accepted for the latest public version.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.3.x   | Yes       |
+| 0.7.x   | Yes       |
+| < 0.7   | No        |
 
 ## Reporting a Vulnerability
 
@@ -30,4 +31,7 @@ Useful reports include:
 
 ## Network Behavior
 
-The discovery providers use HTTPS and a trusted CA bundle. Provider errors should avoid leaking full query URLs or credentials in user-facing messages.
+The discovery providers use HTTPS and a trusted CA bundle. PDF acquisition
+validates DNS results and redirect targets before following them, and rejects
+localhost or non-public addresses. Provider errors should avoid leaking full
+query URLs or credentials in user-facing messages.

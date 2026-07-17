@@ -5,6 +5,7 @@ from typing import Any
 
 from src.literature_review.api import APIResponseError, load_prompt
 from src.literature_review.base import RuntimeAwareAgent
+from src.literature_review.citations import CITATION_PATTERN
 
 __all__ = [
     "ReviewerAgent",
@@ -18,7 +19,7 @@ __all__ = [
 class ReviewerAgent(RuntimeAwareAgent):
     """Checks citation integrity and basic report structure."""
 
-    citation_pattern = re.compile(r"\[([a-z][a-z0-9]+(?:[a-z0-9])?)\]")
+    citation_pattern = CITATION_PATTERN
     stopwords = {
         "a",
         "an",

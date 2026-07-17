@@ -100,6 +100,7 @@
       requireRevision: "Require revision", acceptRisk: "Accept unavailable-text risk",
       pdfPath: "Local PDF path", importPdf: "Import and index PDF", exportReady: "Audit ZIP created locally.",
       evidenceDecisionSaved: "Evidence decision saved.", pdfImported: "PDF imported and indexed.",
+      evidenceDecisionSuperseded: "A previous decision is retained in history but no longer applies because the evidence changed.",
       pending: "Pending", recommended: "Recommended", approved: "Approved", all: "All sources",
       rejected: "Rejected", deferred: "Deferred", include: "Include", review: "Review", exclude: "Exclude",
       waiting: "Waiting", active: "Active", paused: "Paused", retry_wait: "Retry wait",
@@ -230,6 +231,7 @@
       requireRevision: "要求修订", acceptRisk: "接受全文不可得风险",
       pdfPath: "本地 PDF 路径", importPdf: "导入并索引 PDF", exportReady: "审计 ZIP 已生成到本地。",
       evidenceDecisionSaved: "证据决定已保存。", pdfImported: "PDF 已导入并完成索引。",
+      evidenceDecisionSuperseded: "历史决定仍保留在审计记录中，但因证据已变化，不再适用于当前结果。",
       pending: "待处理", recommended: "推荐", approved: "已批准", all: "全部来源",
       rejected: "已拒绝", deferred: "暂缓", include: "纳入", review: "复核", exclude: "排除",
       waiting: "等待中", active: "运行中", paused: "已暂停", retry_wait: "等待重试",
@@ -1243,6 +1245,16 @@
       });
       container.append(section);
     });
+    if (
+      Array.isArray(claim.decision_history)
+      && claim.decision_history.length
+      && !claim.decision
+    ) {
+      const note = document.createElement("p");
+      note.className = "evidence-history-note";
+      note.textContent = t("evidenceDecisionSuperseded");
+      container.append(note);
+    }
     const gateOpen = Boolean(run && run.status === "waiting" && run.current_stage === "awaiting_evidence_review");
     const decisionForm = byId("evidence-decision-form");
     decisionForm.hidden = !claim.blocking || !gateOpen || Boolean(claim.decision);

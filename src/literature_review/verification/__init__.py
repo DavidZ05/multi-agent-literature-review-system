@@ -5,6 +5,7 @@ from src.literature_review.verification.models import (
     ClaimVerification,
     EvidenceReviewDecision,
     VerificationStatus,
+    active_evidence_decisions,
 )
 from src.literature_review.verification.retrieval import (
     CitationScopedRetriever,
@@ -22,4 +23,5 @@ __all__ = [
     "EvidenceReviewDecision",
     "RetrievalHit",
     "VerificationStatus",
+    "active_evidence_decisions",
 ]

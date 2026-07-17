@@ -19,7 +19,7 @@ from src.literature_review.corpus import load_papers
 from src.literature_review.discovery import ApprovalService
 from src.literature_review.documents.service import DocumentImportService
 from src.literature_review.exporting import export_audit_bundle
-from src.literature_review.models import CandidateStatus, WorkflowStage
+from src.literature_review.models import CandidateStatus, RunStatus, WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
 from src.literature_review.plugins import (
     AgentPluginError,
@@ -473,33 +473,47 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         if args.command == "evidence-decide":
-            run = store.get_run(args.run_id)
-            if run.current_stage != WorkflowStage.AWAITING_EVIDENCE_REVIEW:
-                raise ValueError("evidence decisions require the evidence review gate")
             if not args.reason.strip():
                 raise ValueError("decision reason must be nonblank")
-            claim_results = [
-                item
-                for item in store.list_claim_verifications(args.run_id)
-                if item.claim_id == args.claim_id and item.blocking
-            ]
-            if not claim_results:
-                raise ValueError("claim has no blocking verification result")
-            if args.action == "accept_risk" and any(
-                item.status != VerificationStatus.FULL_TEXT_UNAVAILABLE
-                for item in claim_results
-            ):
-                raise ValueError(
-                    "accept_risk is allowed only for unavailable full text"
+            activity = ActivityCoordinator.for_artifact_root(args.artifacts)
+            with activity.resume_execution(args.run_id):
+                run = store.get_run(args.run_id)
+                if (
+                    run.status != RunStatus.WAITING
+                    or run.current_stage
+                    != WorkflowStage.AWAITING_EVIDENCE_REVIEW
+                ):
+                    raise ValueError(
+                        "evidence decisions require the evidence review gate"
+                    )
+                claim_results = [
+                    item
+                    for item in store.list_claim_verifications(args.run_id)
+                    if item.claim_id == args.claim_id and item.blocking
+                ]
+                if not claim_results:
+                    raise ValueError(
+                        "claim has no blocking verification result"
+                    )
+                if args.action == "accept_risk" and any(
+                    item.status
+                    != VerificationStatus.FULL_TEXT_UNAVAILABLE
+                    for item in claim_results
+                ):
+                    raise ValueError(
+                        "accept_risk is allowed only for unavailable full text"
+                    )
+                decision = EvidenceReviewDecision.create(
+                    args.run_id,
+                    args.claim_id,
+                    args.action,
+                    args.reason.strip(),
+                    "human-cli",
+                    verification_fingerprints=tuple(
+                        item.fingerprint for item in claim_results
+                    ),
                 )
-            decision = EvidenceReviewDecision.create(
-                args.run_id,
-                args.claim_id,
-                args.action,
-                args.reason.strip(),
-                "human-cli",
-            )
-            store.put_evidence_review_decision(decision)
+                store.put_evidence_review_decision(decision)
             _print_json(decision.to_dict())
             return 0
         if args.command == "import-pdf":
@@ -539,36 +553,45 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         approval = ApprovalService(store)
         if args.command == "approve":
-            decision = approval.approve(
-                args.run_id,
-                args.candidate_id,
-                reason=args.reason,
-                category=args.category,
-                contribution=args.contribution,
-                tags=tuple(args.tags),
-            )
+            activity = ActivityCoordinator.for_artifact_root(args.artifacts)
+            with activity.resume_execution(args.run_id):
+                decision = approval.approve(
+                    args.run_id,
+                    args.candidate_id,
+                    reason=args.reason,
+                    category=args.category,
+                    contribution=args.contribution,
+                    tags=tuple(args.tags),
+                )
             _print_json(decision.to_dict())
             return 0
         if args.command in {"reject", "defer"}:
             method = approval.reject if args.command == "reject" else approval.defer
-            decision = method(
-                args.run_id,
-                args.candidate_id,
-                reason=args.reason,
-            )
+            activity = ActivityCoordinator.for_artifact_root(args.artifacts)
+            with activity.resume_execution(args.run_id):
+                decision = method(
+                    args.run_id,
+                    args.candidate_id,
+                    reason=args.reason,
+                )
             _print_json(decision.to_dict())
             return 0
         if args.command == "close-discovery":
-            pending = store.list_candidates(args.run_id, status=CandidateStatus.PENDING)
-            if pending:
-                _print_json(
-                    {
-                        "error": "approval_required",
-                        "pending_candidate_count": len(pending),
-                    },
-                    stream=sys.stderr,
+            activity = ActivityCoordinator.for_artifact_root(args.artifacts)
+            with activity.resume_execution(args.run_id):
+                pending = store.list_candidates(
+                    args.run_id,
+                    status=CandidateStatus.PENDING,
                 )
-                return 3
+                if pending:
+                    _print_json(
+                        {
+                            "error": "approval_required",
+                            "pending_candidate_count": len(pending),
+                        },
+                        stream=sys.stderr,
+                    )
+                    return 3
             _print_json({"run_id": args.run_id, "status": "ready_to_resume"})
             return 0
 

@@ -107,12 +107,17 @@ character offsets, and chunking configuration. Reprocessing unchanged input is
 stable, while changing the PDF or chunking policy changes the evidence identity.
 
 PDF acquisition is limited to HTTPS and validates the PDF signature. It does
-not bypass access controls. An unavailable document remains in the manifest so
+not bypass access controls. Before any content is read, the downloader validates
+the hostname's resolved addresses and every redirect target, rejecting localhost
+and non-public destinations. An unavailable document remains in the manifest so
 the final verifier emits `full_text_unavailable` instead of pretending the
 source was checked. A user may import a locally available PDF for the same
-citation key; import reads only up to the configured size limit, immediately
-parses and indexes it, and transactionally replaces the latest claim
-verification results using the same contracts.
+citation key; import runs under the per-run activity lock, reads only up to the
+configured size limit, immediately parses and indexes it, refreshes both
+evidence manifests, and replaces the latest claim verification results using
+the same contracts. If the citation already has a parsed document, the prior
+PDF metadata and chunks are archived before replacement so older claim
+verifications keep a resolvable evidence trail.
 
 ## Claim Verification Contract
 
@@ -131,21 +136,28 @@ statuses.
 
 All statuses except `supported` block automatic completion. Human
 `accept_risk` is valid only if every blocking result for that claim is
-`full_text_unavailable`. All other failures require revision. The gate writes
-claim feedback plus the human decision IDs into
+`full_text_unavailable`. A human decision records the exact blocking
+verification fingerprints it reviewed. If document content or verification
+output changes, the old decision remains append-only history but is no longer
+active for the gate. All other failures require revision. The gate writes claim
+feedback plus the active human decision IDs into
 `evidence/revision_feedback.json`. That control artifact is part of Drafting's
 input fingerprint, ensuring the next Writer run receives the feedback and an
 old checkpoint is not reused.
 
-Claims are versioned across revisions. The Workbench and active gate show the
-latest version; earlier claims, verification results, and decisions remain in
-SQLite and the audit export.
+Claims are versioned across actual survey revisions. Replaying claim
+verification for unchanged Markdown reuses the same version, so an interrupted
+stage does not invent a new draft. The Workbench and active gate show the latest
+version; earlier claims, verification results, and decisions remain in SQLite
+and the audit export.
 
 ## Audit Export
 
 The export command creates a deterministic ZIP with fixed entry metadata,
 sorted paths, run artifacts, source PDFs unless excluded, and
-`audit/manifest.json`. The manifest contains workflow events, document state,
-claims, verification results, human decisions, and SHA-256 hashes for every
-included artifact. This supports review and comparison without treating the ZIP
-as a new source of truth.
+`audit/manifest.json`. Export holds the per-run activity lock while taking the
+snapshot. The manifest contains workflow events, discovery attempts, candidate
+and corpus decisions, document state, evidence chunks, claims, verification
+results, human decisions, archived document history, and SHA-256 hashes for
+every included artifact. This supports review and comparison without treating
+the ZIP as a new source of truth.

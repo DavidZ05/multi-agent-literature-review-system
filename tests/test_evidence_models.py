@@ -15,6 +15,7 @@ from src.literature_review.verification import (
     ClaimVerification,
     EvidenceReviewDecision,
     VerificationStatus,
+    active_evidence_decisions,
 )
 
 
@@ -134,6 +135,7 @@ class EvidenceModelTests(unittest.TestCase):
                 "accept_risk",
                 "Human checked the source.",
                 "tester",
+                verification_fingerprints=(verification.fingerprint,),
             )
             store.put_evidence_review_decision(decision)
 
@@ -180,6 +182,48 @@ class EvidenceModelTests(unittest.TestCase):
         )
         self.assertEqual(unavailable.status, DocumentStatus.UNAVAILABLE)
         self.assertIsNone(unavailable.relative_path)
+
+    def test_legacy_decision_without_fingerprints_is_audit_only(self) -> None:
+        claim = AtomicClaim.create(
+            run_id=self.run.run_id,
+            draft_version=1,
+            text="Memory improved accuracy.",
+            claim_type=ClaimType.FACTUAL,
+            citation_keys=("paper2026",),
+            section="Results",
+            paragraph_index=1,
+            sentence_index=0,
+            requires_citation=True,
+        )
+        verification = ClaimVerification.create(
+            run_id=self.run.run_id,
+            claim_id=claim.claim_id,
+            citation_key="paper2026",
+            status=VerificationStatus.NOT_FOUND,
+            evidence_chunk_ids=(),
+            evidence_pages=(),
+            reason="No passage supports the claim.",
+            confidence=0.8,
+            verifier="deterministic",
+            blocking=True,
+            fingerprint="c" * 64,
+        )
+        legacy = EvidenceReviewDecision.from_dict(
+            {
+                "decision_id": "evidence_decision_" + "d" * 32,
+                "run_id": self.run.run_id,
+                "claim_id": claim.claim_id,
+                "action": "require_revision",
+                "reason": "Legacy review.",
+                "actor": "tester",
+                "created_at": self.run.created_at,
+            }
+        )
+
+        self.assertEqual(
+            active_evidence_decisions((verification,), (legacy,)),
+            {},
+        )
 
 
 if __name__ == "__main__":

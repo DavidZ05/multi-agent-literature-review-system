@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented here.
 
+## 0.7.1 - 2026-07-16
+
+### Fixed
+
+- Unified citation-key parsing and validation across Corpus, Writer, Citation
+  Auditor, Final Verification, and claim extraction. Citation keys containing
+  underscores or hyphens can no longer bypass the unknown-citation gate.
+- Bound human evidence decisions to the exact blocking verification
+  fingerprints they reviewed. PDF refreshes and verifier changes now preserve
+  old decisions as audit history while requiring a new decision for new
+  evidence.
+- Refreshed document and evidence manifests after local PDF import, and included
+  evidence chunks, discovery attempts, candidates, and corpus decisions directly
+  in audit manifests. Replaced parsed PDFs and their chunks are archived so
+  earlier claim versions remain resolvable.
+- Made repeated claim-verification execution idempotent for an unchanged survey
+  instead of creating a new draft version after an interrupted stage.
+- Restricted evidence decisions and local PDF imports to a run waiting at the
+  evidence gate, with the same per-run activity lock used by workflow execution.
+- Validated PDF host DNS results and every redirect target before following the
+  request, rejecting localhost and non-public addresses before content is read.
+
 ## 0.7.0 - 2026-07-15
 
 ### Added

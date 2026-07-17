@@ -175,6 +175,37 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(report["status"], "revise")
         self.assertEqual(report["unknown_citations"], ["fake2026paper"])
 
+    def test_reviewer_and_final_gate_detect_extended_unknown_keys(self) -> None:
+        papers = [
+            {
+                "citation_key": "packer2023memgpt",
+                "title": "MemGPT: Towards LLMs as Operating Systems",
+                "authors": ["Charles Packer"],
+                "year": 2023,
+                "venue": "arXiv",
+                "url": "https://arxiv.org/abs/2310.08560",
+                "category": "memory mechanism",
+                "contribution": "Introduces virtual context management.",
+                "evidence": "verified",
+                "tags": ["memory"],
+            }
+        ]
+        markdown = (
+            "## Abstract\n"
+            "A fabricated claim cites [unknown_key].\n\n"
+            "## Implications for Multi-Agent Literature Review Systems\n"
+            "Evidence remains traceable.\n\n"
+            "## References\n"
+        )
+
+        reviewer = ReviewerAgent().review(markdown, papers)
+        final = FinalVerificationReviewer().review(markdown, markdown, papers)
+
+        self.assertEqual(reviewer["unknown_citations"], ["unknown_key"])
+        self.assertEqual(reviewer["status"], "revise")
+        self.assertEqual(final["unknown_citations"], ["unknown_key"])
+        self.assertEqual(final["status"], "revise")
+
     def test_reviewer_flags_real_citation_when_claim_is_not_supported(self) -> None:
         papers = [
             {

@@ -8,6 +8,7 @@ from src.literature_review.providers.http import (
     ProviderRequestError,
     ProviderResponseTooLargeError,
     UrllibHttpTransport,
+    _ValidatingRedirectHandler,
 )
 
 
@@ -155,6 +156,37 @@ class UrllibHttpTransportTests(unittest.TestCase):
             "multi-agent-literature-review-system",
             request.get_header("User-agent"),
         )
+
+    def test_url_validator_runs_before_the_initial_request(self) -> None:
+        opener = FakeOpener([FakeResponse(b"ok")])
+
+        def reject(_url: str) -> None:
+            raise ValueError("unsafe URL")
+
+        transport = UrllibHttpTransport(
+            opener=opener,
+            url_validator=reject,
+        )
+
+        with self.assertRaisesRegex(ValueError, "unsafe URL"):
+            transport.get("https://127.0.0.1/private", {})
+
+        self.assertEqual(opener.calls, [])
+
+    def test_redirect_handler_validates_before_following_the_target(self) -> None:
+        handler = _ValidatingRedirectHandler(
+            lambda _url: (_ for _ in ()).throw(ValueError("unsafe redirect"))
+        )
+
+        with self.assertRaisesRegex(ValueError, "unsafe redirect"):
+            handler.redirect_request(
+                MagicMock(),
+                None,
+                302,
+                "Found",
+                {},
+                "https://127.0.0.1/private",
+            )
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import ipaddress
 import re
+import socket
 from typing import Mapping
 from urllib.parse import urlparse
 
@@ -62,6 +63,7 @@ class DocumentAcquirer:
             timeout_seconds=15,
             max_attempts=1,
             max_response_bytes=max_pdf_bytes,
+            url_validator=_validate_public_https_url,
         )
         self.max_pdf_bytes = max_pdf_bytes
 
@@ -208,6 +210,37 @@ def _reject_local_host(hostname: str) -> None:
             "document URL cannot target a non-public IP address",
             code="unsafe_url",
         )
+
+
+def _validate_public_https_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise DocumentAcquisitionError(
+            "document acquisition requires a public HTTPS URL",
+            code="unsafe_url",
+        )
+    _reject_local_host(parsed.hostname)
+    try:
+        addresses = {
+            item[4][0]
+            for item in socket.getaddrinfo(
+                parsed.hostname,
+                parsed.port or 443,
+                type=socket.SOCK_STREAM,
+            )
+        }
+    except socket.gaierror as exc:
+        raise DocumentAcquisitionError(
+            "document hostname could not be resolved",
+            code="dns_failed",
+        ) from exc
+    if not addresses:
+        raise DocumentAcquisitionError(
+            "document hostname did not resolve to an address",
+            code="dns_failed",
+        )
+    for address in addresses:
+        _reject_local_host(address)
 
 
 __all__ = [

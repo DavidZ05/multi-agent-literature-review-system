@@ -28,7 +28,7 @@ class PackagingTests(unittest.TestCase):
     def test_public_project_files_are_ready_for_distribution(self) -> None:
         required_files = {
             "LICENSE": "MIT License",
-            "CHANGELOG.md": "0.7.0",
+            "CHANGELOG.md": "0.7.1",
             "CONTRIBUTING.md": "Contributing",
             "SECURITY.md": "Security",
         }
