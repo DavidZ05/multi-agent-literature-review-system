@@ -1,5 +1,9 @@
 # Seed Corpus Review
 
+> Archive notice: this review records the seed corpus used for the original
+> course submission. Current runs may extend that corpus through the human
+> approval workflow described in the root `README.md`.
+
 This document records the additional seed-paper review performed before expanding `data/papers.json`.
 
 ## Inclusion Criteria

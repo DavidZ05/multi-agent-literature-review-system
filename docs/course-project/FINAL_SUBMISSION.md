@@ -1,5 +1,9 @@
 # Final Submission Guide
 
+> Archive notice: this document preserves the original course-submission state.
+> It is not maintained as the current product manual; see the root `README.md`
+> and `docs/workflow_design.md` for the latest workflow.
+
 ## Project
 
 **Memory-Augmented LLM Agents: Mechanisms, Evaluation, and Reliability in Multi-Agent Systems**

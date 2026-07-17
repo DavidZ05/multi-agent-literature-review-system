@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Changed
+
+- Split the Workbench application layer into focused run, discovery, evidence,
+  export, diagnostics, command, and presentation modules. The existing
+  `WorkbenchService` remains a compatibility facade with unchanged public
+  methods and response contracts.
+- Hardened model-agent prompts against instructions embedded in payload text,
+  required complete grounded Writer output, and made Polish preserve citation
+  keys and their claim association exactly.
+
+### Documentation
+
+- Expanded the local deployment threat model, secret handling, PDF/plugin risk,
+  and audit-export guidance in `SECURITY.md`.
+- Replaced the completed early implementation checklist with a v0.7.1 status
+  and compatibility-preserving roadmap.
+- Added a documentation map that separates maintained product documentation
+  from the course-project archive.
+- Reduced the root README to the primary user path and moved API configuration,
+  discovery operations, and full-text evidence details into maintained guides.
+- Documented the boundary between domain-neutral workflow infrastructure and
+  the bundled memory-agent deterministic review profile.
+
 ## 0.7.1 - 2026-07-16
 
 ### Fixed

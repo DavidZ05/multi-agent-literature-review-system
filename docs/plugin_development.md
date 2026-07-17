@@ -118,3 +118,9 @@ Plugins cannot disable human corpus approval, the citation auditor, final
 verification, checkpoint hashing, or the persistent quality gate. API-backed
 plugins should return the same structured artifacts as deterministic agents
 and must not store credentials in artifacts or public errors.
+
+The bundled protected review rubric is currently aligned with the
+memory-augmented LLM agent profile. Replacing Writer alone does not make the
+whole pipeline domain-general because protected Citation Auditor and Final
+Verification contracts still apply. Cross-domain support should use a future
+versioned ReviewProfile rather than weakening or bypassing protected roles.

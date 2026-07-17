@@ -114,6 +114,9 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("literature-review-workbench", readme)
         self.assertIn("literature-review plugins", readme)
         self.assertIn("docs/plugin_development.md", readme)
+        self.assertIn("docs/configuration.md", readme)
+        self.assertIn("docs/discovery.md", readme)
+        self.assertIn("docs/evidence_verification.md", readme)
         self.assertIn("AGENT_BACKEND=deterministic", readme)
         self.assertIn("AGENT_BACKEND=api", readme)
         self.assertIn("SEMANTIC_SCHOLAR_API_KEY", readme)
@@ -121,6 +124,23 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("SSL_CERT_FILE", readme)
         self.assertIn("docs/course-project/FINAL_SUBMISSION.md", readme)
         self.assertNotIn("Final Assignment Deliverables", readme)
+        self.assertLessEqual(len(readme.splitlines()), 320)
+
+    def test_maintained_guides_are_linked_from_the_documentation_map(self) -> None:
+        documentation_map = (ROOT / "docs" / "README.md").read_text(
+            encoding="utf-8"
+        )
+        for filename in (
+            "configuration.md",
+            "discovery.md",
+            "evidence_verification.md",
+            "workflow_design.md",
+            "plugin_development.md",
+            "implementation_plan.md",
+        ):
+            with self.subTest(filename=filename):
+                self.assertTrue((ROOT / "docs" / filename).is_file())
+                self.assertIn(filename, documentation_map)
 
     def test_course_project_material_is_archived(self) -> None:
         archive = ROOT / "docs" / "course-project"

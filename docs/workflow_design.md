@@ -4,6 +4,33 @@ This project is a local-first literature review workflow. The command line and
 Workbench UI use the same SQLite store, artifact store, approval service, and
 persistent workflow engine.
 
+## Review Profile Scope
+
+Discovery planning, persistence, approval, PDF processing, claim evidence, and
+audit export are domain-neutral infrastructure. The bundled deterministic
+Search handoff, Writer, Citation Auditor, Domain Expert, and structure rubric
+remain optimized for the memory-augmented LLM agent survey that originated this
+project. A different discovery topic does not by itself replace that synthesis
+profile.
+
+Runtime API-agent prompts are packaged under
+`src/literature_review/prompts/`. They treat payload text as untrusted research
+data and preserve the same structured result contracts. Search, Citation
+Auditor, and Final Verification are protected deterministic roles. A future
+`ReviewProfile` contract should supply topic, inclusion criteria, required
+sections, coverage rubric, and deterministic writing strategy together so the
+system can generalize domains without weakening its gates.
+
+## Workbench Service Boundaries
+
+`WorkbenchService` is a compatibility facade used by the HTTP server and CLI.
+It delegates run lifecycle and read models, discovery approval, evidence review,
+and audit export to focused application services. Runtime and discovery
+diagnostics are separate from response presentation, while shared command
+rendering keeps equivalent CLI output consistent across services. This split
+does not change HTTP payloads, public imports, activity locking, or artifact
+contracts.
+
 ## Discovery Gate
 
 Automatic discovery is intentionally not fully autonomous. arXiv and Semantic
@@ -150,6 +177,12 @@ verification for unchanged Markdown reuses the same version, so an interrupted
 stage does not invent a new draft. The Workbench and active gate show the latest
 version; earlier claims, verification results, and decisions remain in SQLite
 and the audit export.
+
+Polish is constrained to wording-only edits. Its runtime prompt requires the
+citation-key set and claim association to remain unchanged. Final Verification
+then enforces citation additions/removals and reruns claim-source alignment; if
+the polished output fails, the accepted pre-polish draft is retained
+automatically rather than sent to a human approval step.
 
 ## Audit Export
 

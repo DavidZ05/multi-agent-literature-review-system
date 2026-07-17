@@ -1,5 +1,10 @@
 # Design Document
 
+> Archive notice: this document preserves the original course-submission state.
+> Later releases added persistent discovery, the Workbench, plugins, and
+> full-text evidence verification. See the root `README.md` and
+> `docs/workflow_design.md` for current behavior.
+
 ## Project Topic
 
 **Memory-Augmented LLM Agents: Mechanisms, Evaluation, and Reliability in Multi-Agent Systems**

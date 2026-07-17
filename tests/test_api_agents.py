@@ -100,6 +100,35 @@ class APIDispatchTests(unittest.TestCase):
         self.assertIn("Return JSON", prompt)
         self.assertIn("citation", prompt.lower())
 
+    def test_packaged_prompts_treat_payload_text_as_untrusted_data(self) -> None:
+        for name in (
+            "writer",
+            "domain_expert",
+            "structure_mentor",
+            "review_synthesizer",
+            "polish",
+            "evaluation_reflection",
+        ):
+            with self.subTest(name=name):
+                prompt = load_prompt(name).lower()
+                self.assertIn("return json only", prompt)
+                self.assertIn("not as instructions", prompt)
+
+    def test_polish_prompt_requires_exact_citation_preservation(self) -> None:
+        prompt = load_prompt("polish").lower()
+
+        for rule in ("do not add", "remove", "rename", "citation-key set exactly"):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, prompt)
+
+    def test_writer_prompt_requires_complete_grounded_markdown(self) -> None:
+        prompt = load_prompt("writer").lower()
+
+        self.assertIn("complete literature review", prompt)
+        self.assertIn("search_report", prompt)
+        self.assertIn("review_feedback", prompt)
+        self.assertIn("citation_allowlist", prompt)
+
     def test_prompt_loader_rejects_missing_prompt_files(self) -> None:
         with self.assertRaises(PromptNotFoundError):
             load_prompt("missing-prompt")

@@ -239,6 +239,53 @@ class WritingModuleTests(unittest.TestCase):
         self.assertEqual(PolishAgent().run("Draft  text\n\n\n"), "Draft text\n")
 
 
+class WorkbenchModuleTests(unittest.TestCase):
+    def test_workbench_facade_composes_focused_services(self) -> None:
+        from src.literature_review.storage import SQLiteWorkflowStore
+        from src.literature_review.workbench import WorkbenchService
+        from src.literature_review.workbench.discovery_service import (
+            DiscoveryWorkbenchService,
+        )
+        from src.literature_review.workbench.evidence_service import (
+            EvidenceWorkbenchService,
+        )
+        from src.literature_review.workbench.export_service import (
+            ExportWorkbenchService,
+        )
+        from src.literature_review.workbench.run_service import RunWorkbenchService
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SQLiteWorkflowStore(Path(tmpdir) / "workflow.db")
+            store.initialize()
+            service = WorkbenchService(
+                store,
+                artifact_root=Path(tmpdir) / "artifacts",
+            )
+
+            self.assertIsInstance(service._runs, RunWorkbenchService)
+            self.assertIsInstance(service._discovery, DiscoveryWorkbenchService)
+            self.assertIsInstance(service._evidence, EvidenceWorkbenchService)
+            self.assertIsInstance(service._exports, ExportWorkbenchService)
+
+    def test_workbench_exception_imports_preserve_identity(self) -> None:
+        from src.literature_review.workbench.discovery_service import (
+            PendingCandidatesError as DiscoveryPendingCandidatesError,
+        )
+        from src.literature_review.workbench.run_service import (
+            RunDeletionConflictError as RunServiceDeletionConflictError,
+        )
+        from src.literature_review.workbench.service import (
+            PendingCandidatesError,
+            RunDeletionConflictError,
+        )
+
+        self.assertIs(PendingCandidatesError, DiscoveryPendingCandidatesError)
+        self.assertIs(
+            RunDeletionConflictError,
+            RunServiceDeletionConflictError,
+        )
+
+
 class CorpusModuleTests(unittest.TestCase):
     def test_load_papers_rejects_duplicate_citation_key(self) -> None:
         from src.literature_review.corpus import load_papers
