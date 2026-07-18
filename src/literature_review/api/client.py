@@ -6,7 +6,7 @@ import ssl
 import time
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPSHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 import certifi
 
@@ -17,8 +17,28 @@ from src.literature_review.api.errors import (
 )
 from src.literature_review.api.validation import parse_json_object, require_json_object
 from src.literature_review.config import AgentAPISettings
+from src.literature_review.version import VERSION
 
-USER_AGENT = "multi-agent-literature-review-system/0.3"
+USER_AGENT = f"multi-agent-literature-review-system/{VERSION}"
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        request: Request,
+        file_pointer: Any,
+        code: int,
+        message: str,
+        headers: Any,
+        new_url: str,
+    ) -> Request:
+        raise HTTPError(
+            request.full_url,
+            code,
+            "Model API redirects are not allowed.",
+            headers,
+            file_pointer,
+        )
 
 
 class OpenAIChatClient:
@@ -160,7 +180,7 @@ class OpenAIChatClient:
 
 def _default_opener() -> Any:
     context = ssl.create_default_context(cafile=certifi.where())
-    return build_opener(HTTPSHandler(context=context))
+    return build_opener(_RejectRedirects(), HTTPSHandler(context=context))
 
 
 def _chat_completions_url(base_url: str) -> str:

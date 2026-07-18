@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+import inspect
 import json
 from pathlib import Path
-from tempfile import TemporaryDirectory
+import re
 from typing import Any, Protocol
 
 from src.literature_review.api import APIClientError
@@ -300,12 +301,34 @@ class DraftingHandler:
         return self
 
     def __call__(self, context: StageContext) -> StageResult:
-        with TemporaryDirectory(prefix=f"{context.run.run_id}-") as temporary:
-            output_dir = Path(temporary)
+        attempt_id = _next_agent_attempt(context)
+        attempt_path = f"agent_runs/{attempt_id}"
+        output_dir = context.artifact_store.path_for(context.run.run_id, attempt_path)
+        output_dir.mkdir(parents=True, exist_ok=False)
+        context.artifact_store.write_json(
+            context.run.run_id,
+            f"{attempt_path}/manifest.json",
+            {
+                "attempt_id": attempt_id,
+                "status": "running",
+                "workflow_stage": WorkflowStage.DRAFTING.value,
+            },
+        )
+
+        def record_agent_event(stage: str, payload: dict[str, Any]) -> None:
+            context.workflow_store.append_event(
+                context.run.run_id,
+                "agent_stage_completed",
+                {**payload, "attempt_id": attempt_id, "agent_stage": stage},
+                WorkflowStage.DRAFTING,
+            )
+
+        try:
             corpus_path = context.corpus_path
             approved_path = "discovery/approved_corpus.json"
             if context.artifact_store.exists(context.run.run_id, approved_path):
-                corpus_path = output_dir / "approved_corpus.json"
+                corpus_path = output_dir / "inputs" / "approved_corpus.json"
+                corpus_path.parent.mkdir(parents=True, exist_ok=True)
                 corpus_path.write_text(
                     context.artifact_store.read_text(context.run.run_id, approved_path),
                     encoding="utf-8",
@@ -326,15 +349,30 @@ class DraftingHandler:
                 kwargs["api_client"] = self.api_client
             if self.agent_factory is not None:
                 kwargs["agent_factory"] = self.agent_factory
+            if _accepts_keyword(self.orchestrator_factory, "event_callback"):
+                kwargs["event_callback"] = record_agent_event
             orchestrator = self.orchestrator_factory(**kwargs)
-            try:
-                orchestrator_result = orchestrator.run()
-            except APIClientError as exc:
+            orchestrator_result = orchestrator.run()
+        except BaseException as exc:
+            context.artifact_store.write_json(
+                context.run.run_id,
+                f"{attempt_path}/manifest.json",
+                {
+                    "attempt_id": attempt_id,
+                    "status": "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
+                    "workflow_stage": WorkflowStage.DRAFTING.value,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            if isinstance(exc, APIClientError):
                 if exc.retryable:
                     raise RetryableStageError(
                         _api_error_message(exc, retryable=True)
                     ) from exc
                 raise RuntimeError(_api_error_message(exc, retryable=False)) from exc
+            raise
+
+        try:
             artifacts: dict[str, Any] = {}
             for filename in self._JSON_ARTIFACTS:
                 artifacts[f"final/{filename}"] = json.loads(
@@ -344,29 +382,60 @@ class DraftingHandler:
                 artifacts[f"final/{filename}"] = (output_dir / filename).read_text(
                     encoding="utf-8"
                 )
+        except BaseException as exc:
+            context.artifact_store.write_json(
+                context.run.run_id,
+                f"{attempt_path}/manifest.json",
+                {
+                    "attempt_id": attempt_id,
+                    "status": "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
+                    "workflow_stage": WorkflowStage.DRAFTING.value,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise
 
-            if orchestrator_result.get("status") != "accepted":
-                for relative_path, content in artifacts.items():
-                    diagnostic_path = relative_path.replace(
-                        "final/",
-                        "quality_gate/",
-                        1,
-                    )
-                    if isinstance(content, str):
-                        context.artifact_store.write_text(
-                            context.run.run_id,
-                            diagnostic_path,
-                            content,
-                        )
-                    else:
-                        context.artifact_store.write_json(
-                            context.run.run_id,
-                            diagnostic_path,
-                            content,
-                        )
-                raise QualityGateRejectedError(
-                    "orchestrator review quality gate was not accepted"
+        if orchestrator_result.get("status") != "accepted":
+            context.artifact_store.write_json(
+                context.run.run_id,
+                f"{attempt_path}/manifest.json",
+                {
+                    "attempt_id": attempt_id,
+                    "status": "quality_rejected",
+                    "workflow_stage": WorkflowStage.DRAFTING.value,
+                },
+            )
+            for relative_path, content in artifacts.items():
+                diagnostic_path = relative_path.replace(
+                    "final/",
+                    "quality_gate/",
+                    1,
                 )
+                if isinstance(content, str):
+                    context.artifact_store.write_text(
+                        context.run.run_id,
+                        diagnostic_path,
+                        content,
+                    )
+                else:
+                    context.artifact_store.write_json(
+                        context.run.run_id,
+                        diagnostic_path,
+                        content,
+                    )
+            raise QualityGateRejectedError(
+                "orchestrator review quality gate was not accepted"
+            )
+
+        context.artifact_store.write_json(
+            context.run.run_id,
+            f"{attempt_path}/manifest.json",
+            {
+                "attempt_id": attempt_id,
+                "status": "completed",
+                "workflow_stage": WorkflowStage.DRAFTING.value,
+            },
+        )
 
         return StageResult(
             next_stage=(
@@ -376,6 +445,28 @@ class DraftingHandler:
             ),
             output_artifacts=artifacts,
         )
+
+
+def _next_agent_attempt(context: StageContext) -> str:
+    run_root = context.artifact_store.path_for(context.run.run_id, "agent_runs")
+    existing = []
+    if run_root.is_dir():
+        for child in run_root.iterdir():
+            match = re.fullmatch(r"attempt_(\d{3,})", child.name)
+            if child.is_dir() and match:
+                existing.append(int(match.group(1)))
+    return f"attempt_{max(existing, default=0) + 1:03d}"
+
+
+def _accepts_keyword(factory: OrchestratorFactory, name: str) -> bool:
+    try:
+        signature = inspect.signature(factory)
+    except (TypeError, ValueError):
+        return False
+    return name in signature.parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
 
 
 class ClaimVerificationHandler:

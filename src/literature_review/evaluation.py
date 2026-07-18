@@ -41,7 +41,12 @@ class EvaluationReflectionAgent(RuntimeAwareAgent):
                     "next_run_improvements",
                 ),
             }
-        citation_score = 5.0 if not final_verification["unknown_citations"] else 2.0
+        citation_score = (
+            5.0
+            if not final_verification["unknown_citations"]
+            and not final_verification.get("missing_citations", [])
+            else 2.0
+        )
         support_score = 5.0 if not final_verification["unsupported_claims"] else 3.0
         process_score = 5.0 if len(revision_log) <= 2 else 4.0
         coverage_score = 5.0 if search_report["records_included"] >= 10 else 3.0

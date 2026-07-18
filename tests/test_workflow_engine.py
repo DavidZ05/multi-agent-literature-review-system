@@ -839,6 +839,27 @@ class DurableHandlerTests(unittest.TestCase):
                 self.artifacts.exists(completed.run_id, relative_path),
                 relative_path,
             )
+        self.assertEqual(
+            self.artifacts.read_json(
+                completed.run_id,
+                "agent_runs/attempt_001/manifest.json",
+            )["status"],
+            "completed",
+        )
+        self.assertTrue(
+            self.artifacts.exists(
+                completed.run_id,
+                "agent_runs/attempt_001/intermediate/iterations/iteration_001/"
+                "writer_draft.md",
+            )
+        )
+        agent_events = [
+            event
+            for event in self.store.list_events(completed.run_id)
+            if event.event_type == "agent_stage_completed"
+        ]
+        self.assertTrue(agent_events)
+        self.assertEqual(agent_events[0].payload["agent_stage"], "search")
 
     def test_retryable_api_failure_enters_retry_wait_without_secret_leak(self) -> None:
         write_sample_corpus(self.corpus_path)
@@ -879,6 +900,12 @@ class DurableHandlerTests(unittest.TestCase):
         )
         self.assertNotIn("secret-key", json.dumps(dict(retry_events[0].payload)))
         self.assertEqual(client.calls[0][0].agent_id, "writer")
+        manifest = self.artifacts.read_json(
+            run.run_id,
+            "agent_runs/attempt_001/manifest.json",
+        )
+        self.assertEqual(manifest["status"], "failed")
+        self.assertNotIn("secret-key", json.dumps(manifest))
 
     def test_permanent_api_failure_is_failed_and_sanitized(self) -> None:
         write_sample_corpus(self.corpus_path)

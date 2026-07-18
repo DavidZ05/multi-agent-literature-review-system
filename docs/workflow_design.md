@@ -180,9 +180,26 @@ and the audit export.
 
 Polish is constrained to wording-only edits. Its runtime prompt requires the
 citation-key set and claim association to remain unchanged. Final Verification
-then enforces citation additions/removals and reruns claim-source alignment; if
-the polished output fails, the accepted pre-polish draft is retained
-automatically rather than sent to a human approval step.
+then compares citation occurrence order and context, exact headings and
+reference entries, and high-risk uncited factual claims before rerunning
+claim-source alignment. If the polished output fails, the accepted pre-polish
+draft is retained automatically rather than sent to a human approval step.
+
+## Agent Execution Journal
+
+Each Drafting execution writes an append-only journal under
+`agent_runs/attempt_NNN/`. It contains a sanitized attempt manifest, an approved
+corpus input snapshot, and per-iteration Search, Writer, Expert Panel, review,
+revision, Polish, Final Verification, and Evaluation artifacts. Corresponding
+`agent_stage_completed` events make the orchestration sequence visible in
+SQLite and audit exports. Failed and interrupted attempts remain available for
+diagnosis instead of disappearing with a temporary directory.
+
+The durable workflow checkpoint remains the complete Drafting stage in v0.7.2.
+The journal is audit history, not a set of independently reusable Agent
+checkpoints: resuming an interrupted attempt reruns Drafting from the last valid
+workflow checkpoint. Independent Agent-level resume requires versioned input
+fingerprints and output hashes for every sub-stage and remains roadmap work.
 
 ## Audit Export
 

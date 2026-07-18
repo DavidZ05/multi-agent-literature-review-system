@@ -175,6 +175,53 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(report["status"], "revise")
         self.assertEqual(report["unknown_citations"], ["fake2026paper"])
 
+    def test_reviewer_blocks_high_risk_factual_claim_without_citation(self) -> None:
+        markdown = (
+            "## Abstract\n"
+            "The method improves accuracy by 97 percent.\n\n"
+            "## Implications for Multi-Agent Literature Review Systems\n"
+            "Evidence remains traceable.\n\n"
+            "## References\n"
+        )
+
+        report = ReviewerAgent().review(markdown, [])
+
+        self.assertEqual(report["status"], "revise")
+        self.assertEqual(
+            report["missing_citations"][0]["sentence"],
+            "The method improves accuracy by 97 percent.",
+        )
+
+    def test_reviewer_checks_uncited_facts_in_lists_and_tables(self) -> None:
+        markdown = (
+            "## Abstract\n"
+            "- The benchmark reports a 12 percent gain.\n\n"
+            "| Method | Result |\n"
+            "| --- | --- |\n"
+            "| Proposed system | Achieved 91 percent accuracy. |\n\n"
+            "## Implications for Multi-Agent Literature Review Systems\n"
+            "Evidence remains traceable.\n\n"
+            "## References\n"
+        )
+
+        report = ReviewerAgent().review(markdown, [])
+
+        self.assertEqual(report["status"], "revise")
+        self.assertEqual(len(report["missing_citations"]), 2)
+
+    def test_deterministic_writer_applies_panel_missing_citation_feedback(self) -> None:
+        papers = load_papers(Path("data/papers.json"))
+        search_report = SearchAgent().run(papers)
+        writer = WriterAgent()
+        first = writer.run(search_report)
+        audit = ReviewerAgent().review(first, papers)
+        target = audit["missing_citations"][0]["sentence"]
+
+        revised = writer.run(search_report, review_feedback=audit)
+
+        self.assertNotEqual(first, revised)
+        self.assertNotIn(target, revised)
+
     def test_reviewer_and_final_gate_detect_extended_unknown_keys(self) -> None:
         papers = [
             {
@@ -231,6 +278,34 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(report["unknown_citations"], [])
         self.assertEqual(len(report["unsupported_claims"]), 1)
         self.assertIn("MemoryAgentBench", report["unsupported_claims"][0]["sentence"])
+
+    def test_reviewer_aligns_cited_claims_inside_lists_and_tables(self) -> None:
+        papers = [
+            {
+                "citation_key": "packer2023memgpt",
+                "title": "MemGPT: Towards LLMs as Operating Systems",
+                "authors": ["Charles Packer"],
+                "year": 2023,
+                "venue": "arXiv",
+                "url": "https://arxiv.org/abs/2310.08560",
+                "category": "memory mechanism",
+                "contribution": "Introduces virtual context management.",
+                "evidence": "verified",
+                "tags": ["memory", "virtual context"],
+            }
+        ]
+        markdown = (
+            "- The paper introduced an unrelated medical benchmark "
+            "[packer2023memgpt].\n"
+            "| Claim | Source |\n"
+            "| --- | --- |\n"
+            "| It reports protein folding results | [packer2023memgpt] |\n"
+        )
+
+        report = ReviewerAgent().review(markdown, papers)
+
+        self.assertEqual(report["status"], "revise")
+        self.assertEqual(len(report["unsupported_claims"]), 2)
 
     def test_orchestrator_passes_reviewer_feedback_back_to_writer(self) -> None:
         class FeedbackAwareWriter:
@@ -378,6 +453,59 @@ class PipelineTests(unittest.TestCase):
             ["packer2023memgpt"],
         )
         self.assertIn("removed citations", " ".join(report["recommendations"]))
+
+    def test_final_verification_rejects_uncited_fact_added_by_polish(self) -> None:
+        accepted = (
+            "## Abstract\n"
+            "A scoped review.\n\n"
+            "## Implications for Multi-Agent Literature Review Systems\n"
+            "Evidence remains traceable.\n\n"
+            "## References\n"
+        )
+        polished = accepted.replace(
+            "A scoped review.",
+            "A scoped review. The method improves accuracy by 97 percent.",
+        )
+
+        report = FinalVerificationReviewer().review(accepted, polished, [])
+
+        self.assertEqual(report["status"], "revise")
+        self.assertEqual(len(report["missing_citations"]), 1)
+
+    def test_final_verification_rejects_reference_or_citation_context_drift(self) -> None:
+        papers = [
+            {
+                "citation_key": "packer2023memgpt",
+                "title": "MemGPT: Towards LLMs as Operating Systems",
+                "authors": ["Charles Packer"],
+                "year": 2023,
+                "venue": "arXiv",
+                "url": "https://arxiv.org/abs/2310.08560",
+                "category": "memory mechanism",
+                "contribution": "Introduces virtual context management.",
+                "evidence": "verified",
+                "tags": ["virtual context"],
+            }
+        ]
+        accepted = (
+            "## Abstract\n"
+            "Virtual context management supports agent memory [packer2023memgpt].\n\n"
+            "## Implications for Multi-Agent Literature Review Systems\n"
+            "Evidence remains traceable.\n\n"
+            "## References\n"
+            "- [packer2023memgpt] Packer. MemGPT.\n"
+        )
+        polished = accepted.replace(
+            "Virtual context management supports agent memory [packer2023memgpt].",
+            "Virtual context management supports agent memory.\n"
+            "An unrelated deployment statement [packer2023memgpt].",
+        ).replace("Packer. MemGPT.", "Packer. Renamed reference.")
+
+        report = FinalVerificationReviewer().review(accepted, polished, papers)
+
+        self.assertEqual(report["status"], "revise")
+        self.assertTrue(report["citation_context_drift"])
+        self.assertTrue(report["references_changed"])
 
     def test_runtime_config_defaults_to_deterministic_without_env(self) -> None:
         config = AgentRuntimeConfig.from_env({})

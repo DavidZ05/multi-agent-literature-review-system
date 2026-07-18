@@ -193,13 +193,16 @@ rules, fingerprint-bound approvals, PDF replacement history, and audit contents.
 
 - Only human-approved corpus records become Writer-visible.
 - Writer citations must belong to the approved allowlist.
-- Citation Auditor checks unknown keys, required structure, and lightweight
-  metadata alignment.
-- Reviewer feedback returns to Writer and changes the next checkpoint input.
-- Polish may not add, remove, rename, or repurpose citations.
-- Final Verification automatically rejects citation drift and retains the
-  accepted pre-polish draft.
+- Citation Auditor checks unknown keys, high-risk facts without citations,
+  required structure, and lightweight metadata alignment.
+- Reviewer feedback returns to Writer; deterministic and API Writers consume the
+  same blocking claim fields, and an unchanged revision is marked stalled.
+- Polish is prompted to make wording-only changes. Final Verification rejects
+  citation count, order, context, heading, reference, or high-risk factual drift
+  and retains the accepted pre-polish draft.
 - Optional full-text verification blocks unresolved claim-evidence failures.
+- Each Drafting attempt keeps versioned drafts, panel reports, and Agent events
+  under `agent_runs/attempt_NNN/` for interruption-safe auditing.
 
 These controls make evidence use inspectable; they do not replace expert reading
 or guarantee scientific correctness. See [Workflow Design](docs/workflow_design.md)

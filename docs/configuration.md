@@ -70,7 +70,8 @@ protected deterministic roles.
 Remote API base URLs must use HTTPS. Loopback endpoints such as
 `http://127.0.0.1:11434/v1` are allowed for local OpenAI-compatible servers.
 Temperatures must be between `0.0` and `2.0`; timeouts must be between `1` and
-`600` seconds.
+`600` seconds. Model API redirects are rejected so authenticated requests are
+not forwarded to another location; configure the final endpoint directly.
 
 ## Literature Provider Credentials
 

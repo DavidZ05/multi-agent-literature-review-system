@@ -12,8 +12,8 @@ Security fixes are accepted for the latest public version.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.7.1   | Yes       |
-| <= 0.7.0 | No       |
+| 0.7.2   | Yes       |
+| <= 0.7.1 | No       |
 
 ## Intended Deployment
 
@@ -24,10 +24,12 @@ forwarding, or a container configuration that publishes it beyond the local
 machine.
 
 Workbench mutations require a per-process token injected into the served page.
-The server also checks browser origins, applies a restrictive Content Security
-Policy, denies framing, disables response caching, and limits JSON request-body
-size. These controls reduce local browser attacks; they do not provide user
-accounts, authorization between users, or protection for a public deployment.
+Every request must also carry a loopback `Host` header matching the active
+server, and mutations check browser origins and a per-process token. The server
+applies a restrictive Content Security Policy, denies framing, disables response
+caching, and limits JSON request-body size. These controls reduce DNS-rebinding
+and local browser attacks; they do not provide user accounts, authorization
+between users, or protection for a public deployment.
 
 ## Reporting a Vulnerability
 
@@ -57,6 +59,11 @@ accepts HTTPS only, validates DNS results and redirect targets before following
 them, rejects localhost or non-public addresses, applies a size limit, and
 requires a PDF signature. Provider errors avoid exposing credentials in
 user-facing messages.
+
+Model API calls reject redirects instead of forwarding authenticated requests
+to a different location. Configure `AGENT_API_BASE_URL` and per-agent overrides
+with the provider's final HTTPS endpoint. Loopback HTTP endpoints remain allowed
+only for explicitly configured local OpenAI-compatible servers.
 
 These checks are defense in depth, not a hardened network sandbox. Do not use
 the downloader as a general-purpose fetch proxy or process attacker-controlled

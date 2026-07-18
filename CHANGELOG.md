@@ -4,8 +4,27 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## 0.7.2 - 2026-07-18
+
+### Fixed
+
+- Blocked high-risk factual claims that contain quantitative or explicit
+  research-result language but no approved citation, including claims introduced
+  by Writer or Polish when full-text verification is disabled.
+- Made Final Verification compare citation occurrence order, citation context,
+  headings, and reference entries in addition to citation-key membership.
+- Normalized Expert Panel and full-text evidence feedback for the deterministic
+  Writer, and record a stalled revision instead of repeating an unchanged draft.
+- Rejected model API redirects so an Authorization header cannot be forwarded to
+  another origin.
+- Required every Workbench request to use a loopback Host matching the local
+  server, closing the read-side DNS-rebinding gap.
+
 ### Changed
 
+- Persist each Drafting execution under `agent_runs/attempt_NNN/`, including
+  versioned Writer drafts, per-iteration expert reports, a sanitized attempt
+  manifest, and SQLite `agent_stage_completed` events.
 - Split the Workbench application layer into focused run, discovery, evidence,
   export, diagnostics, command, and presentation modules. The existing
   `WorkbenchService` remains a compatibility facade with unchanged public
@@ -18,7 +37,7 @@ All notable changes to this project are documented here.
 
 - Expanded the local deployment threat model, secret handling, PDF/plugin risk,
   and audit-export guidance in `SECURITY.md`.
-- Replaced the completed early implementation checklist with a v0.7.1 status
+- Replaced the completed early implementation checklist with a v0.7.2 status
   and compatibility-preserving roadmap.
 - Added a documentation map that separates maintained product documentation
   from the course-project archive.

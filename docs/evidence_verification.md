@@ -76,4 +76,4 @@ The deterministic verifier is conservative. `supported` means a
 citation-scoped passage contains the material terms of the claim; it is not a
 guarantee of expert scientific correctness. Central conclusions still require
 reading the cited pages. Scanned PDFs may be marked `low_quality`; OCR is not
-included in v0.7.1.
+included in v0.7.2.

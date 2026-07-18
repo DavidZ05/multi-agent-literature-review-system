@@ -335,6 +335,25 @@ class WorkbenchHTTPTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "invalid_request")
 
+    def test_all_routes_reject_foreign_or_ambiguous_host_headers(self) -> None:
+        status, _, payload = self.request(
+            "GET",
+            "/api/runs",
+            headers={"Host": "attacker.example"},
+        )
+
+        self.assertEqual(status, 421)
+        self.assertEqual(payload["error"]["code"], "misdirected_request")
+
+        status, _, payload = self.raw_post(
+            (
+                "Host: attacker.example",
+                "Content-Length: 2",
+            )
+        )
+        self.assertEqual(status, 421)
+        self.assertEqual(payload["error"]["code"], "misdirected_request")
+
         status, _, payload = self.request("GET", "/api/jobs?status=finished")
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "invalid_request")

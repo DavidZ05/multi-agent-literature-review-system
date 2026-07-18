@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from src.literature_review.config import AgentRuntimeConfig
 from src.literature_review.corpus import load_papers
@@ -22,6 +22,7 @@ class Orchestrator:
         api_client: Any | None = None,
         agent_factory: AgentFactory | None = None,
         initial_review_feedback: dict[str, Any] | None = None,
+        event_callback: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self.corpus_path = corpus_path
         self.output_dir = output_dir
@@ -30,6 +31,7 @@ class Orchestrator:
         self.api_client = api_client
         self.agent_factory = agent_factory or build_agent_factory()
         self.initial_review_feedback = initial_review_feedback
+        self.event_callback = event_callback
         create = self.agent_factory.create
         self.search_agent = create("search", self.runtime_config, api_client)
         self.writer_agent = create("writer", self.runtime_config, api_client)
@@ -64,17 +66,23 @@ class Orchestrator:
         )
         search_report = self.search_agent.run(papers)
         self._write_json(intermediate_dir / "search_report.json", search_report)
+        self._emit("search", {"records_included": search_report["records_included"]})
 
         draft = ""
         review_report: dict[str, Any] = {}
         revision_log = []
         review_feedback: dict[str, Any] | None = self.initial_review_feedback
+        previous_draft: str | None = None
         for attempt in range(max_revision_loops + 1):
             draft = self._run_writer(search_report, review_feedback)
             (intermediate_dir / f"writer_draft_v{attempt + 1}.md").write_text(
                 draft,
                 encoding="utf-8",
             )
+            iteration_dir = intermediate_dir / "iterations" / f"iteration_{attempt + 1:03d}"
+            iteration_dir.mkdir(parents=True, exist_ok=True)
+            (iteration_dir / "writer_draft.md").write_text(draft, encoding="utf-8")
+            self._emit("writer", {"iteration": attempt + 1})
 
             citation_audit = self.reviewer_agent.review(draft, papers)
             domain_review = self.domain_expert_agent.review(
@@ -91,6 +99,14 @@ class Orchestrator:
                 intermediate_dir / "structure_review.json", structure_review
             )
             self._write_json(intermediate_dir / "revision_plan.json", revision_plan)
+            self._write_json(iteration_dir / "citation_audit.json", citation_audit)
+            self._write_json(iteration_dir / "domain_review.json", domain_review)
+            self._write_json(iteration_dir / "structure_review.json", structure_review)
+            self._write_json(iteration_dir / "revision_plan.json", revision_plan)
+            self._emit(
+                "expert_review_panel",
+                {"iteration": attempt + 1, "status": revision_plan["status"]},
+            )
 
             review_report = {
                 "agent": "Expert Review Panel",
@@ -102,6 +118,7 @@ class Orchestrator:
                 },
                 "revision_plan": revision_plan,
                 "unknown_citations": citation_audit["unknown_citations"],
+                "missing_citations": citation_audit["missing_citations"],
                 "unsupported_claims": citation_audit["unsupported_claims"],
                 "missing_sections": citation_audit["missing_sections"],
             }
@@ -110,14 +127,25 @@ class Orchestrator:
                     "iteration": attempt + 1,
                     "status": review_report["status"],
                     "unknown_citations": review_report["unknown_citations"],
+                    "missing_citation_count": len(
+                        review_report["missing_citations"]
+                    ),
                     "unsupported_claim_count": len(review_report["unsupported_claims"]),
                     "missing_sections": review_report["missing_sections"],
                     "blocking_agents": revision_plan["blocking_agents"],
                 }
             )
             if review_report["status"] == "accepted":
+                self._emit("review_accepted", {"iteration": attempt + 1})
                 break
+            if previous_draft is not None and draft == previous_draft:
+                review_report["revision_stalled"] = True
+                revision_log[-1]["revision_stalled"] = True
+                self._emit("revision_stalled", {"iteration": attempt + 1})
+                break
+            previous_draft = draft
             review_feedback = review_report
+            self._emit("revision_requested", {"iteration": attempt + 1})
 
         (intermediate_dir / "writer_draft.md").write_text(draft, encoding="utf-8")
         self._write_json(self.output_dir / "review_report.json", review_report)
@@ -127,6 +155,7 @@ class Orchestrator:
 
         if review_report["status"] == "accepted":
             final = self.polish_agent.run(draft)
+            self._emit("polish", {})
         else:
             final = draft
 
@@ -147,6 +176,13 @@ class Orchestrator:
         else:
             final_verification = polish_verification
             final_verification["final_action"] = "polish_output_accepted"
+        self._emit(
+            "final_verification",
+            {
+                "status": final_verification["status"],
+                "final_action": final_verification["final_action"],
+            },
+        )
 
         self._write_json(
             self.output_dir / "final_verification.json", final_verification
@@ -158,6 +194,7 @@ class Orchestrator:
             revision_log,
         )
         self._write_json(self.output_dir / "evaluation_report.json", evaluation_report)
+        self._emit("evaluation_reflection", {})
         (self.output_dir / "reflection_log.md").write_text(
             self.evaluation_reflection_agent.to_markdown(evaluation_report),
             encoding="utf-8",
@@ -179,6 +216,10 @@ class Orchestrator:
 
     def _write_json(self, path: Path, data: dict[str, Any]) -> None:
         path.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
+
+    def _emit(self, stage: str, payload: dict[str, Any]) -> None:
+        if self.event_callback is not None:
+            self.event_callback(stage, payload)
 
     def _run_writer(
         self,

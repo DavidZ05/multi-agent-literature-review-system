@@ -1,6 +1,6 @@
 # Development Status and Roadmap
 
-This document describes the maintained product as of v0.7.1. The original
+This document describes the maintained product as of v0.7.2. The original
 course submission is archived under `docs/course-project/`.
 
 ## Implemented
@@ -20,6 +20,9 @@ course submission is archived under `docs/course-project/`.
   with protected citation and final-verification roles.
 - Citation-key validation, Writer feedback loops, post-polish verification, and
   opt-in citation-scoped PDF evidence verification.
+- Append-only Agent execution journals with per-attempt manifests, versioned
+  Writer drafts, expert reports, and SQLite stage events that survive failure or
+  interruption.
 - Versioned claims, fingerprint-bound human evidence decisions, historical PDF
   evidence retention, and deterministic audit ZIP export.
 - macOS/Linux packaging and CI across Python 3.11 and 3.12.
@@ -30,18 +33,22 @@ course submission is archived under `docs/course-project/`.
    required sections, domain rubric, and deterministic writing strategy. Keep
    the current memory-agent profile as the default and add a topic-general
    profile only after its citation and quality behavior has regression tests.
-2. Continue the compatibility-preserving modularization with
+2. Promote the Agent execution journal into independently resumable Agent
+   checkpoints. In v0.7.2 the journal survives interruption, but an interrupted
+   Drafting attempt restarts the complete Drafting stage from its last workflow
+   checkpoint.
+3. Continue the compatibility-preserving modularization with
    `storage/sqlite.py`, followed by `workbench/server.py` and `cli.py`. Keep thin
    facades at existing import paths and do not change public commands, artifacts,
    database behavior, or plugin contracts.
-3. Add a model-backed semantic claim verifier behind the existing verification
+4. Add a model-backed semantic claim verifier behind the existing verification
    result contract. It must remain citation-scoped and cannot bypass blocking
    statuses or human review.
-4. Add optional OCR for scanned or low-quality PDFs, recording the OCR engine,
+5. Add optional OCR for scanned or low-quality PDFs, recording the OCR engine,
    version, and derived-text provenance in document artifacts.
-5. Improve evidence review with side-by-side PDF page viewing and passage-level
+6. Improve evidence review with side-by-side PDF page viewing and passage-level
    navigation in the Workbench.
-6. Add Windows-compatible activity locking after preserving the current
+7. Add Windows-compatible activity locking after preserving the current
    interruption and concurrency semantics in platform-neutral tests.
 
 ## Compatibility Rules

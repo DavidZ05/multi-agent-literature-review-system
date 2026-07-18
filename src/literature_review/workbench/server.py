@@ -126,11 +126,25 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
             }
         )
 
+    @property
+    def allowed_hosts(self) -> frozenset[str]:
+        port = self.server_address[1]
+        return frozenset(
+            {
+                "127.0.0.1",
+                "localhost",
+                f"127.0.0.1:{port}",
+                f"localhost:{port}",
+            }
+        )
+
 
 class WorkbenchRequestHandler(BaseHTTPRequestHandler):
     server: WorkbenchHTTPServer
 
     def do_GET(self) -> None:
+        if not self._require_allowed_host():
+            return
         request_path = urlsplit(self.path).path
         if request_path in _STATIC_ASSETS:
             self._serve_static(request_path)
@@ -140,24 +154,38 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         self._handle(self._dispatch_get)
 
     def do_POST(self) -> None:
+        if not self._require_allowed_host():
+            return
         self._handle(self._dispatch_post)
 
     def do_DELETE(self) -> None:
+        if not self._require_allowed_host():
+            return
         self._handle(self._dispatch_delete)
 
     def do_HEAD(self) -> None:
+        if not self._require_allowed_host(include_body=False):
+            return
         self._send_not_found(include_body=False)
 
     def do_OPTIONS(self) -> None:
+        if not self._require_allowed_host():
+            return
         self._send_not_found()
 
     def do_PATCH(self) -> None:
+        if not self._require_allowed_host():
+            return
         self._send_not_found()
 
     def do_PUT(self) -> None:
+        if not self._require_allowed_host():
+            return
         self._send_not_found()
 
     def do_TRACE(self) -> None:
+        if not self._require_allowed_host():
+            return
         self._send_not_found()
 
     def send_error(
@@ -470,6 +498,22 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
             self.server.allowed_origins
         ):
             raise _APIError(403, "forbidden", "Mutation access was denied.")
+
+    def _require_allowed_host(self, *, include_body: bool = True) -> bool:
+        hosts = self.headers.get_all("Host", [])
+        if (
+            len(hosts) == 1
+            and hosts[0].isascii()
+            and hosts[0].strip().lower() in self.server.allowed_hosts
+        ):
+            return True
+        self._send_error(
+            421,
+            "misdirected_request",
+            "The request Host is not accepted by this local Workbench.",
+            include_body=include_body,
+        )
+        return False
 
     @staticmethod
     def _normalize_origin(origin: str) -> str | None:

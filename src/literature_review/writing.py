@@ -410,8 +410,13 @@ class WriterAgent(RuntimeAwareAgent):
         if not isinstance(review_feedback, dict):
             return draft
         issues = review_feedback.get("issues", [])
-        if not isinstance(issues, list):
-            return draft
+        issues = list(issues) if isinstance(issues, list) else []
+        for unsupported in review_feedback.get("unsupported_claims", []):
+            if isinstance(unsupported, dict):
+                issues.append({"claim": unsupported.get("sentence")})
+        for missing in review_feedback.get("missing_citations", []):
+            if isinstance(missing, dict):
+                issues.append({"claim": missing.get("sentence")})
         revised = draft
         table_keys: set[str] = set()
         for issue in issues:

@@ -20,6 +20,14 @@ class ReviewerAgent(RuntimeAwareAgent):
     """Checks citation integrity and basic report structure."""
 
     citation_pattern = CITATION_PATTERN
+    high_risk_factual_pattern = re.compile(
+        r"(?:\b\d+(?:\.\d+)?%?\b|\b(?:shows?|showed|reports?|reported|"
+        r"introduces?|introduced|proposes?|proposed|evaluates?|evaluated|"
+        r"improves?|improved|reduces?|reduced|increases?|increased|"
+        r"decreases?|decreased|demonstrates?|demonstrated|finds?|found|"
+        r"outperforms?|outperformed|achieves?|achieved)\b)",
+        re.IGNORECASE,
+    )
     stopwords = {
         "a",
         "an",
@@ -56,6 +64,7 @@ class ReviewerAgent(RuntimeAwareAgent):
         papers_by_key = {paper["citation_key"]: paper for paper in papers}
         cited_keys = sorted(set(self.citation_pattern.findall(markdown)))
         unknown = [key for key in cited_keys if key not in valid_keys]
+        missing_citations = self._find_missing_citations(markdown)
         unsupported_claims = self._find_unsupported_claims(markdown, papers_by_key)
         required_markers = [
             "## Abstract",
@@ -69,7 +78,10 @@ class ReviewerAgent(RuntimeAwareAgent):
         ]
         status = (
             "accepted"
-            if not unknown and not missing_sections and not unsupported_claims
+            if not unknown
+            and not missing_citations
+            and not missing_sections
+            and not unsupported_claims
             else "revise"
         )
         return {
@@ -78,10 +90,12 @@ class ReviewerAgent(RuntimeAwareAgent):
             "status": status,
             "cited_keys": cited_keys,
             "unknown_citations": unknown,
+            "missing_citations": missing_citations,
             "unsupported_claims": unsupported_claims,
             "missing_sections": missing_sections,
             "recommendations": self._recommendations(
                 unknown,
+                missing_citations,
                 missing_sections,
                 unsupported_claims,
             ),
@@ -90,12 +104,17 @@ class ReviewerAgent(RuntimeAwareAgent):
     def _recommendations(
         self,
         unknown: list[str],
+        missing_citations: list[dict[str, str]],
         missing: list[str],
         unsupported_claims: list[dict[str, Any]],
     ) -> list[str]:
         recommendations = []
         if unknown:
             recommendations.append("Remove or replace citations not present in data/papers.json.")
+        if missing_citations:
+            recommendations.append(
+                "Add approved citations to high-risk factual claims or remove those claims."
+            )
         if missing:
             recommendations.append("Restore required survey sections before final polish.")
         if unsupported_claims:
@@ -105,6 +124,27 @@ class ReviewerAgent(RuntimeAwareAgent):
         if not recommendations:
             recommendations.append("No blocking citation or structure issues found.")
         return recommendations
+
+    def _find_missing_citations(self, markdown: str) -> list[dict[str, str]]:
+        body = markdown.split("## References", 1)[0]
+        section = "Preamble"
+        missing: list[dict[str, str]] = []
+        for raw_line in body.splitlines():
+            stripped = raw_line.strip()
+            if stripped.startswith("#"):
+                section = stripped.lstrip("#").strip() or section
+                continue
+            if not stripped or set(stripped) <= {"-", "|", ":", " "}:
+                continue
+            for sentence in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9`*])", stripped):
+                sentence = sentence.strip()
+                if (
+                    sentence
+                    and not self.citation_pattern.search(sentence)
+                    and self.high_risk_factual_pattern.search(sentence)
+                ):
+                    missing.append({"sentence": sentence, "section": section})
+        return missing
 
     def _find_unsupported_claims(
         self,
@@ -173,7 +213,7 @@ class ReviewerAgent(RuntimeAwareAgent):
             stripped = line.strip()
             if not stripped:
                 continue
-            if stripped.startswith(("#", "|", "-", "*")):
+            if stripped.startswith("#") or set(stripped) <= {"-", "|", ":", " "}:
                 continue
             if not self.citation_pattern.search(stripped):
                 continue
@@ -376,13 +416,31 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
         polished_markdown: str,
         papers: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        before = sorted(set(self.citation_pattern.findall(accepted_draft)))
-        after = sorted(set(self.citation_pattern.findall(polished_markdown)))
+        before_sequence = self.citation_pattern.findall(accepted_draft)
+        after_sequence = self.citation_pattern.findall(polished_markdown)
+        before = sorted(set(before_sequence))
+        after = sorted(set(after_sequence))
         new_citations = sorted(set(after) - set(before))
         removed_citations = sorted(set(before) - set(after))
+        citation_sequence_changed = before_sequence != after_sequence
+        citation_context_drift = _citation_context_drift(
+            accepted_draft,
+            polished_markdown,
+            self.citation_pattern,
+        )
+        headings_changed = _headings(accepted_draft) != _headings(polished_markdown)
+        references_changed = _reference_entries(accepted_draft) != _reference_entries(
+            polished_markdown
+        )
         citation_audit = ReviewerAgent(self.runtime_config).review(polished_markdown, papers)
         status = "accepted"
-        if new_citations or removed_citations or citation_audit["status"] != "accepted":
+        if (
+            citation_sequence_changed
+            or citation_context_drift
+            or headings_changed
+            or references_changed
+            or citation_audit["status"] != "accepted"
+        ):
             status = "revise"
         return {
             "agent": "Final Verification Reviewer",
@@ -392,12 +450,21 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
             "citations_after_polish": after,
             "new_citations_after_polish": new_citations,
             "removed_citations_after_polish": removed_citations,
+            "citation_sequence_changed": citation_sequence_changed,
+            "citation_context_drift": citation_context_drift,
+            "headings_changed": headings_changed,
+            "references_changed": references_changed,
             "unknown_citations": citation_audit["unknown_citations"],
+            "missing_citations": citation_audit["missing_citations"],
             "unsupported_claims": citation_audit["unsupported_claims"],
             "missing_sections": citation_audit["missing_sections"],
             "recommendations": self._recommendations(
                 new_citations,
                 removed_citations,
+                citation_sequence_changed,
+                citation_context_drift,
+                headings_changed,
+                references_changed,
                 citation_audit,
             ),
         }
@@ -406,6 +473,10 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
         self,
         new_citations: list[str],
         removed_citations: list[str],
+        citation_sequence_changed: bool,
+        citation_context_drift: list[dict[str, Any]],
+        headings_changed: bool,
+        references_changed: bool,
         citation_audit: dict[str, Any],
     ) -> list[str]:
         recommendations = []
@@ -415,10 +486,88 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
             recommendations.append(
                 "Reject polish output or re-run Writer review; polish removed citations."
             )
-        recommendations.extend(citation_audit.get("recommendations", []))
+        if citation_sequence_changed and not (new_citations or removed_citations):
+            recommendations.append(
+                "Reject polish output; citation occurrence count or order changed."
+            )
+        if citation_context_drift:
+            recommendations.append(
+                "Reject polish output; one or more citations moved away from their accepted claim context."
+            )
+        if headings_changed:
+            recommendations.append("Reject polish output; the accepted heading structure changed.")
+        if references_changed:
+            recommendations.append("Reject polish output; reference entries changed.")
+        audit_recommendations = citation_audit.get("recommendations", [])
+        if recommendations:
+            audit_recommendations = [
+                recommendation
+                for recommendation in audit_recommendations
+                if recommendation != "No blocking citation or structure issues found."
+            ]
+        recommendations.extend(audit_recommendations)
         if not recommendations:
-            recommendations.append("Final polish preserved the accepted citation set.")
+            recommendations.append(
+                "Final polish preserved accepted structure, references, and citation context."
+            )
         return recommendations
+
+
+def _headings(markdown: str) -> list[str]:
+    return [line.strip() for line in markdown.splitlines() if line.lstrip().startswith("#")]
+
+
+def _reference_entries(markdown: str) -> list[str]:
+    if "## References" not in markdown:
+        return []
+    references = markdown.split("## References", 1)[1]
+    return [line.strip() for line in references.splitlines() if line.strip()]
+
+
+def _citation_context_drift(
+    before_markdown: str,
+    after_markdown: str,
+    pattern: re.Pattern[str],
+) -> list[dict[str, Any]]:
+    before = _citation_contexts(before_markdown, pattern)
+    after = _citation_contexts(after_markdown, pattern)
+    if [item[0] for item in before] != [item[0] for item in after]:
+        return []
+    drift = []
+    for index, ((key, old_context), (_, new_context)) in enumerate(zip(before, after)):
+        old_tokens = _context_tokens(old_context, pattern)
+        new_tokens = _context_tokens(new_context, pattern)
+        union = old_tokens | new_tokens
+        similarity = 1.0 if not union else len(old_tokens & new_tokens) / len(union)
+        if similarity < 0.35:
+            drift.append(
+                {
+                    "occurrence": index + 1,
+                    "citation_key": key,
+                    "similarity": round(similarity, 3),
+                }
+            )
+    return drift
+
+
+def _citation_contexts(
+    markdown: str,
+    pattern: re.Pattern[str],
+) -> list[tuple[str, str]]:
+    contexts = []
+    for line in markdown.splitlines():
+        for key in pattern.findall(line):
+            contexts.append((key, line.strip()))
+    return contexts
+
+
+def _context_tokens(text: str, pattern: re.Pattern[str]) -> set[str]:
+    without_citations = pattern.sub("", text.lower())
+    return {
+        token
+        for token in re.findall(r"[a-z][a-z0-9-]*", without_citations)
+        if len(token) >= 3
+    }
 
 
 def _status(response: dict[str, Any]) -> str:

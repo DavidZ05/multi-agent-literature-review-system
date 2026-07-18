@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import io
 import json
+from email.message import Message
 import socket
 import unittest
 from urllib.error import HTTPError, URLError
+from urllib.request import Request
 
 from src.literature_review.config import AgentAPISettings
 from src.literature_review.api import (
@@ -12,6 +14,7 @@ from src.literature_review.api import (
     APIResponseError,
     OpenAIChatClient,
 )
+from src.literature_review.api.client import _RejectRedirects, _default_opener
 
 
 class FakeResponse:
@@ -76,6 +79,33 @@ def http_error(status: int, body: bytes = b"secret-key raw failure") -> HTTPErro
 
 
 class OpenAIChatClientTests(unittest.TestCase):
+    def test_default_opener_installs_only_the_rejecting_redirect_handler(self) -> None:
+        redirect_handlers = [
+            handler
+            for handler in _default_opener().handlers
+            if isinstance(handler, _RejectRedirects)
+        ]
+
+        self.assertEqual(len(redirect_handlers), 1)
+
+    def test_redirect_handler_rejects_before_authorization_can_be_forwarded(self) -> None:
+        request = Request(
+            "https://api.example.test/v1/chat/completions",
+            data=b"{}",
+            headers={"Authorization": "Bearer secret"},
+            method="POST",
+        )
+
+        with self.assertRaises(HTTPError):
+            _RejectRedirects().redirect_request(
+                request,
+                None,
+                302,
+                "Found",
+                Message(),
+                "https://collector.example.test/capture",
+            )
+
     def test_posts_openai_compatible_chat_request_and_parses_json_object(self) -> None:
         opener = FakeOpener([chat_response('{"summary":"ok","score":1}')])
         client = OpenAIChatClient(opener=opener, max_attempts=1)
