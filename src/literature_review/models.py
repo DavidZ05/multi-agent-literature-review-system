@@ -62,6 +62,7 @@ class WorkflowStage(str, Enum):
     FINAL_VERIFICATION = "final_verification"
     CLAIM_VERIFICATION = "claim_verification"
     AWAITING_EVIDENCE_REVIEW = "awaiting_evidence_review"
+    EVALUATING = "evaluating"
     COMPLETED = "completed"
 
 

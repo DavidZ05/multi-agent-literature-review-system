@@ -109,6 +109,7 @@ class RuntimeDiagnostics:
             "indexing_evidence": "evidence_indexing",
             "claim_verification": "claim_verification",
             "awaiting_evidence_review": "human_evidence_review",
+            "evaluating": "evaluation_reflection",
             "completed": "completed",
         }
         if stage in {

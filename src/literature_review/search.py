@@ -13,6 +13,8 @@ __all__ = ["SearchAgent"]
 class SearchAgent(RuntimeAwareAgent):
     """Selects and groups papers from the verified corpus."""
 
+    supports_api = False
+
     def run(self, papers: list[dict[str, Any]]) -> dict[str, Any]:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for paper in papers:

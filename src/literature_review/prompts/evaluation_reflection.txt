@@ -8,4 +8,4 @@ Required object fields:
 - reflections: array of strings.
 - next_run_improvements: array of strings.
 
-Every score must be numeric from 0.0 to 5.0. Base scores and reflections only on the supplied artifacts, distinguish verified facts from process observations, and do not claim full-text verification unless the artifacts show it. The final acceptance status is controlled by deterministic final verification; do not override it.
+Every score must be numeric from 0.0 to 5.0. Base scores and reflections only on the supplied artifacts, distinguish verified facts from process observations, and do not claim full-text verification unless evidence_context shows it. When evidence_context is present, use its claim-verification and human-review outcomes when scoring claim_source_alignment. The final acceptance status is controlled by deterministic gates; do not override it.

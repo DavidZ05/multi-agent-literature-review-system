@@ -120,11 +120,21 @@ class PersistentWorkflowEngine:
         )
         self.workflow_store.initialize()
 
-    def start(self, topic: str, corpus_path: Path) -> ResearchRun:
+    def start(
+        self,
+        topic: str,
+        corpus_path: Path,
+        *,
+        run: ResearchRun | None = None,
+    ) -> ResearchRun:
         resolved_corpus = Path(corpus_path).resolve()
         if not resolved_corpus.is_file():
             raise FileNotFoundError(resolved_corpus)
-        run = ResearchRun.create(topic)
+        run = ResearchRun.create(topic) if run is None else run
+        if run.topic != topic.strip():
+            raise ValueError("prepared run topic does not match start topic")
+        if run.status != RunStatus.ACTIVE or run.current_stage != WorkflowStage.CREATED:
+            raise ValueError("prepared run must be active at the created stage")
         with self.activity.start_execution():
             with self.activity.resume_execution(run.run_id):
                 return self._start(run, resolved_corpus)
@@ -393,9 +403,15 @@ class PersistentWorkflowEngine:
         next_stage: WorkflowStage,
     ) -> ResearchRun:
         require_transition(run.current_stage, next_stage)
+        evidence_revision_requested = (
+            run.current_stage == WorkflowStage.AWAITING_EVIDENCE_REVIEW
+            and next_stage == WorkflowStage.DRAFTING
+        )
         advanced = replace(
             run,
             current_stage=next_stage,
+            # Writer's inner loop is counted separately in revision_log.json.
+            revision_count=run.revision_count + int(evidence_revision_requested),
             updated_at=utc_now_iso(),
         )
         if not self.workflow_store.compare_and_update_run(
@@ -404,13 +420,16 @@ class PersistentWorkflowEngine:
             expected_stage=run.current_stage,
         ):
             return self.workflow_store.get_run(run.run_id)
+        transition_payload: dict[str, object] = {
+            "from_stage": run.current_stage.value,
+            "to_stage": next_stage.value,
+        }
+        if evidence_revision_requested:
+            transition_payload["revision_count"] = advanced.revision_count
         self.workflow_store.append_event(
             run.run_id,
             "stage_transition",
-            {
-                "from_stage": run.current_stage.value,
-                "to_stage": next_stage.value,
-            },
+            transition_payload,
             next_stage,
         )
         if next_stage == WorkflowStage.COMPLETED:

@@ -92,6 +92,24 @@ Reflective memory improved evaluation accuracy [memorypaper]. It reduced repeate
         self.assertEqual(claims[0].citation_keys, ("memorypaper",))
         self.assertEqual(claims[1].citation_keys, ("memorypaper",))
 
+    def test_table_rows_do_not_inherit_citations_from_other_rows(self) -> None:
+        claims = ClaimExtractor().extract(
+            self.run.run_id,
+            """## Results
+| Finding | Source |
+|---|---|
+| Memory improved accuracy | [memorypaper] |
+| Latency increased | [otherpaper] |
+""",
+            draft_version=1,
+        )
+
+        evidence_claims = [claim for claim in claims if claim.citation_keys]
+        self.assertEqual(
+            [claim.citation_keys for claim in evidence_claims],
+            [("memorypaper",), ("otherpaper",)],
+        )
+
     def test_verifier_supports_grounded_claim_and_blocks_missing_citation(self) -> None:
         claims = ClaimExtractor().extract(
             self.run.run_id,

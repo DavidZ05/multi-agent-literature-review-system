@@ -19,6 +19,7 @@ __all__ = [
 class ReviewerAgent(RuntimeAwareAgent):
     """Checks citation integrity and basic report structure."""
 
+    supports_api = False
     citation_pattern = CITATION_PATTERN
     high_risk_factual_pattern = re.compile(
         r"(?:\b\d+(?:\.\d+)?%?\b|\b(?:shows?|showed|reports?|reported|"
@@ -355,17 +356,27 @@ class ReviewSynthesizerAgent(RuntimeAwareAgent):
             model_must_fix = _string_list(response, "must_fix")
             model_should_fix = _string_list(response, "should_fix")
             model_blocking_agents = _string_list(response, "blocking_agents")
+            model_status = _status(response)
+            if model_status == "revise" and not (blocking_reviews or model_must_fix):
+                raise _invalid_output("must_fix")
+            revision_required = bool(blocking_reviews) or model_status == "revise"
             blocking_agents = _dedupe(
                 [review["agent"] for review in blocking_reviews]
-                + model_blocking_agents
+                + (model_blocking_agents if revision_required else [])
+            )
+            synthesized_must_fix = must_fix + (
+                model_must_fix if revision_required else []
+            )
+            synthesized_should_fix = should_fix + model_should_fix + (
+                model_must_fix if not revision_required else []
             )
             return {
                 "agent": "Review Synthesizer Agent",
                 "backend": self.backend_note(),
-                "status": "revise" if blocking_reviews else _status(response),
+                "status": "revise" if revision_required else "accepted",
                 "blocking_agents": blocking_agents,
-                "must_fix": _dedupe(must_fix + model_must_fix),
-                "should_fix": _dedupe(should_fix + model_should_fix),
+                "must_fix": _dedupe(synthesized_must_fix),
+                "should_fix": _dedupe(synthesized_should_fix),
                 "iteration_stop_rule": _string_field(
                     response,
                     "iteration_stop_rule",
@@ -408,6 +419,7 @@ class ReviewSynthesizerAgent(RuntimeAwareAgent):
 class FinalVerificationReviewer(RuntimeAwareAgent):
     """Checks that polish did not introduce new citation or evidence risks."""
 
+    supports_api = False
     citation_pattern = ReviewerAgent.citation_pattern
 
     def review(

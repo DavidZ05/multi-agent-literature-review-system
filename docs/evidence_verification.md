@@ -17,7 +17,8 @@ corpus before document acquisition.
 
 ```text
 acquiring_documents -> indexing_evidence -> drafting
--> claim_verification -> completed | awaiting_evidence_review
+-> claim_verification -> evaluating -> completed
+                     \-> awaiting_evidence_review -> drafting | evaluating
 ```
 
 The downloader accepts HTTPS PDFs, validates public DNS and every redirect,
@@ -60,6 +61,12 @@ literature-review resume RUN_ID
 missing citation, contradiction, partial support, or evidence-not-found result.
 Every decision is bound to the exact verification fingerprints reviewed; a PDF
 or verifier change leaves the old decision in history but makes it inactive.
+Returning a run to Drafting increments its durable `revision_count` exactly once;
+restarting or resuming the same checkpoint does not inflate the audit count.
+Final evaluation is deferred until this gate accepts the evidence state. Runs
+waiting for evidence decisions therefore have no stable final evaluation report;
+after acceptance, the report records the claim-verification and human-review
+outcome used for scoring.
 
 ## Audit Export
 

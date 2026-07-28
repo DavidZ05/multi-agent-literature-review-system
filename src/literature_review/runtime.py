@@ -38,6 +38,7 @@ from src.literature_review.workflow import (
     DraftingHandler,
     EvidenceIndexingHandler,
     EvidenceReviewGateHandler,
+    EvaluationHandler,
     PersistentWorkflowEngine,
     PlanningHandler,
     ScreeningHandler,
@@ -126,6 +127,11 @@ def build_engine(
                 WorkflowStage.INDEXING_EVIDENCE: EvidenceIndexingHandler(),
                 WorkflowStage.CLAIM_VERIFICATION: ClaimVerificationHandler(),
                 WorkflowStage.AWAITING_EVIDENCE_REVIEW: EvidenceReviewGateHandler(),
+                WorkflowStage.EVALUATING: EvaluationHandler(
+                    runtime_config,
+                    api_client=api_client,
+                    agent_factory=agent_factory,
+                ),
             }
         )
     return PersistentWorkflowEngine(

@@ -48,16 +48,17 @@ ALLOWED_TRANSITIONS: dict[WorkflowStage, frozenset[WorkflowStage]] = {
     WorkflowStage.CLAIM_VERIFICATION: frozenset(
         {
             WorkflowStage.AWAITING_EVIDENCE_REVIEW,
-            WorkflowStage.COMPLETED,
+            WorkflowStage.EVALUATING,
         }
     ),
     WorkflowStage.AWAITING_EVIDENCE_REVIEW: frozenset(
         {
             WorkflowStage.DRAFTING,
             WorkflowStage.CLAIM_VERIFICATION,
-            WorkflowStage.COMPLETED,
+            WorkflowStage.EVALUATING,
         }
     ),
+    WorkflowStage.EVALUATING: frozenset({WorkflowStage.COMPLETED}),
     WorkflowStage.COMPLETED: frozenset(),
 }
 

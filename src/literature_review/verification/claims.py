@@ -74,10 +74,14 @@ class ClaimExtractor:
                 flush()
                 continue
             if line.startswith("|") and line.endswith("|"):
+                flush()
                 if re.fullmatch(r"\|?[\s|:-]+\|?", line):
                     continue
                 cells = [cell.strip() for cell in line.strip("|").split("|")]
-                buffer.append("; ".join(cell for cell in cells if cell))
+                row = " ".join(cell for cell in cells if cell)
+                if row:
+                    paragraphs.append((section, row))
+                    paragraph_index += 1
                 continue
             if line.startswith(("- ", "* ")):
                 flush()

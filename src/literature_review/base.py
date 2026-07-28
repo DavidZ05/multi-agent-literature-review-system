@@ -14,6 +14,8 @@ class AgentBackendError(RuntimeError):
 class RuntimeAwareAgent:
     """Common base for agents that may later swap deterministic logic for API calls."""
 
+    supports_api = True
+
     def __init__(
         self,
         runtime_config: AgentRuntimeConfig | None = None,
@@ -25,6 +27,8 @@ class RuntimeAwareAgent:
         self.agent_id = self._agent_id_from_class_name()
 
     def backend_note(self) -> str:
+        if not self.supports_api:
+            return "deterministic"
         return self.runtime_config.for_agent(self.agent_id).active_backend
 
     def call_api(
@@ -34,6 +38,10 @@ class RuntimeAwareAgent:
     ) -> dict[str, Any]:
         if not isinstance(user_payload, dict):
             raise TypeError("API user payload must be a JSON object")
+        if not self.supports_api:
+            raise AgentBackendError(
+                f"{self.agent_id} is a protected deterministic agent"
+            )
         settings = self.runtime_config.for_agent(self.agent_id)
         if settings.active_backend != "api":
             raise AgentBackendError(

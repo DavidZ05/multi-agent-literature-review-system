@@ -381,7 +381,7 @@ class WorkbenchHTTPTests(unittest.TestCase):
         self.assertEqual(status, 202)
         self.assertEqual(
             set(start),
-            {"job_id", "kind", "status", "equivalent_command"},
+            {"job_id", "kind", "status", "run_id", "equivalent_command"},
         )
         tracked_start = self.manager.get_job(start["job_id"])
         for key, value in start.items():

@@ -211,6 +211,20 @@ class PersistentWorkflowEngineTests(unittest.TestCase):
             ],
         )
 
+    def test_start_uses_a_prepared_run_identity(self) -> None:
+        planning = RecordingHandler(WorkflowStage.DRAFTING, "checkpoints/plan.json")
+        drafting = RecordingHandler(WorkflowStage.COMPLETED, "final/survey.json")
+        prepared = ResearchRun.create("Memory agents")
+
+        completed = self._engine(planning, drafting).start(
+            "Memory agents",
+            self.corpus_path,
+            run=prepared,
+        )
+
+        self.assertEqual(completed.run_id, prepared.run_id)
+        self.assertEqual(self.store.get_run(prepared.run_id).status, RunStatus.COMPLETED)
+
     def test_start_reserves_generated_run_before_making_it_visible(self) -> None:
         entered = threading.Event()
         release = threading.Event()
@@ -677,14 +691,20 @@ class FakeOrchestrator:
         (self.output_dir / "survey.md").write_text(
             "# Durable survey\n", encoding="utf-8"
         )
-        for filename in (
-            "review_report.json",
-            "final_verification.json",
-            "evaluation_report.json",
-            "revision_log.json",
-        ):
+        payloads = {
+            "search_report.json": {"records_included": 1},
+            "review_report.json": {"status": "accepted"},
+            "final_verification.json": {
+                "status": "accepted",
+                "unknown_citations": [],
+                "unsupported_claims": [],
+            },
+            "evaluation_report.json": {"status": "accepted"},
+            "revision_log.json": {"iterations": [{"iteration": 1}]},
+        }
+        for filename, payload in payloads.items():
             (self.output_dir / filename).write_text(
-                json.dumps({"status": "accepted"}),
+                json.dumps(payload),
                 encoding="utf-8",
             )
         (self.output_dir / "reflection_log.md").write_text(
@@ -768,6 +788,7 @@ class DurableHandlerTests(unittest.TestCase):
             set(result.output_artifacts),
             {
                 "final/survey.md",
+                "final/search_report.json",
                 "final/review_report.json",
                 "final/final_verification.json",
                 "final/evaluation_report.json",
@@ -829,6 +850,7 @@ class DurableHandlerTests(unittest.TestCase):
         self.assertEqual(completed.status, RunStatus.COMPLETED)
         for relative_path in (
             "final/survey.md",
+            "final/search_report.json",
             "final/review_report.json",
             "final/final_verification.json",
             "final/evaluation_report.json",

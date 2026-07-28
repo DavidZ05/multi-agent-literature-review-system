@@ -177,7 +177,8 @@ literature-review start \
 
 The workflow acquires or imports PDFs, extracts page-aware chunks, splits the
 final survey into atomic claims, and retrieves evidence only from each claim's
-own citation key. Unsupported results wait for human evidence review.
+own citation key. Unsupported results wait for human evidence review. Final
+evaluation runs only after this evidence gate accepts or records allowed risk.
 
 ```bash
 literature-review documents RUN_ID
@@ -201,6 +202,8 @@ rules, fingerprint-bound approvals, PDF replacement history, and audit contents.
   citation count, order, context, heading, reference, or high-risk factual drift
   and retains the accepted pre-polish draft.
 - Optional full-text verification blocks unresolved claim-evidence failures.
+- Full-text Evaluation runs after claim verification and includes the final
+  evidence decision; it is not emitted while human evidence review is pending.
 - Each Drafting attempt keeps versioned drafts, panel reports, and Agent events
   under `agent_runs/attempt_NNN/` for interruption-safe auditing.
 

@@ -17,7 +17,10 @@ class EvaluationReflectionAgent(RuntimeAwareAgent):
         review_report: dict[str, Any],
         final_verification: dict[str, Any],
         revision_log: list[dict[str, Any]],
+        evidence_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        writer_iteration_count = len(revision_log)
+        writer_revision_count = max(0, writer_iteration_count - 1)
         if self.backend_note() == "api":
             response = self.call_api(
                 load_prompt("evaluation_reflection"),
@@ -26,13 +29,37 @@ class EvaluationReflectionAgent(RuntimeAwareAgent):
                     "review_report": review_report,
                     "final_verification": final_verification,
                     "revision_log": revision_log,
+                    "evidence_context": evidence_context,
                 },
             )
+            scores = _scores(response)
+            if evidence_context is not None:
+                scores["claim_source_alignment"] = min(
+                    scores["claim_source_alignment"],
+                    _evidence_alignment_score(evidence_context),
+                )
+                component_average = round(
+                    sum(
+                        scores[name]
+                        for name in (
+                            "citation_integrity",
+                            "claim_source_alignment",
+                            "process_control",
+                            "literature_coverage",
+                        )
+                    )
+                    / 4,
+                    2,
+                )
+                scores["overall"] = min(scores["overall"], component_average)
             return {
                 "agent": "Evaluation / Reflection Agent",
                 "backend": self.backend_note(),
-                "scores": _scores(response),
-                "revision_iterations": len(revision_log),
+                "scores": scores,
+                # Compatibility alias retained for consumers of pre-0.7.3 artifacts.
+                "revision_iterations": writer_iteration_count,
+                "writer_iteration_count": writer_iteration_count,
+                "writer_revision_count": writer_revision_count,
                 "records_included": search_report["records_included"],
                 "final_status": final_verification["status"],
                 "reflections": _string_list(response, "reflections"),
@@ -40,6 +67,7 @@ class EvaluationReflectionAgent(RuntimeAwareAgent):
                     response,
                     "next_run_improvements",
                 ),
+                "evidence_status": _evidence_status(evidence_context),
             }
         citation_score = (
             5.0
@@ -48,6 +76,11 @@ class EvaluationReflectionAgent(RuntimeAwareAgent):
             else 2.0
         )
         support_score = 5.0 if not final_verification["unsupported_claims"] else 3.0
+        if evidence_context is not None:
+            support_score = min(
+                support_score,
+                _evidence_alignment_score(evidence_context),
+            )
         process_score = 5.0 if len(revision_log) <= 2 else 4.0
         coverage_score = 5.0 if search_report["records_included"] >= 10 else 3.0
         average = round(
@@ -64,9 +97,13 @@ class EvaluationReflectionAgent(RuntimeAwareAgent):
                 "literature_coverage": coverage_score,
                 "overall": average,
             },
-            "revision_iterations": len(revision_log),
+            # Compatibility alias retained for consumers of pre-0.7.3 artifacts.
+            "revision_iterations": writer_iteration_count,
+            "writer_iteration_count": writer_iteration_count,
+            "writer_revision_count": writer_revision_count,
             "records_included": search_report["records_included"],
             "final_status": final_verification["status"],
+            "evidence_status": _evidence_status(evidence_context),
             "reflections": [
                 "Structured source memory reduced fabricated-reference risk.",
                 "Expert review is useful only when synthesized feedback is passed back to Writer.",
@@ -84,15 +121,26 @@ class EvaluationReflectionAgent(RuntimeAwareAgent):
         }
 
     def to_markdown(self, report: dict[str, Any]) -> str:
+        writer_iterations = report.get(
+            "writer_iteration_count",
+            report.get("revision_iterations", 0),
+        )
+        writer_revisions = report.get(
+            "writer_revision_count",
+            max(0, writer_iterations - 1),
+        )
         lines = [
             "# Evaluation and Reflection",
             "",
             f"Final status: `{report['final_status']}`",
             f"Records included: {report['records_included']}",
-            f"Revision iterations: {report['revision_iterations']}",
+            f"Writer iterations: {writer_iterations}",
+            f"Writer revisions: {writer_revisions}",
             "",
             "## Scores",
         ]
+        if report.get("evidence_status") is not None:
+            lines.insert(6, f"Evidence status: `{report['evidence_status']}`")
         for name, score in report["scores"].items():
             lines.append(f"- {name}: {float(score):.1f}/5.0")
         lines.extend(["", "## Reflections"])
@@ -123,6 +171,22 @@ def _scores(response: dict[str, Any]) -> dict[str, float]:
             raise _invalid_output("scores")
         scores[key] = round(numeric, 2)
     return scores
+
+
+def _evidence_status(evidence_context: dict[str, Any] | None) -> str | None:
+    if evidence_context is None:
+        return None
+    status = evidence_context.get("status")
+    return status if isinstance(status, str) and status else "unresolved"
+
+
+def _evidence_alignment_score(evidence_context: dict[str, Any]) -> float:
+    status = _evidence_status(evidence_context)
+    if status == "accepted_with_documented_risk":
+        return 3.0
+    if isinstance(status, str) and status.startswith("accepted"):
+        return 5.0
+    return 2.0
 
 
 def _string_list(response: dict[str, Any], field: str) -> list[str]:

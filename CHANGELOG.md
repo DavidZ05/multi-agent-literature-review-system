@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Fixed
+
+- Increment `ResearchRun.revision_count` atomically when human evidence review
+  returns a run to Drafting, and distinguish that workflow-level count from
+  per-Drafting Writer iterations and revisions in generated audit artifacts.
+- Isolate Markdown table rows during atomic-claim extraction so citations cannot
+  leak across rows.
+- Pause orphaned active Runs during Workbench restart recovery, preserving their
+  stage and making Resume available after the associated Job is interrupted.
+- Reject redirects for credentialed literature-provider requests, including
+  Semantic Scholar API-key requests.
+- Normalize nonblocking Synthesizer advisory output to accepted and require
+  actionable `must_fix` feedback for model-requested revision loops.
+- Report the actual deterministic backend for protected Search, Citation Auditor,
+  and Final Verification agents even when model APIs are enabled elsewhere.
+- Defer full-text Evaluation until claim verification and any human evidence
+  review have completed, and include the final evidence outcome in scoring.
+
 ## 0.7.2 - 2026-07-18
 
 ### Fixed

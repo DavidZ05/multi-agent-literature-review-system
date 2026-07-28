@@ -25,7 +25,7 @@ from src.literature_review.documents import (
 from src.literature_review.models import CandidateStatus
 from src.literature_review.models import WorkflowStage
 from src.literature_review.orchestrator import Orchestrator
-from src.literature_review.plugins import AgentFactory
+from src.literature_review.plugins import AgentFactory, build_agent_factory
 from src.literature_review.workflow.engine import (
     RetryableStageError,
     StageWaitingError,
@@ -275,6 +275,7 @@ class EvidenceIndexingHandler:
 
 class DraftingHandler:
     _JSON_ARTIFACTS = (
+        "search_report.json",
         "review_report.json",
         "final_verification.json",
         "evaluation_report.json",
@@ -351,6 +352,11 @@ class DraftingHandler:
                 kwargs["agent_factory"] = self.agent_factory
             if _accepts_keyword(self.orchestrator_factory, "event_callback"):
                 kwargs["event_callback"] = record_agent_event
+            if self.claim_verification_enabled and _accepts_keyword(
+                self.orchestrator_factory,
+                "defer_evaluation",
+            ):
+                kwargs["defer_evaluation"] = True
             orchestrator = self.orchestrator_factory(**kwargs)
             orchestrator_result = orchestrator.run()
         except BaseException as exc:
@@ -374,11 +380,24 @@ class DraftingHandler:
 
         try:
             artifacts: dict[str, Any] = {}
-            for filename in self._JSON_ARTIFACTS:
+            json_artifacts = self._JSON_ARTIFACTS
+            text_artifacts = self._TEXT_ARTIFACTS
+            if self.claim_verification_enabled:
+                json_artifacts = tuple(
+                    filename
+                    for filename in json_artifacts
+                    if filename != "evaluation_report.json"
+                )
+                text_artifacts = tuple(
+                    filename
+                    for filename in text_artifacts
+                    if filename != "reflection_log.md"
+                )
+            for filename in json_artifacts:
                 artifacts[f"final/{filename}"] = json.loads(
                     (output_dir / filename).read_text(encoding="utf-8")
                 )
-            for filename in self._TEXT_ARTIFACTS:
+            for filename in text_artifacts:
                 artifacts[f"final/{filename}"] = (output_dir / filename).read_text(
                     encoding="utf-8"
                 )
@@ -535,7 +554,7 @@ class ClaimVerificationHandler:
         feedback = self.verifier.feedback(claims, verifications)
         return StageResult(
             next_stage=(
-                WorkflowStage.COMPLETED
+                WorkflowStage.EVALUATING
                 if report["accepted"]
                 else WorkflowStage.AWAITING_EVIDENCE_REVIEW
             ),
@@ -617,7 +636,7 @@ class EvidenceReviewGateHandler:
                 output_artifacts={"evidence/revision_feedback.json": feedback},
             )
         return StageResult(
-            next_stage=WorkflowStage.COMPLETED,
+            next_stage=WorkflowStage.EVALUATING,
             output_artifacts={
                 "evidence/final_review.json": {
                     "status": (
@@ -634,6 +653,106 @@ class EvidenceReviewGateHandler:
                 }
             },
         )
+
+
+class EvaluationHandler:
+    def __init__(
+        self,
+        runtime_config: AgentRuntimeConfig | None = None,
+        *,
+        api_client: Any | None = None,
+        agent_factory: AgentFactory | None = None,
+    ) -> None:
+        self.runtime_config = runtime_config or AgentRuntimeConfig.from_env()
+        self.api_client = api_client
+        self.agent_factory = agent_factory or build_agent_factory()
+
+    def __call__(self, context: StageContext) -> StageResult:
+        evaluator = self.agent_factory.create(
+            "evaluation_reflection",
+            self.runtime_config,
+            self.api_client,
+        )
+        search_report = context.artifact_store.read_json(
+            context.run.run_id,
+            "final/search_report.json",
+        )
+        review_report = context.artifact_store.read_json(
+            context.run.run_id,
+            "final/review_report.json",
+        )
+        final_verification = context.artifact_store.read_json(
+            context.run.run_id,
+            "final/final_verification.json",
+        )
+        revision_artifact = context.artifact_store.read_json(
+            context.run.run_id,
+            "final/revision_log.json",
+        )
+        revision_log = revision_artifact.get("iterations", [])
+        if not isinstance(revision_log, list):
+            raise TypeError("revision log iterations must be a list")
+        evidence_context = _evaluation_evidence_context(context)
+        evaluate = evaluator.evaluate
+        try:
+            if _accepts_keyword(evaluate, "evidence_context"):
+                report = evaluate(
+                    search_report,
+                    review_report,
+                    final_verification,
+                    revision_log,
+                    evidence_context=evidence_context,
+                )
+            else:
+                report = evaluate(
+                    search_report,
+                    review_report,
+                    final_verification,
+                    revision_log,
+                )
+            if not isinstance(report, dict):
+                raise TypeError("evaluation agent must return an object")
+            report = {
+                **report,
+                "evaluation_scope": "post_evidence",
+                "evidence_status": evidence_context["status"],
+                "claim_verification": evidence_context,
+            }
+            reflection = evaluator.to_markdown(report)
+        except APIClientError as exc:
+            if exc.retryable:
+                raise RetryableStageError(
+                    _api_error_message(exc, retryable=True)
+                ) from exc
+            raise RuntimeError(_api_error_message(exc, retryable=False)) from exc
+        return StageResult(
+            next_stage=WorkflowStage.COMPLETED,
+            output_artifacts={
+                "final/evaluation_report.json": report,
+                "final/reflection_log.md": reflection,
+            },
+        )
+
+
+def _evaluation_evidence_context(context: StageContext) -> dict[str, Any]:
+    claim_report = context.artifact_store.read_json(
+        context.run.run_id,
+        "evidence/claim_verification.json",
+    )
+    final_review = None
+    if context.artifact_store.exists(context.run.run_id, "evidence/final_review.json"):
+        final_review = context.artifact_store.read_json(
+            context.run.run_id,
+            "evidence/final_review.json",
+        )
+    status = "accepted" if claim_report.get("accepted") else "unresolved"
+    if isinstance(final_review, dict) and isinstance(final_review.get("status"), str):
+        status = final_review["status"]
+    return {
+        "status": status,
+        "claim_verification": claim_report,
+        "human_review": final_review,
+    }
 
 
 def _claim_content_signature(claims: tuple[Any, ...]) -> tuple[tuple[Any, ...], ...]:
@@ -672,6 +791,7 @@ __all__ = [
     "DraftingHandler",
     "EvidenceIndexingHandler",
     "EvidenceReviewGateHandler",
+    "EvaluationHandler",
     "OrchestratorFactory",
     "OrchestratorRunner",
     "PlanningHandler",

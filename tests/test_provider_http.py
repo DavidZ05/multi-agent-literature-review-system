@@ -3,6 +3,7 @@ import ssl
 import unittest
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
+from urllib.request import Request
 
 from src.literature_review.providers.http import (
     ProviderRequestError,
@@ -66,6 +67,10 @@ class UrllibHttpTransportTests(unittest.TestCase):
                 return_value=context,
             ) as create_context,
             patch(
+                "src.literature_review.providers.http._ValidatingRedirectHandler",
+                return_value=MagicMock(),
+            ) as redirect_handler,
+            patch(
                 "src.literature_review.providers.http.HTTPSHandler",
                 return_value=handler,
             ) as https_handler,
@@ -77,8 +82,9 @@ class UrllibHttpTransportTests(unittest.TestCase):
             transport = UrllibHttpTransport()
 
         create_context.assert_called_once_with(cafile="/trusted/cacert.pem")
+        redirect_handler.assert_called_once_with(None)
         https_handler.assert_called_once_with(context=context)
-        build.assert_called_once_with(handler)
+        build.assert_called_once_with(redirect_handler.return_value, handler)
         self.assertIs(transport.opener, opener)
 
     def test_injected_opener_does_not_build_ssl_context(self) -> None:
@@ -187,6 +193,26 @@ class UrllibHttpTransportTests(unittest.TestCase):
                 {},
                 "https://127.0.0.1/private",
             )
+
+    def test_redirect_handler_rejects_credentialed_requests(self) -> None:
+        handler = _ValidatingRedirectHandler()
+        request = Request(
+            "https://api.semanticscholar.org/graph/v1/paper/search",
+            headers={"x-api-key": "secret-key"},
+        )
+
+        with self.assertRaises(ProviderRequestError) as raised:
+            handler.redirect_request(
+                request,
+                None,
+                302,
+                "Found",
+                {},
+                "https://redirect.example.test/collect",
+            )
+
+        self.assertEqual(raised.exception.code, "credentialed_redirect")
+        self.assertNotIn("secret-key", str(raised.exception))
 
 
 if __name__ == "__main__":

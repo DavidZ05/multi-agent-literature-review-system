@@ -47,7 +47,11 @@ class HttpTransport(Protocol):
 
 
 class _ValidatingRedirectHandler(HTTPRedirectHandler):
-    def __init__(self, validator: Callable[[str], None]) -> None:
+    _SENSITIVE_HEADERS = frozenset(
+        {"authorization", "proxy-authorization", "x-api-key", "api-key"}
+    )
+
+    def __init__(self, validator: Callable[[str], None] | None = None) -> None:
         super().__init__()
         self.validator = validator
 
@@ -60,7 +64,16 @@ class _ValidatingRedirectHandler(HTTPRedirectHandler):
         headers,
         new_url,
     ):
-        self.validator(str(new_url))
+        if self.validator is not None:
+            self.validator(str(new_url))
+        request_header_names = {
+            str(name).lower() for name, _value in request.header_items()
+        }
+        if request_header_names & self._SENSITIVE_HEADERS:
+            raise ProviderRequestError(
+                "provider redirect rejected for a credentialed request",
+                code="credentialed_redirect",
+            )
         return super().redirect_request(
             request,
             file_pointer,
@@ -86,9 +99,7 @@ class UrllibHttpTransport:
     ) -> None:
         if opener is None:
             context = ssl.create_default_context(cafile=certifi.where())
-            handlers = []
-            if url_validator is not None:
-                handlers.append(_ValidatingRedirectHandler(url_validator))
+            handlers = [_ValidatingRedirectHandler(url_validator)]
             handlers.append(HTTPSHandler(context=context))
             opener = build_opener(*handlers)
         self.opener = opener

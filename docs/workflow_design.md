@@ -100,6 +100,11 @@ approval gate. Existing candidates and append-only human decisions are merged,
 not replaced. A paper already present in the run is not counted as a new
 candidate. If the backend exits during retry, startup recovery marks the attempt
 and Job interrupted, restores the previous gate, and appends an audit event.
+Start Jobs persist their generated Run ID before execution. For any other
+interrupted Workbench Job, startup recovery changes its linked leftover `active`
+Run to `paused` at the same stage and records `run_interrupted`. Unrelated active
+Runs are not mutated. The user can then resume from the last valid checkpoint
+instead of seeing an active Run with no worker behind it.
 
 The default query planner is domain-neutral and produces topic, survey,
 evaluation, and reliability variants. Users may replace these with up to eight
@@ -121,10 +126,11 @@ flowchart LR
     F --> G["Extract atomic claims"]
     G --> H["Citation-scoped retrieval"]
     H --> I{"Claim evidence gate"}
-    I -->|accepted| J["Completed"]
+    I -->|accepted| L["Evaluation and reflection"]
     I -->|human revision decision| E
     I -->|full text unavailable only| K["Documented risk acceptance"]
-    K --> J
+    K --> L
+    L --> J["Completed"]
 ```
 
 `DocumentRecord` stores acquisition method, source URL, run-relative path,
@@ -152,6 +158,8 @@ The final polished Markdown is split into versioned `AtomicClaim` records with
 section and paragraph positions. Factual and synthesis claims require citation
 keys. Retrieval is hard-scoped to evidence chunks whose citation key matches
 the claim citation; a passage from another paper cannot satisfy the result.
+Markdown table rows are extracted independently, so a citation in one row cannot
+be inherited by a claim in another row.
 
 The deterministic verifier emits `supported`, `partially_supported`,
 `contradicted`, `not_found`, `full_text_unavailable`, or `missing_citation`.
@@ -178,6 +186,22 @@ stage does not invent a new draft. The Workbench and active gate show the latest
 version; earlier claims, verification results, and decisions remain in SQLite
 and the audit export.
 
+Revision counters have deliberately separate scopes. `ResearchRun.revision_count`
+is the durable workflow count: it increments atomically only when evidence review
+returns `AWAITING_EVIDENCE_REVIEW` to `DRAFTING`. A resume or replay that does not
+cross that transition cannot increment it. Within one Drafting execution,
+`revision_log.json` records `writer_iteration_count` (all Writer drafts reviewed)
+and `writer_revision_count` (drafts after the initial one). The older
+`revision_iterations` evaluation field remains a compatibility alias for
+`writer_iteration_count`; new consumers should use the explicit names.
+
+In full-text mode, Evaluation is a separate durable stage after the claim gate.
+The stable `final/evaluation_report.json` and `final/reflection_log.md` do not
+exist while evidence decisions are unresolved. Evaluation receives the final
+claim-verification and human-review outcome; documented risk acceptance caps
+claim-source alignment rather than being reported as fully verified. Non-full-
+text and standalone Orchestrator runs retain the compatible inline evaluation.
+
 Polish is constrained to wording-only edits. Its runtime prompt requires the
 citation-key set and claim association to remain unchanged. Final Verification
 then compares citation occurrence order and context, exact headings and
@@ -190,8 +214,9 @@ draft is retained automatically rather than sent to a human approval step.
 Each Drafting execution writes an append-only journal under
 `agent_runs/attempt_NNN/`. It contains a sanitized attempt manifest, an approved
 corpus input snapshot, and per-iteration Search, Writer, Expert Panel, review,
-revision, Polish, Final Verification, and Evaluation artifacts. Corresponding
-`agent_stage_completed` events make the orchestration sequence visible in
+revision, Polish, and Final Verification artifacts. In full-text runs, Evaluation
+is written by the later durable `evaluating` stage after evidence acceptance.
+Corresponding `agent_stage_completed` events make the Drafting sequence visible in
 SQLite and audit exports. Failed and interrupted attempts remain available for
 diagnosis instead of disappearing with a temporary directory.
 

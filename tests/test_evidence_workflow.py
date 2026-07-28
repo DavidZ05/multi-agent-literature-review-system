@@ -25,6 +25,7 @@ from src.literature_review.workflow import (
     DraftingHandler,
     EvidenceIndexingHandler,
     EvidenceReviewGateHandler,
+    EvaluationHandler,
     PersistentWorkflowEngine,
     PlanningHandler,
     StageContext,
@@ -109,14 +110,20 @@ class FeedbackAwareOrchestrator:
             f"# Review\n\n## Results\n{claim}\n",
             encoding="utf-8",
         )
-        for name in (
-            "review_report.json",
-            "final_verification.json",
-            "evaluation_report.json",
-            "revision_log.json",
-        ):
+        payloads = {
+            "search_report.json": {"records_included": 1},
+            "review_report.json": {"status": "accepted"},
+            "final_verification.json": {
+                "status": "accepted",
+                "unknown_citations": [],
+                "unsupported_claims": [],
+            },
+            "evaluation_report.json": {"status": "premature"},
+            "revision_log.json": {"iterations": [{"iteration": 1}]},
+        }
+        for name, payload in payloads.items():
             (self.output_dir / name).write_text(
-                json.dumps({"status": "accepted"}),
+                json.dumps(payload),
                 encoding="utf-8",
             )
         (self.output_dir / "reflection_log.md").write_text(
@@ -158,6 +165,7 @@ class EvidenceWorkflowTests(unittest.TestCase):
                 WorkflowStage.DRAFTING: drafting,
                 WorkflowStage.CLAIM_VERIFICATION: ClaimVerificationHandler(),
                 WorkflowStage.AWAITING_EVIDENCE_REVIEW: EvidenceReviewGateHandler(),
+                WorkflowStage.EVALUATING: EvaluationHandler(),
             },
             runtime_config={"full_text_enabled": True},
         )
@@ -167,6 +175,9 @@ class EvidenceWorkflowTests(unittest.TestCase):
         waiting = engine.start("Agent memory", self.corpus)
 
         self.assertEqual(waiting.current_stage, WorkflowStage.AWAITING_EVIDENCE_REVIEW)
+        self.assertFalse(
+            self.artifacts.exists(waiting.run_id, "final/evaluation_report.json")
+        )
         self.assertEqual(len(FeedbackAwareOrchestrator.feedback), 1)
         blocking_results = [
             item
@@ -194,6 +205,7 @@ class EvidenceWorkflowTests(unittest.TestCase):
         completed = engine.resume(waiting.run_id)
 
         self.assertEqual(completed.current_stage, WorkflowStage.COMPLETED)
+        self.assertEqual(completed.revision_count, 1)
         self.assertEqual(len(FeedbackAwareOrchestrator.feedback), 2)
         feedback = FeedbackAwareOrchestrator.feedback[1]
         self.assertIsInstance(feedback, dict)
@@ -210,6 +222,22 @@ class EvidenceWorkflowTests(unittest.TestCase):
         ]
         self.assertTrue(latest_results)
         self.assertTrue(all(not item.blocking for item in latest_results))
+        revision_transitions = [
+            event
+            for event in self.store.list_events(waiting.run_id)
+            if event.event_type == "stage_transition"
+            and event.payload.get("to_stage") == WorkflowStage.DRAFTING.value
+            and "revision_count" in event.payload
+        ]
+        self.assertEqual(len(revision_transitions), 1)
+        self.assertEqual(revision_transitions[0].payload["revision_count"], 1)
+        self.assertEqual(engine.resume(waiting.run_id).revision_count, 1)
+        evaluation = self.artifacts.read_json(
+            waiting.run_id,
+            "final/evaluation_report.json",
+        )
+        self.assertEqual(evaluation["evaluation_scope"], "post_evidence")
+        self.assertEqual(evaluation["evidence_status"], "accepted")
 
     def test_refreshed_document_results_can_complete_without_a_risk_decision(self) -> None:
         engine = self.engine()
@@ -245,6 +273,7 @@ class EvidenceWorkflowTests(unittest.TestCase):
         completed = engine.resume(waiting.run_id)
 
         self.assertEqual(completed.current_stage, WorkflowStage.COMPLETED)
+        self.assertEqual(completed.revision_count, 0)
         final_review = self.artifacts.read_json(
             waiting.run_id,
             "evidence/final_review.json",
@@ -252,6 +281,18 @@ class EvidenceWorkflowTests(unittest.TestCase):
         self.assertEqual(
             final_review["status"],
             "accepted_after_document_refresh",
+        )
+        evaluation = self.artifacts.read_json(
+            waiting.run_id,
+            "final/evaluation_report.json",
+        )
+        self.assertEqual(
+            evaluation["evidence_status"],
+            "accepted_after_document_refresh",
+        )
+        self.assertEqual(
+            evaluation["scores"]["claim_source_alignment"],
+            5.0,
         )
 
     def test_claim_verification_replay_reuses_the_same_draft_version(self) -> None:

@@ -75,6 +75,9 @@ class PipelineTests(unittest.TestCase):
             review = json.loads(
                 (output_dir / "review_report.json").read_text(encoding="utf-8")
             )
+            revision_log = json.loads(
+                (output_dir / "revision_log.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(result["status"], "accepted")
             self.assertIn("Memory-Augmented LLM Agents", survey)
             self.assertIn("[packer2023memgpt]", survey)
@@ -85,6 +88,14 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(review["unknown_citations"], [])
             self.assertIn("expert_panel", review)
             self.assertIn("revision_plan", review)
+            self.assertEqual(
+                revision_log["writer_iteration_count"],
+                len(revision_log["iterations"]),
+            )
+            self.assertEqual(
+                revision_log["writer_revision_count"],
+                max(0, revision_log["writer_iteration_count"] - 1),
+            )
 
             expected_artifacts = [
                 output_dir / "intermediate" / "citation_audit.json",
@@ -635,6 +646,8 @@ class PipelineTests(unittest.TestCase):
             "final_status": "accepted",
             "records_included": 17,
             "revision_iterations": 1,
+            "writer_iteration_count": 1,
+            "writer_revision_count": 0,
             "scores": {
                 "citation_integrity": 5,
                 "claim_source_alignment": 5,
@@ -650,6 +663,8 @@ class PipelineTests(unittest.TestCase):
 
         self.assertIn("- citation_integrity: 5.0/5.0", markdown)
         self.assertIn("- overall: 5.0/5.0", markdown)
+        self.assertIn("Writer iterations: 1", markdown)
+        self.assertIn("Writer revisions: 0", markdown)
 
 
 if __name__ == "__main__":

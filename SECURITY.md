@@ -54,7 +54,9 @@ Useful reports include:
 
 ## Network Behavior
 
-The discovery providers use HTTPS and a trusted CA bundle. PDF acquisition
+The discovery providers use HTTPS and a trusted CA bundle. Credentialed provider
+requests, including Semantic Scholar requests with `x-api-key`, reject redirects
+so the credential cannot be forwarded to a redirect target. PDF acquisition
 accepts HTTPS only, validates DNS results and redirect targets before following
 them, rejects localhost or non-public addresses, applies a size limit, and
 requires a PDF signature. Provider errors avoid exposing credentials in

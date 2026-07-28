@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from concurrent.futures import CancelledError, Executor, Future, ThreadPoolExecutor
+import inspect
 from dataclasses import dataclass, replace
 import logging
 from pathlib import Path
@@ -31,7 +32,11 @@ from src.literature_review.runtime import (
     load_resume_settings,
     retry_discovery,
 )
-from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
+from src.literature_review.storage import (
+    LocalArtifactStore,
+    RunNotFoundError,
+    SQLiteWorkflowStore,
+)
 from src.literature_review.workbench.service import PendingCandidatesError
 
 
@@ -41,7 +46,13 @@ _PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 class WorkflowEngine(Protocol):
-    def start(self, topic: str, corpus_path: Path) -> ResearchRun: ...
+    def start(
+        self,
+        topic: str,
+        corpus_path: Path,
+        *,
+        run: ResearchRun | None = None,
+    ) -> ResearchRun: ...
 
     def resume(self, run_id: str) -> ResearchRun: ...
 
@@ -184,11 +195,13 @@ class _JobRecord:
     updated_at: str = ""
 
     def to_dict(self) -> dict[str, object]:
+        result_run_id = (self.result or {}).get("run_id")
+        reserved_run_id = (self.result or {}).get("reserved_run_id")
         return {
             "job_id": self.job_id,
             "kind": self.kind,
             "status": self.status,
-            "run_id": self.run_id,
+            "run_id": self.run_id or result_run_id or reserved_run_id,
             "equivalent_command": self.equivalent_command,
             "result": None if self.result is None else dict(self.result),
             "error": None if self.error is None else dict(self.error),
@@ -270,6 +283,7 @@ class WorkflowJobManager:
         self.store.interrupt_active_discovery_attempts()
         stored_jobs = self.store.list_jobs()
         self._recover_interrupted_discovery_retries(stored_jobs)
+        self._pause_interrupted_runs(stored_jobs)
         self._jobs: dict[str, _JobRecord] = {
             job.job_id: _JobRecord.from_stored_job(job) for job in stored_jobs
         }
@@ -332,6 +346,45 @@ class WorkflowJobManager:
                 return_stage,
             )
 
+    def _pause_interrupted_runs(self, jobs: Iterable[WorkflowJob]) -> None:
+        interrupted_run_ids: set[str] = set()
+        for job in jobs:
+            if job.status != "interrupted":
+                continue
+            if job.run_id is not None:
+                interrupted_run_ids.add(job.run_id)
+                continue
+            reserved_run_id = (job.result or {}).get("reserved_run_id")
+            if isinstance(reserved_run_id, str):
+                interrupted_run_ids.add(reserved_run_id)
+        for run_id in interrupted_run_ids:
+            try:
+                run = self.store.get_run(run_id)
+            except RunNotFoundError:
+                continue
+            if run.status != RunStatus.ACTIVE:
+                continue
+            paused = replace(
+                run,
+                status=RunStatus.PAUSED,
+                updated_at=utc_now_iso(),
+            )
+            if not self.store.compare_and_update_run(
+                paused,
+                expected_status=RunStatus.ACTIVE,
+                expected_stage=run.current_stage,
+            ):
+                continue
+            self.store.append_event(
+                run.run_id,
+                "run_interrupted",
+                {
+                    "reason": "backend_restarted",
+                    "resume_stage": run.current_stage.value,
+                },
+                run.current_stage,
+            )
+
     def submit_start(self, request: StartRunRequest) -> dict[str, object]:
         if not isinstance(request, StartRunRequest):
             raise TypeError("request must be a StartRunRequest")
@@ -350,18 +403,28 @@ class WorkflowJobManager:
         reservation = self._activity.reserve_start()
         try:
             command = self._start_command(request)
-            job = self._new_job("start", command, reservation=reservation)
+            prepared_run = ResearchRun.create(request.topic)
+            job = self._new_job(
+                "start",
+                command,
+                result={"reserved_run_id": prepared_run.run_id},
+                reservation=reservation,
+            )
             self._schedule(
                 job,
-                lambda: self._engine_builder(
-                    self.store,
-                    self.artifact_root,
-                    discovery_enabled=request.discovery_enabled,
-                    full_text_enabled=request.full_text_enabled,
-                    providers=request.providers,
-                    max_results=request.max_results,
-                    query_texts=request.query_texts,
-                ).start(request.topic, request.corpus_path),
+                lambda: _start_prepared_run(
+                    self._engine_builder(
+                        self.store,
+                        self.artifact_root,
+                        discovery_enabled=request.discovery_enabled,
+                        full_text_enabled=request.full_text_enabled,
+                        providers=request.providers,
+                        max_results=request.max_results,
+                        query_texts=request.query_texts,
+                    ),
+                    request,
+                    prepared_run,
+                ),
             )
         except BaseException:
             reservation.release()
@@ -487,6 +550,7 @@ class WorkflowJobManager:
         equivalent_command: str,
         *,
         run_id: str | None = None,
+        result: dict[str, Any] | None = None,
         reservation: ActivityReservation | None = None,
     ) -> _JobRecord:
         with self._lock:
@@ -500,6 +564,7 @@ class WorkflowJobManager:
                 status="queued",
                 equivalent_command=equivalent_command,
                 run_id=run_id,
+                result=None if result is None else dict(result),
                 reservation=reservation,
             )
             stored = job.to_stored_job()
@@ -642,10 +707,12 @@ class WorkflowJobManager:
 
     @staticmethod
     def _accepted_payload(job: _JobRecord) -> dict[str, object]:
+        reserved_run_id = (job.result or {}).get("reserved_run_id")
         return {
             "job_id": job.job_id,
             "kind": job.kind,
             "status": "queued",
+            "run_id": job.run_id or reserved_run_id,
             "equivalent_command": job.equivalent_command,
         }
 
@@ -680,6 +747,31 @@ class WorkflowJobManager:
                 *arguments,
             ]
         )
+
+
+def _start_prepared_run(
+    engine: WorkflowEngine,
+    request: StartRunRequest,
+    prepared_run: ResearchRun,
+) -> ResearchRun:
+    try:
+        signature = inspect.signature(engine.start)
+    except (TypeError, ValueError):
+        signature = None
+    accepts_run = signature is not None and (
+        "run" in signature.parameters
+        or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+    )
+    if accepts_run:
+        return engine.start(
+            request.topic,
+            request.corpus_path,
+            run=prepared_run,
+        )
+    return engine.start(request.topic, request.corpus_path)
 
 
 __all__ = [

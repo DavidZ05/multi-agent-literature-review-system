@@ -23,6 +23,7 @@ class Orchestrator:
         agent_factory: AgentFactory | None = None,
         initial_review_feedback: dict[str, Any] | None = None,
         event_callback: Callable[[str, dict[str, Any]], None] | None = None,
+        defer_evaluation: bool = False,
     ) -> None:
         self.corpus_path = corpus_path
         self.output_dir = output_dir
@@ -32,6 +33,7 @@ class Orchestrator:
         self.agent_factory = agent_factory or build_agent_factory()
         self.initial_review_feedback = initial_review_feedback
         self.event_callback = event_callback
+        self.defer_evaluation = defer_evaluation
         create = self.agent_factory.create
         self.search_agent = create("search", self.runtime_config, api_client)
         self.writer_agent = create("writer", self.runtime_config, api_client)
@@ -66,6 +68,7 @@ class Orchestrator:
         )
         search_report = self.search_agent.run(papers)
         self._write_json(intermediate_dir / "search_report.json", search_report)
+        self._write_json(self.output_dir / "search_report.json", search_report)
         self._emit("search", {"records_included": search_report["records_included"]})
 
         draft = ""
@@ -149,8 +152,14 @@ class Orchestrator:
 
         (intermediate_dir / "writer_draft.md").write_text(draft, encoding="utf-8")
         self._write_json(self.output_dir / "review_report.json", review_report)
+        writer_iteration_count = len(revision_log)
         self._write_json(
-            self.output_dir / "revision_log.json", {"iterations": revision_log}
+            self.output_dir / "revision_log.json",
+            {
+                "writer_iteration_count": writer_iteration_count,
+                "writer_revision_count": max(0, writer_iteration_count - 1),
+                "iterations": revision_log,
+            },
         )
 
         if review_report["status"] == "accepted":
@@ -187,18 +196,22 @@ class Orchestrator:
         self._write_json(
             self.output_dir / "final_verification.json", final_verification
         )
-        evaluation_report = self.evaluation_reflection_agent.evaluate(
-            search_report,
-            review_report,
-            final_verification,
-            revision_log,
-        )
-        self._write_json(self.output_dir / "evaluation_report.json", evaluation_report)
-        self._emit("evaluation_reflection", {})
-        (self.output_dir / "reflection_log.md").write_text(
-            self.evaluation_reflection_agent.to_markdown(evaluation_report),
-            encoding="utf-8",
-        )
+        if not self.defer_evaluation:
+            evaluation_report = self.evaluation_reflection_agent.evaluate(
+                search_report,
+                review_report,
+                final_verification,
+                revision_log,
+            )
+            self._write_json(
+                self.output_dir / "evaluation_report.json",
+                evaluation_report,
+            )
+            self._emit("evaluation_reflection", {})
+            (self.output_dir / "reflection_log.md").write_text(
+                self.evaluation_reflection_agent.to_markdown(evaluation_report),
+                encoding="utf-8",
+            )
         (self.output_dir / "survey.md").write_text(final, encoding="utf-8")
 
         result = {
@@ -208,8 +221,11 @@ class Orchestrator:
             "survey": str(self.output_dir / "survey.md"),
             "review_report": str(self.output_dir / "review_report.json"),
             "final_verification": str(self.output_dir / "final_verification.json"),
-            "evaluation_report": str(self.output_dir / "evaluation_report.json"),
         }
+        if not self.defer_evaluation:
+            result["evaluation_report"] = str(
+                self.output_dir / "evaluation_report.json"
+            )
         if self.run_id is not None:
             result["run_id"] = self.run_id
         return result

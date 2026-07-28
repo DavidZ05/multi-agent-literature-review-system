@@ -12,9 +12,12 @@ from src.literature_review.evaluation import EvaluationReflectionAgent
 from src.literature_review.orchestrator import Orchestrator
 from src.literature_review.review import (
     DomainExpertAgent,
+    FinalVerificationReviewer,
+    ReviewerAgent,
     ReviewSynthesizerAgent,
     StructureMentorAgent,
 )
+from src.literature_review.search import SearchAgent
 from src.literature_review.writing import PolishAgent, WriterAgent
 from tests.test_pipeline import write_sample_corpus
 
@@ -68,6 +71,17 @@ class APIDispatchTests(unittest.TestCase):
         agent = WriterAgent(AgentRuntimeConfig())
 
         self.assertEqual(agent.backend_note(), "deterministic")
+
+    def test_protected_agents_report_their_actual_deterministic_backend(self) -> None:
+        runtime = api_runtime()
+
+        for agent in (
+            SearchAgent(runtime),
+            ReviewerAgent(runtime),
+            FinalVerificationReviewer(runtime),
+        ):
+            with self.subTest(agent=agent.agent_id):
+                self.assertEqual(agent.backend_note(), "deterministic")
 
     def test_api_call_uses_agent_profile_and_injected_client(self) -> None:
         client = FakeClient()
@@ -296,6 +310,35 @@ class APIExpertAgentTests(unittest.TestCase):
         )
         self.assertIn("Keep the structure.", report["should_fix"])
 
+    def test_synthesizer_normalizes_advisory_to_nonblocking_acceptance(self) -> None:
+        client = FakeClient(
+            [
+                {
+                    "status": "advisory",
+                    "blocking_agents": ["Structure Mentor Agent"],
+                    "must_fix": ["Consider a shorter introduction."],
+                    "should_fix": ["Tighten the prose."],
+                    "iteration_stop_rule": "Stop when no review is blocking.",
+                }
+            ]
+        )
+        agent = ReviewSynthesizerAgent(api_runtime(), api_client=client)
+
+        report = agent.synthesize(
+            [
+                {
+                    "agent": "Structure Mentor Agent",
+                    "status": "advisory",
+                    "recommendations": ["Consider a shorter introduction."],
+                }
+            ]
+        )
+
+        self.assertEqual(report["status"], "accepted")
+        self.assertEqual(report["blocking_agents"], [])
+        self.assertEqual(report["must_fix"], [])
+        self.assertIn("Tighten the prose.", report["should_fix"])
+
 
 class APIReflectionAgentTests(unittest.TestCase):
     def test_reflection_api_preserves_advisory_report_contract(self) -> None:
@@ -328,6 +371,8 @@ class APIReflectionAgentTests(unittest.TestCase):
         self.assertEqual(report["backend"], "api")
         self.assertEqual(report["final_status"], "revise")
         self.assertEqual(report["revision_iterations"], 1)
+        self.assertEqual(report["writer_iteration_count"], 1)
+        self.assertEqual(report["writer_revision_count"], 0)
         self.assertEqual(report["records_included"], 1)
         self.assertEqual(report["scores"]["overall"], 4.25)
         self.assertEqual(report["reflections"], ["Keep citation gates deterministic."])
@@ -359,6 +404,42 @@ class APIReflectionAgentTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.code, "invalid_agent_output")
+
+    def test_reflection_api_receives_evidence_and_cannot_overrate_accepted_risk(self) -> None:
+        client = FakeClient(
+            [
+                {
+                    "scores": {
+                        "citation_integrity": 5.0,
+                        "claim_source_alignment": 5.0,
+                        "process_control": 5.0,
+                        "literature_coverage": 5.0,
+                        "overall": 5.0,
+                    },
+                    "reflections": ["A source PDF was unavailable."],
+                    "next_run_improvements": ["Import the missing PDF."],
+                }
+            ]
+        )
+        agent = EvaluationReflectionAgent(api_runtime(), api_client=client)
+        evidence_context = {
+            "status": "accepted_with_documented_risk",
+            "claim_verification": {"blocking_count": 1},
+            "human_review": {"status": "accepted_with_documented_risk"},
+        }
+
+        report = agent.evaluate(
+            search_report(),
+            {},
+            {"status": "accepted"},
+            [{"iteration": 1}],
+            evidence_context=evidence_context,
+        )
+
+        self.assertEqual(report["evidence_status"], "accepted_with_documented_risk")
+        self.assertEqual(report["scores"]["claim_source_alignment"], 3.0)
+        self.assertEqual(report["scores"]["overall"], 4.5)
+        self.assertEqual(client.calls[0][2]["evidence_context"], evidence_context)
 
 
 class APIOrchestratorTests(unittest.TestCase):

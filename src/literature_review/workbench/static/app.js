@@ -22,6 +22,7 @@
       executor_evidence_indexing: "Evidence indexing",
       executor_claim_verification: "Claim verification",
       executor_human_evidence_review: "Human evidence review",
+      executor_evaluation_reflection: "Evaluation and reflection",
       executor_model_agent_loop: "Model-backed agent loop",
       executor_deterministic_agent_loop: "Deterministic agent loop",
       executor_workflow_engine: "Workflow engine", executor_completed: "Completed",
@@ -153,6 +154,7 @@
       executor_evidence_indexing: "证据索引",
       executor_claim_verification: "论断核验",
       executor_human_evidence_review: "人工证据审查",
+      executor_evaluation_reflection: "评估与反思",
       executor_model_agent_loop: "模型 Agent 回环",
       executor_deterministic_agent_loop: "确定性 Agent 回环",
       executor_workflow_engine: "工作流引擎", executor_completed: "已完成",
@@ -328,7 +330,7 @@
     ["discovering", "screening"],
     ["awaiting_corpus_approval", "acquiring_documents", "indexing_evidence"],
     ["drafting", "reviewing", "revising", "polishing", "final_verification"],
-    ["claim_verification", "awaiting_evidence_review"],
+    ["claim_verification", "awaiting_evidence_review", "evaluating"],
     ["completed"]
   ];
 
@@ -1566,7 +1568,7 @@
         submittedAtMs: Date.now(),
         selectionVersion: state.manualSelectionVersion,
         autoSelected: false,
-        resultRunId: null
+        resultRunId: payload.run_id || null
       });
       showFeedback(t("jobQueued"));
       closeDialog("new-run-dialog");

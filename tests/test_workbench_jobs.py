@@ -313,7 +313,11 @@ class WorkflowJobManagerTests(unittest.TestCase):
         executor.run_next()
         self.assertEqual(manager.get_job(accepted["job_id"])["status"], "succeeded")
         self.assertEqual(manager.list_jobs(active_only=True), [])
-        self.assertEqual(manager.list_jobs()[0]["run_id"], None)
+        self.assertEqual(manager.list_jobs()[0]["run_id"], run.run_id)
+        self.assertEqual(
+            manager.list_jobs()[0]["result"]["run_id"],
+            run.run_id,
+        )
         manager.shutdown(wait=False)
 
     def test_discovery_retry_is_a_durable_same_run_job(self) -> None:
@@ -484,6 +488,59 @@ class WorkflowJobManagerTests(unittest.TestCase):
             self.store.list_events(run.run_id)[-1].event_type,
             "discovery_retry_interrupted",
         )
+        manager.shutdown(wait=False)
+
+    def test_manager_pauses_active_run_left_by_backend_restart(self) -> None:
+        run = replace(
+            ResearchRun.create("Interrupted drafting"),
+            status=RunStatus.ACTIVE,
+            current_stage=WorkflowStage.DRAFTING,
+            updated_at=utc_now_iso(),
+        )
+        self.store.create_run(run)
+        job = WorkflowJob(
+            job_id="job_resume_stale",
+            kind="resume",
+            status="running",
+            run_id=run.run_id,
+            equivalent_command="literature-review resume RUN_ID",
+        )
+        self.store.put_job(job)
+
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            executor=ManualExecutor(),
+        )
+
+        recovered = self.store.get_run(run.run_id)
+        self.assertEqual(recovered.status, RunStatus.PAUSED)
+        self.assertEqual(recovered.current_stage, WorkflowStage.DRAFTING)
+        self.assertEqual(manager.get_job(job.job_id)["status"], "interrupted")
+        event = self.store.list_events(run.run_id)[-1]
+        self.assertEqual(event.event_type, "run_interrupted")
+        self.assertEqual(event.payload["reason"], "backend_restarted")
+        manager.shutdown(wait=False)
+
+    def test_manager_tolerates_interrupted_start_before_run_creation(self) -> None:
+        job = WorkflowJob(
+            job_id="job_start_before_run",
+            kind="start",
+            status="running",
+            equivalent_command="literature-review start --topic=Memory",
+            result={
+                "reserved_run_id": "run_0123456789abcdef0123456789abcdef"
+            },
+        )
+        self.store.put_job(job)
+
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            executor=ManualExecutor(),
+        )
+
+        self.assertEqual(manager.get_job(job.job_id)["status"], "interrupted")
         manager.shutdown(wait=False)
 
     def test_terminal_job_history_is_bounded(self) -> None:
@@ -767,7 +824,10 @@ class WorkflowJobManagerTests(unittest.TestCase):
                 "message": "Workflow execution failed.",
             },
         )
-        self.assertIsNone(failed["result"])
+        self.assertEqual(
+            failed["result"],
+            {"reserved_run_id": accepted["run_id"]},
+        )
         public_payload = json.dumps(failed).lower()
         self.assertNotIn("traceback", public_payload)
         self.assertNotIn("secret-value", public_payload)
