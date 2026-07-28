@@ -1,8 +1,8 @@
 {
   "agent": "Structure Mentor Agent",
-  "backend": "deterministic-fallback",
+  "backend": "deterministic",
   "status": "accepted",
-  "word_count": 3689,
+  "word_count": 3895,
   "missing_headings": [],
   "recommendations": [
     "Structure is suitable for submission."

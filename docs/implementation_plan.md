@@ -1,6 +1,6 @@
 # Development Status and Roadmap
 
-This document describes the maintained product as of v0.7.2. The original
+This document describes the maintained product as of v0.7.3. The original
 course submission is archived under `docs/course-project/`.
 
 ## Implemented
@@ -25,6 +25,10 @@ course submission is archived under `docs/course-project/`.
   interruption.
 - Versioned claims, fingerprint-bound human evidence decisions, historical PDF
   evidence retention, and deterministic audit ZIP export.
+- Fingerprint-bound corpus decisions, run-scoped evidence chunk identities,
+  fail-closed post-Polish semantic anchors, and staged transactional PDF import.
+- Exclusive per-database Workbench ownership that prevents one backend from
+  interrupting another backend's live durable Jobs.
 - macOS/Linux packaging and CI across Python 3.11 and 3.12.
 
 ## Next Priorities
@@ -34,7 +38,7 @@ course submission is archived under `docs/course-project/`.
    the current memory-agent profile as the default and add a topic-general
    profile only after its citation and quality behavior has regression tests.
 2. Promote the Agent execution journal into independently resumable Agent
-   checkpoints. In v0.7.2 the journal survives interruption, but an interrupted
+   checkpoints. In v0.7.3 the journal survives interruption, but an interrupted
    Drafting attempt restarts the complete Drafting stage from its last workflow
    checkpoint.
 3. Continue the compatibility-preserving modularization with

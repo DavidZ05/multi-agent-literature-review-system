@@ -4,7 +4,22 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## 0.7.3 - 2026-07-28
+
 ### Fixed
+
+- Scoped deterministic evidence-chunk identifiers to the run, document, and
+  citation so the same PDF can be indexed safely in multiple workflows.
+- Added a fail-closed post-Polish semantic gate for negation, numeric values,
+  directional language, comparison, modality, and named factual anchors.
+- Kept trailing citations on their own atomic clause instead of broadcasting
+  them to unrelated clauses earlier in the sentence.
+- Bound corpus decisions to a SHA-256 fingerprint and exact candidate snapshot;
+  materially changed discovery metadata now returns to pending approval.
+- Added an exclusive per-database Workbench process lock so a second backend
+  cannot interrupt Jobs owned by a live instance.
+- Staged and parsed imported PDFs before atomically replacing the current
+  document and evidence chunks, with file rollback on database failure.
 
 - Increment `ResearchRun.revision_count` atomically when human evidence review
   returns a run to Drafting, and distinguish that workflow-level count from

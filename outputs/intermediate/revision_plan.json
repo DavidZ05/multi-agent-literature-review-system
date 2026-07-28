@@ -1,6 +1,6 @@
 {
   "agent": "Review Synthesizer Agent",
-  "backend": "deterministic-fallback",
+  "backend": "deterministic",
   "status": "accepted",
   "blocking_agents": [],
   "must_fix": [],

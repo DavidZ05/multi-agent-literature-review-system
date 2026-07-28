@@ -93,13 +93,11 @@ class ClaimExtractor:
 
         for paragraph_number, (paragraph_section, paragraph) in enumerate(paragraphs):
             for sentence_number, sentence in enumerate(_split_sentences(paragraph)):
-                sentence_citations = tuple(dict.fromkeys(_CITATION.findall(sentence)))
                 for clause_number, clause in enumerate(_split_atomic_clauses(sentence)):
                     text = clause.strip()
                     if not text or _is_reference_entry(text):
                         continue
-                    own_citations = tuple(dict.fromkeys(_CITATION.findall(text)))
-                    citation_keys = own_citations or sentence_citations
+                    citation_keys = tuple(dict.fromkeys(_CITATION.findall(text)))
                     claim_type = _classify(text, citation_keys)
                     requires_citation = claim_type in {
                         ClaimType.FACTUAL,

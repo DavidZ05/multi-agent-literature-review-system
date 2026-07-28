@@ -483,12 +483,21 @@ class WorkbenchServiceTests(unittest.TestCase):
         self.assertEqual(stored_candidate.status, CandidateStatus.APPROVED)
         self.assertEqual(decision.actor, "workbench")
         self.assertEqual(
-            details,
+            {
+                key: value
+                for key, value in details.items()
+                if not key.startswith("candidate_")
+            },
             {
                 "category": category,
                 "contribution": contribution,
                 "tags": list(tags),
             },
+        )
+        self.assertEqual(details["candidate_snapshot"], self.pending.to_dict())
+        self.assertEqual(
+            details["candidate_fingerprint"],
+            self.pending.approval_fingerprint(),
         )
         self.assertEqual(result["candidate"], stored_candidate.to_dict())
         self.assertEqual(result["decision"], decision.to_dict())
@@ -596,7 +605,11 @@ class WorkbenchServiceTests(unittest.TestCase):
         )[0]
         self.assertEqual(stored_candidate.status, CandidateStatus.REJECTED)
         self.assertEqual(decision.actor, "workbench")
-        self.assertEqual(details, {})
+        self.assertEqual(details["candidate_snapshot"], self.pending.to_dict())
+        self.assertEqual(
+            details["candidate_fingerprint"],
+            self.pending.approval_fingerprint(),
+        )
         self.assertEqual(result["candidate"], stored_candidate.to_dict())
         self.assertEqual(result["decision"], decision.to_dict())
         self.assertEqual(
@@ -634,7 +647,11 @@ class WorkbenchServiceTests(unittest.TestCase):
         )[0]
         self.assertEqual(stored_candidate.status, CandidateStatus.DEFERRED)
         self.assertEqual(decision.actor, "workbench")
-        self.assertEqual(details, {})
+        self.assertEqual(details["candidate_snapshot"], self.pending.to_dict())
+        self.assertEqual(
+            details["candidate_fingerprint"],
+            self.pending.approval_fingerprint(),
+        )
         self.assertEqual(result["candidate"], stored_candidate.to_dict())
         self.assertEqual(result["decision"], decision.to_dict())
         self.assertEqual(

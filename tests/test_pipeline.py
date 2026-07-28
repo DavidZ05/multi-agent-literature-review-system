@@ -518,6 +518,80 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(report["citation_context_drift"])
         self.assertTrue(report["references_changed"])
 
+    def test_final_verification_rejects_semantic_anchor_changes(self) -> None:
+        papers = [
+            {
+                "citation_key": "alpha2024",
+                "title": "Model Alpha",
+                "authors": ["A Researcher"],
+                "year": 2024,
+                "venue": "Test venue",
+                "url": "https://example.test/alpha",
+                "category": "evaluation",
+                "contribution": "Reports a 12 percent accuracy improvement.",
+                "evidence": "verified",
+                "tags": ["accuracy"],
+            }
+        ]
+        accepted = (
+            "## Abstract\n"
+            "Model Alpha may improve accuracy by 12% [alpha2024].\n\n"
+            "## Implications for Multi-Agent Literature Review Systems\n"
+            "Evidence remains traceable.\n\n"
+            "## References\n"
+        )
+        cases = {
+            "negation": "Model Alpha may not improve accuracy by 12% [alpha2024].",
+            "direction": "Model Alpha may decrease accuracy by 12% [alpha2024].",
+            "numbers": "Model Alpha may improve accuracy by 21% [alpha2024].",
+            "modality": "Model Alpha always improves accuracy by 12% [alpha2024].",
+            "named_entities": "Model Beta may improve accuracy by 12% [alpha2024].",
+        }
+
+        for expected_anchor, replacement in cases.items():
+            with self.subTest(expected_anchor):
+                polished = accepted.replace(
+                    "Model Alpha may improve accuracy by 12% [alpha2024].",
+                    replacement,
+                )
+                report = FinalVerificationReviewer().review(accepted, polished, papers)
+
+                self.assertEqual(report["status"], "revise")
+                self.assertIn(
+                    expected_anchor,
+                    report["semantic_drift"][0]["changed_anchors"],
+                )
+
+    def test_final_verification_accepts_semantically_safe_rewording(self) -> None:
+        papers = [
+            {
+                "citation_key": "alpha2024",
+                "title": "Model Alpha",
+                "authors": ["A Researcher"],
+                "year": 2024,
+                "venue": "Test venue",
+                "url": "https://example.test/alpha",
+                "category": "evaluation",
+                "contribution": "Reports an accuracy improvement.",
+                "evidence": "verified",
+                "tags": ["accuracy"],
+            }
+        ]
+        accepted = (
+            "## Abstract\nModel Alpha may improve accuracy [alpha2024].\n\n"
+            "## Implications for Multi-Agent Literature Review Systems\n"
+            "Evidence remains traceable.\n\n## References\n"
+        )
+        polished = accepted.replace(
+            "Model Alpha may improve accuracy [alpha2024].",
+            "Model Alpha could improve overall accuracy [alpha2024].",
+        )
+
+        report = FinalVerificationReviewer().review(accepted, polished, papers)
+
+        self.assertEqual(report["status"], "accepted")
+        self.assertEqual(report["semantic_drift"], [])
+
     def test_runtime_config_defaults_to_deterministic_without_env(self) -> None:
         config = AgentRuntimeConfig.from_env({})
 

@@ -39,6 +39,14 @@ class UnsupportedPlatformError(RuntimeError):
     """Raised when persistent workflow locking is unavailable."""
 
 
+class WorkbenchAlreadyRunningError(RuntimeError):
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = Path(database_path)
+        super().__init__(
+            f"another Workbench is already using database {self.database_path}"
+        )
+
+
 def require_supported_platform() -> None:
     if fcntl is None:
         raise UnsupportedPlatformError(
@@ -77,6 +85,38 @@ class _AdvisoryLock:
 
     def __del__(self) -> None:
         self.release()
+
+
+class WorkbenchInstanceGuard:
+    """Own an exclusive process lock for one Workbench database."""
+
+    def __init__(self, database_path: Path) -> None:
+        database_path = Path(database_path).expanduser().resolve()
+        lock_path = database_path.parent / f".{database_path.name}.workbench.lock"
+        try:
+            self._lock = _AdvisoryLock(lock_path, shared=False)
+        except BlockingIOError as exc:
+            raise WorkbenchAlreadyRunningError(database_path) from exc
+        self.database_path = database_path
+
+    def release(self) -> None:
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            return
+        self._lock = None
+        lock.release()
+
+    def __enter__(self) -> WorkbenchInstanceGuard:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.release()
+
+    def __del__(self) -> None:
+        try:
+            self.release()
+        except Exception:
+            pass
 
 
 class ActivityReservation:
@@ -273,5 +313,7 @@ __all__ = [
     "RunBusy",
     "RunDeletionBusy",
     "UnsupportedPlatformError",
+    "WorkbenchAlreadyRunningError",
+    "WorkbenchInstanceGuard",
     "require_supported_platform",
 ]

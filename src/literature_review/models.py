@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+import hashlib
+import json
 import re
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -376,6 +378,25 @@ class CandidatePaper:
             "relevance_score": self.relevance_score,
             "status": self.status.value,
         }
+
+    def approval_snapshot(self) -> dict[str, Any]:
+        """Return the exact candidate state reviewed by a human decision."""
+        return self.to_dict()
+
+    def approval_fingerprint(self) -> str:
+        material = {
+            key: value
+            for key, value in self.to_dict().items()
+            if key
+            not in {"status", "recommendation", "relevance_score", "provenance"}
+        }
+        payload = json.dumps(
+            material,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> CandidatePaper:

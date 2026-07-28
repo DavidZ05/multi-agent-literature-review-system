@@ -1,6 +1,6 @@
 {
   "agent": "Domain Expert Agent",
-  "backend": "deterministic-fallback",
+  "backend": "deterministic",
   "status": "accepted",
   "review_focus": "memory-agent literature coverage and academic framing",
   "paper_count_reviewed": 17,

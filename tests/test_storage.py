@@ -13,6 +13,7 @@ from src.literature_review.models import (
     WorkflowStage,
     utc_now_iso,
 )
+from src.literature_review.documents import DocumentRecord, EvidenceChunk
 from src.literature_review.job_state import WorkflowJob
 from src.literature_review.storage.sqlite import (
     RunAlreadyExistsError,
@@ -238,6 +239,115 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         self.store.update_run(updated)
         self.assertEqual(self.store.get_run(self.run.run_id), updated)
         self.assertEqual(self.store.list_runs(), [updated])
+
+    def test_same_pdf_can_be_indexed_in_multiple_runs(self) -> None:
+        first = self.run
+        second = ResearchRun.create("Other memory agents")
+        self.store.create_run(first)
+        self.store.create_run(second)
+        chunks = []
+        for run in (first, second):
+            document = DocumentRecord.acquired(
+                run.run_id,
+                "sharedpaper",
+                "https://example.test/shared.pdf",
+                relative_path="documents/sharedpaper.pdf",
+                sha256="a" * 64,
+                byte_size=100,
+                access_method="downloaded",
+            )
+            self.store.put_document(document)
+            chunk = EvidenceChunk.create(
+                run_id=run.run_id,
+                document_id=document.document_id,
+                document_sha256="a" * 64,
+                citation_key="sharedpaper",
+                section="Results",
+                page_start=1,
+                page_end=1,
+                text="Shared evidence text.",
+                char_start=0,
+                char_end=21,
+                settings_fingerprint="b" * 64,
+            )
+            self.store.replace_evidence_chunks(
+                run.run_id,
+                document.document_id,
+                (chunk,),
+            )
+            chunks.append(chunk)
+
+        self.assertNotEqual(chunks[0].chunk_id, chunks[1].chunk_id)
+        self.assertEqual(len(self.store.list_evidence_chunks(first.run_id)), 1)
+        self.assertEqual(len(self.store.list_evidence_chunks(second.run_id)), 1)
+
+    def test_document_and_chunk_replacement_rolls_back_as_one_transaction(self) -> None:
+        self.store.create_run(self.run)
+        old_document = DocumentRecord.acquired(
+            self.run.run_id,
+            "paper",
+            "https://example.test/old.pdf",
+            relative_path="documents/paper.pdf",
+            sha256="a" * 64,
+            byte_size=100,
+            access_method="downloaded",
+        )
+        self.store.put_document(old_document)
+        old_chunk = EvidenceChunk.create(
+            run_id=self.run.run_id,
+            document_id=old_document.document_id,
+            document_sha256="a" * 64,
+            citation_key="paper",
+            section="Results",
+            page_start=1,
+            page_end=1,
+            text="Old evidence.",
+            char_start=0,
+            char_end=13,
+            settings_fingerprint="old",
+        )
+        self.store.replace_evidence_chunks(
+            self.run.run_id,
+            old_document.document_id,
+            (old_chunk,),
+        )
+        new_document = DocumentRecord.acquired(
+            self.run.run_id,
+            "paper",
+            "https://example.test/new.pdf",
+            relative_path="documents/paper.pdf",
+            sha256="b" * 64,
+            byte_size=120,
+            access_method="imported",
+        )
+        duplicate_chunk = EvidenceChunk.create(
+            run_id=self.run.run_id,
+            document_id=new_document.document_id,
+            document_sha256="b" * 64,
+            citation_key="paper",
+            section="Results",
+            page_start=1,
+            page_end=1,
+            text="New evidence.",
+            char_start=0,
+            char_end=13,
+            settings_fingerprint="new",
+        )
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.replace_document_with_chunks(
+                new_document,
+                (duplicate_chunk, duplicate_chunk),
+            )
+
+        self.assertEqual(
+            self.store.get_document(self.run.run_id, "paper"),
+            old_document,
+        )
+        self.assertEqual(
+            self.store.list_evidence_chunks(self.run.run_id),
+            [old_chunk],
+        )
 
     def test_compare_and_update_run_requires_matching_status_and_stage(
         self,

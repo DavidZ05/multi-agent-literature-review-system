@@ -51,7 +51,7 @@ class AgentAPISettings:
 
 @dataclass(frozen=True)
 class AgentRuntimeConfig:
-    """Shared runtime switch for deterministic agents and future API-backed agents."""
+    """Shared runtime switch for deterministic and API-backed agents."""
 
     backend: str = "deterministic"
     api_mode: str = "single"

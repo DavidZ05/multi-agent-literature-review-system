@@ -55,6 +55,9 @@ literature-review-workbench
 .review-workflow/artifacts/
 ```
 
+Only one Workbench backend may own a database at a time. A second launch exits
+with a clear error instead of changing the live instance's durable Job state.
+
 The UI creates and resumes runs, reviews candidates and claim evidence, imports
 local PDFs, exports results, and manages terminal runs. Selection survives page
 reloads; active Job state is recovered without switching away from the run being
@@ -149,6 +152,8 @@ literature-review start \
 
 New papers are normalized, deduplicated, screened, and held at
 `awaiting_corpus_approval`. They cannot be cited until a human approves them.
+A decision records the exact candidate snapshot and fingerprint reviewed;
+material metadata changes discovered later require a new decision.
 A zero-candidate run also waits instead of silently drafting from a potentially
 unrelated seed corpus.
 
@@ -179,6 +184,8 @@ The workflow acquires or imports PDFs, extracts page-aware chunks, splits the
 final survey into atomic claims, and retrieves evidence only from each claim's
 own citation key. Unsupported results wait for human evidence review. Final
 evaluation runs only after this evidence gate accepts or records allowed risk.
+Local replacements are parsed from a staging path before the current PDF and
+its SQLite evidence index are switched atomically.
 
 ```bash
 literature-review documents RUN_ID
@@ -199,8 +206,8 @@ rules, fingerprint-bound approvals, PDF replacement history, and audit contents.
 - Reviewer feedback returns to Writer; deterministic and API Writers consume the
   same blocking claim fields, and an unchanged revision is marked stalled.
 - Polish is prompted to make wording-only changes. Final Verification rejects
-  citation count, order, context, heading, reference, or high-risk factual drift
-  and retains the accepted pre-polish draft.
+  citation count, order, context, heading, reference, high-risk factual, or
+  protected semantic-anchor drift and retains the accepted pre-polish draft.
 - Optional full-text verification blocks unresolved claim-evidence failures.
 - Full-text Evaluation runs after claim verification and includes the final
   evidence decision; it is not emitted while human evidence review is pending.

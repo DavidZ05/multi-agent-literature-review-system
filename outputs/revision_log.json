@@ -1,9 +1,23 @@
 {
+  "writer_iteration_count": 2,
+  "writer_revision_count": 1,
   "iterations": [
     {
       "iteration": 1,
+      "status": "revise",
+      "unknown_citations": [],
+      "missing_citation_count": 12,
+      "unsupported_claim_count": 0,
+      "missing_sections": [],
+      "blocking_agents": [
+        "Citation Auditor Agent"
+      ]
+    },
+    {
+      "iteration": 2,
       "status": "accepted",
       "unknown_citations": [],
+      "missing_citation_count": 0,
       "unsupported_claim_count": 0,
       "missing_sections": [],
       "blocking_agents": []

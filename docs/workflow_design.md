@@ -31,6 +31,11 @@ rendering keeps equivalent CLI output consistent across services. This split
 does not change HTTP payloads, public imports, activity locking, or artifact
 contracts.
 
+The Job manager also owns an exclusive POSIX lock keyed by the resolved SQLite
+path. Only one Workbench backend can recover and mutate durable Jobs for a
+database at a time. A second process fails before startup recovery, while CLI
+operations continue to use the existing per-run activity locks.
+
 ## Discovery Gate
 
 Automatic discovery is intentionally not fully autonomous. arXiv and Semantic
@@ -97,8 +102,12 @@ retry the original discovery stage. It uses the same per-run execution lock as
 resume and deletion, so two retries cannot mutate one candidate pool at the
 same time. Retry temporarily returns the run to discovery, then restores the
 approval gate. Existing candidates and append-only human decisions are merged,
-not replaced. A paper already present in the run is not counted as a new
-candidate. If the backend exits during retry, startup recovery marks the attempt
+not replaced. Each decision includes the exact candidate snapshot and canonical
+fingerprint reviewed. If retry changes material candidate metadata, its prior
+decision remains audit history but the candidate returns to pending. Screening
+score, recommendation, and provider provenance changes are nonmaterial. A paper
+already present in the run is not counted as a new candidate. If the backend
+exits during retry, startup recovery marks the attempt
 and Job interrupted, restores the previous gate, and appends an audit event.
 Start Jobs persist their generated Run ID before execution. For any other
 interrupted Workbench Job, startup recovery changes its linked leftover `active`
@@ -135,9 +144,10 @@ flowchart LR
 
 `DocumentRecord` stores acquisition method, source URL, run-relative path,
 SHA-256, parser version, page count, extraction quality, and failure code.
-`EvidenceChunk` IDs are derived from the document checksum, page range,
-character offsets, and chunking configuration. Reprocessing unchanged input is
-stable, while changing the PDF or chunking policy changes the evidence identity.
+`EvidenceChunk` IDs are derived from the run, document, citation key, document
+checksum, page range, character offsets, and chunking configuration.
+Reprocessing unchanged input in one document is stable, while the same PDF in a
+different run receives a distinct identity and cannot collide in SQLite.
 
 PDF acquisition is limited to HTTPS and validates the PDF signature. It does
 not bypass access controls. Before any content is read, the downloader validates
@@ -146,11 +156,14 @@ and non-public destinations. An unavailable document remains in the manifest so
 the final verifier emits `full_text_unavailable` instead of pretending the
 source was checked. A user may import a locally available PDF for the same
 citation key; import runs under the per-run activity lock, reads only up to the
-configured size limit, immediately parses and indexes it, refreshes both
-evidence manifests, and replaces the latest claim verification results using
-the same contracts. If the citation already has a parsed document, the prior
-PDF metadata and chunks are archived before replacement so older claim
-verifications keep a resolvable evidence trail.
+configured size limit, writes to a private staging path, and parses and indexes
+the staged file before replacement. The current PDF is switched only after
+parsing succeeds; document metadata and chunks are replaced in one SQLite
+transaction, and a database failure restores the prior file. Evidence manifests
+and latest claim verification results are then refreshed. If the citation
+already has a parsed document, the prior PDF metadata and chunks are archived
+before the successful replacement so older claim verifications keep a
+resolvable evidence trail.
 
 ## Claim Verification Contract
 
@@ -158,8 +171,8 @@ The final polished Markdown is split into versioned `AtomicClaim` records with
 section and paragraph positions. Factual and synthesis claims require citation
 keys. Retrieval is hard-scoped to evidence chunks whose citation key matches
 the claim citation; a passage from another paper cannot satisfy the result.
-Markdown table rows are extracted independently, so a citation in one row cannot
-be inherited by a claim in another row.
+Markdown table rows and semicolon/contrast clauses are extracted independently,
+so a citation in one row or clause cannot be inherited by another claim.
 
 The deterministic verifier emits `supported`, `partially_supported`,
 `contradicted`, `not_found`, `full_text_unavailable`, or `missing_citation`.
@@ -205,9 +218,12 @@ text and standalone Orchestrator runs retain the compatible inline evaluation.
 Polish is constrained to wording-only edits. Its runtime prompt requires the
 citation-key set and claim association to remain unchanged. Final Verification
 then compares citation occurrence order and context, exact headings and
-reference entries, and high-risk uncited factual claims before rerunning
-claim-source alignment. If the polished output fails, the accepted pre-polish
-draft is retained automatically rather than sent to a human approval step.
+reference entries, high-risk uncited factual claims, and protected semantic
+anchors. Changes to negation, numeric values, direction, comparisons, modality,
+or named entities fail closed before claim-source alignment is accepted. If the
+polished output fails, the accepted pre-polish draft is retained automatically
+rather than sent to a human approval step. This deterministic anchor comparison
+blocks common factual inversions; it is not a general semantic-entailment model.
 
 ## Agent Execution Journal
 
@@ -220,7 +236,7 @@ Corresponding `agent_stage_completed` events make the Drafting sequence visible 
 SQLite and audit exports. Failed and interrupted attempts remain available for
 diagnosis instead of disappearing with a temporary directory.
 
-The durable workflow checkpoint remains the complete Drafting stage in v0.7.2.
+The durable workflow checkpoint remains the complete Drafting stage in v0.7.3.
 The journal is audit history, not a set of independently reusable Agent
 checkpoints: resuming an interrupted attempt reruns Drafting from the last valid
 workflow checkpoint. Independent Agent-level resume requires versioned input

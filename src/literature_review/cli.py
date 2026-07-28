@@ -12,6 +12,7 @@ from src.literature_review.activity import (
     ActivityCoordinator,
     RunBusy,
     RunDeletionBusy,
+    WorkbenchAlreadyRunningError,
     require_supported_platform,
 )
 from src.literature_review.config import AgentConfigurationError, AgentRuntimeConfig
@@ -734,6 +735,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         if exc.run_id is not None:
             payload["run_id"] = exc.run_id
         _print_json(payload, stream=sys.stderr)
+        return 3
+    except WorkbenchAlreadyRunningError as exc:
+        _print_json(
+            {
+                "error": "workbench_already_running",
+                "database": str(exc.database_path),
+                "message": "Stop the existing Workbench or use a different database.",
+            },
+            stream=sys.stderr,
+        )
         return 3
     except (RunNotFoundError, CandidateNotFoundError) as exc:
         _print_json(

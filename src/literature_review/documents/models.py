@@ -209,6 +209,9 @@ class EvidenceChunk:
     ) -> EvidenceChunk:
         identity = "\0".join(
             (
+                run_id,
+                document_id,
+                citation_key,
                 document_sha256,
                 str(page_start),
                 str(page_end),

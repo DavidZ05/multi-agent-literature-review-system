@@ -81,7 +81,7 @@ Reflective memory improved evaluation accuracy [memorypaper]. It reduced repeate
 
         self.assertEqual([hit.chunk.chunk_id for hit in hits], [self.chunk.chunk_id])
 
-    def test_compound_sentence_is_split_and_inherits_trailing_citation(self) -> None:
+    def test_compound_sentence_keeps_trailing_citation_on_its_own_clause(self) -> None:
         claims = ClaimExtractor().extract(
             self.run.run_id,
             "## Results\nMemory improved accuracy; however, it increased latency [memorypaper].",
@@ -89,8 +89,23 @@ Reflective memory improved evaluation accuracy [memorypaper]. It reduced repeate
         )
 
         self.assertEqual(len(claims), 2)
-        self.assertEqual(claims[0].citation_keys, ("memorypaper",))
+        self.assertEqual(claims[0].citation_keys, ())
         self.assertEqual(claims[1].citation_keys, ("memorypaper",))
+
+    def test_each_atomic_clause_keeps_only_its_explicit_citation(self) -> None:
+        claims = ClaimExtractor().extract(
+            self.run.run_id,
+            (
+                "## Results\nMemory improved accuracy [memorypaper]; "
+                "latency increased [latencypaper]."
+            ),
+            draft_version=1,
+        )
+
+        self.assertEqual(
+            [claim.citation_keys for claim in claims],
+            [("memorypaper",), ("latencypaper",)],
+        )
 
     def test_table_rows_do_not_inherit_citations_from_other_rows(self) -> None:
         claims = ClaimExtractor().extract(

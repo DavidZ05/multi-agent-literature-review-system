@@ -4,7 +4,7 @@
   "expert_panel": {
     "citation_audit": {
       "agent": "Citation Auditor Agent",
-      "backend": "deterministic-fallback",
+      "backend": "deterministic",
       "status": "accepted",
       "cited_keys": [
         "chhikara2025mem0",
@@ -26,6 +26,7 @@
         "zhong2023memorybank"
       ],
       "unknown_citations": [],
+      "missing_citations": [],
       "unsupported_claims": [],
       "missing_sections": [],
       "recommendations": [
@@ -34,7 +35,7 @@
     },
     "domain_review": {
       "agent": "Domain Expert Agent",
-      "backend": "deterministic-fallback",
+      "backend": "deterministic",
       "status": "accepted",
       "review_focus": "memory-agent literature coverage and academic framing",
       "paper_count_reviewed": 17,
@@ -58,9 +59,9 @@
     },
     "structure_review": {
       "agent": "Structure Mentor Agent",
-      "backend": "deterministic-fallback",
+      "backend": "deterministic",
       "status": "accepted",
-      "word_count": 3689,
+      "word_count": 3895,
       "missing_headings": [],
       "recommendations": [
         "Structure is suitable for submission."
@@ -69,7 +70,7 @@
   },
   "revision_plan": {
     "agent": "Review Synthesizer Agent",
-    "backend": "deterministic-fallback",
+    "backend": "deterministic",
     "status": "accepted",
     "blocking_agents": [],
     "must_fix": [],
@@ -81,6 +82,7 @@
     "iteration_stop_rule": "Stop when synthesized status is accepted or max_revision_loops is reached."
   },
   "unknown_citations": [],
+  "missing_citations": [],
   "unsupported_claims": [],
   "missing_sections": []
 }

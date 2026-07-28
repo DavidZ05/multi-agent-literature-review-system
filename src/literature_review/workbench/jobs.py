@@ -15,6 +15,7 @@ from uuid import uuid4
 from src.literature_review.activity import (
     ActivityCoordinator,
     ActivityReservation,
+    WorkbenchInstanceGuard,
 )
 from src.literature_review.job_state import ACTIVE_JOB_STATUSES, WorkflowJob
 from src.literature_review.models import (
@@ -269,6 +270,7 @@ class WorkflowJobManager:
         self.provider_names = tuple(option["id"] for option in self.provider_options)
         if not self.provider_names:
             raise ValueError("at least one literature provider must be registered")
+        self._instance_guard = WorkbenchInstanceGuard(self.store.path)
         self._activity = ActivityCoordinator.for_artifact_root(self.artifact_root)
         self._executor = (
             executor
@@ -522,7 +524,10 @@ class WorkflowJobManager:
             return [job.to_dict() for job in jobs]
 
     def shutdown(self, wait: bool = True) -> None:
-        self._executor.shutdown(wait=wait)
+        try:
+            self._executor.shutdown(wait=wait)
+        finally:
+            self._instance_guard.release()
 
     def _resume(self, run_id: str) -> ResearchRun:
         artifact_store = LocalArtifactStore(self.artifact_root)

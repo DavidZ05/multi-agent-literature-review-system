@@ -1,6 +1,6 @@
 {
   "agent": "Citation Auditor Agent",
-  "backend": "deterministic-fallback",
+  "backend": "deterministic",
   "status": "accepted",
   "cited_keys": [
     "chhikara2025mem0",
@@ -22,6 +22,7 @@
     "zhong2023memorybank"
   ],
   "unknown_citations": [],
+  "missing_citations": [],
   "unsupported_claims": [],
   "missing_sections": [],
   "recommendations": [

@@ -781,6 +781,63 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
                 ],
             )
 
+    def replace_document_with_chunks(
+        self,
+        document: DocumentRecord,
+        chunks: list[EvidenceChunk] | tuple[EvidenceChunk, ...],
+    ) -> None:
+        """Atomically replace one citation's document record and evidence index."""
+        self._require_run(document.run_id)
+        if any(
+            chunk.run_id != document.run_id
+            or chunk.document_id != document.document_id
+            or chunk.citation_key != document.citation_key
+            for chunk in chunks
+        ):
+            raise ValueError("evidence chunks must match the replacement document")
+        with self._connection() as connection, connection:
+            connection.execute(
+                """DELETE FROM documents
+                WHERE run_id=? AND citation_key=? AND document_id<>?""",
+                (document.run_id, document.citation_key, document.document_id),
+            )
+            connection.execute(
+                """INSERT INTO documents
+                (document_id,run_id,citation_key,status,sha256,payload_json)
+                VALUES (?,?,?,?,?,?)
+                ON CONFLICT(document_id) DO UPDATE SET
+                status=excluded.status,sha256=excluded.sha256,
+                payload_json=excluded.payload_json""",
+                (
+                    document.document_id,
+                    document.run_id,
+                    document.citation_key,
+                    document.status.value,
+                    document.sha256,
+                    json.dumps(document.to_dict(), sort_keys=True),
+                ),
+            )
+            connection.execute(
+                "DELETE FROM evidence_chunks WHERE document_id=?",
+                (document.document_id,),
+            )
+            connection.executemany(
+                """INSERT INTO evidence_chunks
+                (chunk_id,run_id,document_id,citation_key,page_start,payload_json)
+                VALUES (?,?,?,?,?,?)""",
+                [
+                    (
+                        chunk.chunk_id,
+                        chunk.run_id,
+                        chunk.document_id,
+                        chunk.citation_key,
+                        chunk.page_start,
+                        json.dumps(chunk.to_dict(), sort_keys=True),
+                    )
+                    for chunk in chunks
+                ],
+            )
+
     def list_evidence_chunks(
         self,
         run_id: str,
@@ -994,13 +1051,35 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
         else:
             merged = replace(
                 candidate,
+                year=(
+                    candidate.year if candidate.year is not None else existing.year
+                ),
+                venue=candidate.venue or existing.venue,
+                abstract=candidate.abstract or existing.abstract,
+                doi=candidate.doi or existing.doi,
+                arxiv_id=candidate.arxiv_id or existing.arxiv_id,
+                semantic_scholar_id=(
+                    candidate.semantic_scholar_id or existing.semantic_scholar_id
+                ),
                 source_urls=tuple(
                     sorted(set(existing.source_urls) | set(candidate.source_urls))
+                ),
+                open_access_pdf_url=(
+                    candidate.open_access_pdf_url or existing.open_access_pdf_url
                 ),
                 provenance=tuple(
                     sorted(set(existing.provenance) | set(candidate.provenance))
                 ),
-                status=existing.status,
+                status=CandidateStatus.PENDING,
+            )
+            merged = replace(
+                merged,
+                status=(
+                    existing.status
+                    if existing.approval_fingerprint()
+                    == merged.approval_fingerprint()
+                    else CandidateStatus.PENDING
+                ),
             )
         payload = merged.to_dict()
         with self._connection() as connection, connection:

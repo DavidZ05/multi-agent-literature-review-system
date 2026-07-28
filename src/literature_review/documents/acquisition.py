@@ -161,6 +161,7 @@ class DocumentAcquirer:
         artifact_store: LocalArtifactStore,
         *,
         source_label: str = "https://local.invalid/imported-pdf",
+        relative_path: str | None = None,
     ) -> DocumentRecord:
         if len(content) > self.max_pdf_bytes:
             raise DocumentAcquisitionError(
@@ -169,7 +170,7 @@ class DocumentAcquirer:
             )
         if not content.startswith(b"%PDF-"):
             raise DocumentAcquisitionError("imported file is not a PDF", code="not_pdf")
-        relative_path = f"documents/{_safe_filename(citation_key)}.pdf"
+        relative_path = relative_path or document_relative_path(citation_key)
         artifact = artifact_store.write_bytes(run_id, relative_path, content)
         return DocumentRecord.acquired(
             run_id,
@@ -192,6 +193,10 @@ def _safe_filename(citation_key: str) -> str:
     if not normalized:
         raise DocumentAcquisitionError("citation key has no safe filename", code="unsafe_citation_key")
     return normalized[:120]
+
+
+def document_relative_path(citation_key: str) -> str:
+    return f"documents/{_safe_filename(citation_key)}.pdf"
 
 
 def _reject_local_host(hostname: str) -> None:
@@ -247,5 +252,6 @@ __all__ = [
     "AcquisitionResult",
     "DocumentAcquirer",
     "DocumentAcquisitionError",
+    "document_relative_path",
     "resolve_pdf_url",
 ]

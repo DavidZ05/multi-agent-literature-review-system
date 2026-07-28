@@ -28,7 +28,7 @@ class PackagingTests(unittest.TestCase):
     def test_public_project_files_are_ready_for_distribution(self) -> None:
         required_files = {
             "LICENSE": "MIT License",
-            "CHANGELOG.md": "0.7.2",
+            "CHANGELOG.md": "0.7.3",
             "CONTRIBUTING.md": "Contributing",
             "SECURITY.md": "Security",
         }
@@ -41,8 +41,8 @@ class PackagingTests(unittest.TestCase):
                 self.assertNotIn("TBD", text)
 
         security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn("| 0.7.2   | Yes", security)
-        self.assertIn("| <= 0.7.1 | No", security)
+        self.assertIn("| 0.7.3   | Yes", security)
+        self.assertIn("| <= 0.7.2 | No", security)
 
     def test_pyproject_declares_supported_install_and_console_command(self) -> None:
         metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())

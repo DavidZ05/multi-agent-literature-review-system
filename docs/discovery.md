@@ -78,6 +78,12 @@ preserved; new papers are deduplicated against the accumulated pool. Attempt
 records store provider selection, queries, limits, failures, and the
 retrieved/normalized/deduplicated/screened/new-candidate funnel.
 
+Every corpus decision stores the exact candidate snapshot and a canonical
+SHA-256 fingerprint. Screening scores, recommendations, and provider provenance
+may be refreshed without invalidating a decision. A change to bibliographic,
+identifier, source, abstract, or PDF metadata returns the candidate to `pending`
+so the earlier human decision cannot authorize different material later.
+
 Provider responses are cached in SQLite for 24 hours. arXiv calls are spaced by
 at least three seconds, and Semantic Scholar calls use conservative throttling.
 If every provider fails, the run enters `retry_wait`. Partial failures remain

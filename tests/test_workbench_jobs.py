@@ -14,6 +14,7 @@ from src.literature_review.activity import (
     ActivityCoordinator,
     RunBusy,
     RunDeletionBusy,
+    WorkbenchAlreadyRunningError,
 )
 from src.literature_review.models import (
     CandidatePaper,
@@ -319,6 +320,38 @@ class WorkflowJobManagerTests(unittest.TestCase):
             run.run_id,
         )
         manager.shutdown(wait=False)
+
+    def test_second_manager_cannot_interrupt_live_workbench_jobs(self) -> None:
+        executor = ManualExecutor()
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            engine_builder=lambda *args, **kwargs: FakeEngine(
+                ResearchRun.create("Memory agents")
+            ),
+            executor=executor,
+        )
+        accepted = manager.submit_start(self._request())
+
+        try:
+            with self.assertRaises(WorkbenchAlreadyRunningError):
+                WorkflowJobManager(
+                    SQLiteWorkflowStore(self.store.path),
+                    self.artifact_root,
+                    executor=ManualExecutor(),
+                )
+            stored = self.store.get_job(accepted["job_id"])
+            assert stored is not None
+            self.assertEqual(stored.status, "queued")
+        finally:
+            manager.shutdown(wait=False)
+
+        replacement = WorkflowJobManager(
+            SQLiteWorkflowStore(self.store.path),
+            self.artifact_root,
+            executor=ManualExecutor(),
+        )
+        replacement.shutdown(wait=False)
 
     def test_discovery_retry_is_a_durable_same_run_job(self) -> None:
         run = replace(

@@ -45,7 +45,10 @@ literature-review import-pdf RUN_ID CITATION_KEY /path/to/paper.pdf
 
 The latest claims are reverified immediately. If a parsed PDF is replaced, its
 prior file, metadata, and chunks are archived so earlier claim versions remain
-resolvable in the audit trail.
+resolvable in the audit trail. The new file is first parsed and indexed from a
+staging path. Parse failure leaves the current PDF and database unchanged;
+document and chunk replacement is one SQLite transaction, with the prior file
+restored if that transaction fails.
 
 Record a human decision and resume:
 
@@ -83,4 +86,4 @@ The deterministic verifier is conservative. `supported` means a
 citation-scoped passage contains the material terms of the claim; it is not a
 guarantee of expert scientific correctness. Central conclusions still require
 reading the cited pages. Scanned PDFs may be marked `low_quality`; OCR is not
-included in v0.7.2.
+included in v0.7.3.

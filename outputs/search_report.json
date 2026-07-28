@@ -1,0 +1,442 @@
+{
+  "agent": "Search Agent",
+  "backend": "deterministic",
+  "query": "Memory-Augmented LLM Agents: Mechanisms, Evaluation, and Reliability in Multi-Agent Systems",
+  "date": "2026-07-28",
+  "records_identified": 17,
+  "records_included": 17,
+  "inclusion_criteria": [
+    "Directly addresses LLM agent memory mechanisms, management, or evaluation.",
+    "Provides a reusable design pattern, benchmark, or empirical finding.",
+    "Has a stable arXiv or publisher URL for reference verification."
+  ],
+  "grouped_papers": {
+    "memory mechanism": [
+      {
+        "citation_key": "packer2023memgpt",
+        "title": "MemGPT: Towards LLMs as Operating Systems",
+        "authors": [
+          "Charles Packer",
+          "Sarah Wooders",
+          "Kevin Lin",
+          "Vivian Fang",
+          "Shishir G. Patil",
+          "Ion Stoica",
+          "Joseph E. Gonzalez"
+        ],
+        "year": 2023,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2310.08560",
+        "category": "memory mechanism",
+        "contribution": "Introduces virtual context management with memory tiers inspired by operating systems.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "hierarchical memory",
+          "virtual context",
+          "long context"
+        ]
+      },
+      {
+        "citation_key": "zhong2023memorybank",
+        "title": "MemoryBank: Enhancing Large Language Models with Long-Term Memory",
+        "authors": [
+          "Wanjun Zhong",
+          "Lianghong Guo",
+          "Qiqi Gao",
+          "He Ye",
+          "Yanlin Wang"
+        ],
+        "year": 2023,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2305.10250",
+        "category": "memory mechanism",
+        "contribution": "Implements long-term user memory with updating and forgetting mechanisms for sustained interaction.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "long-term memory",
+          "forgetting",
+          "personalization"
+        ]
+      },
+      {
+        "citation_key": "shinn2023reflexion",
+        "title": "Reflexion: Language Agents with Verbal Reinforcement Learning",
+        "authors": [
+          "Noah Shinn",
+          "Federico Cassano",
+          "Edward Berman",
+          "Ashwin Gopinath",
+          "Karthik Narasimhan",
+          "Shunyu Yao"
+        ],
+        "year": 2023,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2303.11366",
+        "category": "memory mechanism",
+        "contribution": "Uses verbal reflections stored in episodic memory to improve later agent trials without weight updates.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "reflection",
+          "episodic memory",
+          "feedback"
+        ]
+      },
+      {
+        "citation_key": "zhang2024survey",
+        "title": "A Survey on the Memory Mechanism of Large Language Model based Agents",
+        "authors": [
+          "Zeyu Zhang",
+          "Xiaohe Bo",
+          "Chen Ma",
+          "Rui Li",
+          "Xu Chen",
+          "Quanyu Dai",
+          "Jieming Zhu",
+          "Zhenhua Dong",
+          "Ji-Rong Wen"
+        ],
+        "year": 2024,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2404.13501",
+        "category": "memory mechanism",
+        "contribution": "Provides an early systematic review of memory design, evaluation, applications, and limitations in LLM agents.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "survey",
+          "memory design",
+          "applications"
+        ]
+      },
+      {
+        "citation_key": "xu2025amem",
+        "title": "A-MEM: Agentic Memory for LLM Agents",
+        "authors": [
+          "Wujiang Xu",
+          "Zujie Liang",
+          "Kai Mei",
+          "Hang Gao",
+          "Juntao Tan",
+          "Yongfeng Zhang"
+        ],
+        "year": 2025,
+        "venue": "NeurIPS 2025 / arXiv preprint",
+        "url": "https://arxiv.org/abs/2502.12110",
+        "category": "memory mechanism",
+        "contribution": "Proposes an agentic memory system that dynamically organizes memories using Zettelkasten-style indexing, linking, and memory evolution.",
+        "evidence": "verified via arXiv page; accepted at NeurIPS 2025",
+        "tags": [
+          "agentic memory",
+          "dynamic organization",
+          "Zettelkasten",
+          "memory evolution"
+        ]
+      },
+      {
+        "citation_key": "chhikara2025mem0",
+        "title": "Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory",
+        "authors": [
+          "Prateek Chhikara",
+          "Dev Khant",
+          "Saket Aryan",
+          "Taranjeet Singh",
+          "Deshraj Yadav"
+        ],
+        "year": 2025,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2504.19413",
+        "category": "memory mechanism",
+        "contribution": "Presents a scalable memory-centric architecture that extracts, consolidates, and retrieves salient conversational information, including a graph-memory variant.",
+        "evidence": "verified via arXiv page",
+        "tags": [
+          "production memory",
+          "long-term memory",
+          "graph memory",
+          "scalable retrieval"
+        ]
+      },
+      {
+        "citation_key": "du2026memory",
+        "title": "Memory for Autonomous LLM Agents: Mechanisms, Evaluation, and Emerging Frontiers",
+        "authors": [
+          "Pengfei Du"
+        ],
+        "year": 2026,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2603.07670",
+        "category": "memory mechanism",
+        "contribution": "Frames agent memory as a write-manage-read loop and surveys mechanism families through early 2026.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "survey",
+          "taxonomy",
+          "write-manage-read"
+        ]
+      }
+    ],
+    "memory reliability": [
+      {
+        "citation_key": "xiong2025memory",
+        "title": "How Memory Management Impacts LLM Agents: An Empirical Study of Experience-Following Behavior",
+        "authors": [
+          "Zidi Xiong",
+          "Yuping Lin",
+          "Wenya Xie",
+          "Pengfei He",
+          "Jiliang Tang",
+          "Himabindu Lakkaraju",
+          "Zhen Xiang"
+        ],
+        "year": 2025,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2505.16067",
+        "category": "memory reliability",
+        "contribution": "Shows how addition and deletion policies affect long-term behavior, error propagation, and stale replay.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "memory management",
+          "error propagation",
+          "deletion"
+        ]
+      },
+      {
+        "citation_key": "li2025memos",
+        "title": "MemOS: An Operating System for Memory-Augmented Generation (MAG) in Large Language Models",
+        "authors": [
+          "Zhiyu Li",
+          "Shichao Song",
+          "Hanyu Wang",
+          "Simin Niu",
+          "Ding Chen",
+          "Jiawei Yang",
+          "Chenyang Xi",
+          "Huayi Lai",
+          "Jihao Zhao",
+          "Yezhaohui Wang",
+          "Junpeng Ren",
+          "Zehao Lin",
+          "Jiahao Huo",
+          "Tianyi Chen",
+          "Kai Chen",
+          "Kehang Li",
+          "Zhiqiang Yin",
+          "Qingchen Yu",
+          "Bo Tang",
+          "Hongkang Yang",
+          "Zhi-Qin John Xu",
+          "Feiyu Xiong"
+        ],
+        "year": 2025,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2505.22101",
+        "category": "memory reliability",
+        "contribution": "Frames memory as a first-class operational resource with lifecycle governance across parametric, activation, and plaintext memory.",
+        "evidence": "verified via arXiv page",
+        "tags": [
+          "memory operating system",
+          "memory governance",
+          "lifecycle management",
+          "traceable access"
+        ]
+      }
+    ],
+    "multi-agent and embodied memory": [
+      {
+        "citation_key": "park2023generative",
+        "title": "Generative Agents: Interactive Simulacra of Human Behavior",
+        "authors": [
+          "Joon Sung Park",
+          "Joseph C. O'Brien",
+          "Carrie J. Cai",
+          "Meredith Ringel Morris",
+          "Percy Liang",
+          "Michael S. Bernstein"
+        ],
+        "year": 2023,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2304.03442",
+        "category": "multi-agent and embodied memory",
+        "contribution": "Combines observation, memory retrieval, reflection, and planning for believable multi-agent social behavior.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "multi-agent",
+          "reflection",
+          "planning"
+        ]
+      },
+      {
+        "citation_key": "wang2023voyager",
+        "title": "Voyager: An Open-Ended Embodied Agent with Large Language Models",
+        "authors": [
+          "Guanzhi Wang",
+          "Yuqi Xie",
+          "Yunfan Jiang",
+          "Ajay Mandlekar",
+          "Chaowei Xiao",
+          "Yuke Zhu",
+          "Linxi Fan",
+          "Anima Anandkumar"
+        ],
+        "year": 2023,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2305.16291",
+        "category": "multi-agent and embodied memory",
+        "contribution": "Demonstrates procedural skill memory through an expanding library of executable behaviors.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "embodied agent",
+          "skill library",
+          "lifelong learning"
+        ]
+      }
+    ],
+    "memory evaluation": [
+      {
+        "citation_key": "maharana2024locomo",
+        "title": "Evaluating Very Long-Term Conversational Memory of LLM Agents",
+        "authors": [
+          "Adyasha Maharana",
+          "Dong-Ho Lee",
+          "Sergey Tulyakov",
+          "Mohit Bansal",
+          "Francesco Barbieri",
+          "Yuwei Fang"
+        ],
+        "year": 2024,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2402.17753",
+        "category": "memory evaluation",
+        "contribution": "Introduces LoCoMo, a benchmark for very long-term dialogue memory across many sessions.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "benchmark",
+          "conversation",
+          "long-term memory"
+        ]
+      },
+      {
+        "citation_key": "wu2024longmemeval",
+        "title": "LongMemEval: Benchmarking Chat Assistants on Long-Term Interactive Memory",
+        "authors": [
+          "Di Wu",
+          "Hongwei Wang",
+          "Wenhao Yu",
+          "Yuwei Zhang",
+          "Kai-Wei Chang",
+          "Dong Yu"
+        ],
+        "year": 2024,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2410.10813",
+        "category": "memory evaluation",
+        "contribution": "Evaluates extraction, multi-session reasoning, temporal reasoning, knowledge updates, and abstention.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "benchmark",
+          "temporal reasoning",
+          "abstention"
+        ]
+      },
+      {
+        "citation_key": "hu2025memoryagentbench",
+        "title": "Evaluating Memory in LLM Agents via Incremental Multi-Turn Interactions",
+        "authors": [
+          "Yuanzhe Hu",
+          "Yu Wang",
+          "Julian McAuley"
+        ],
+        "year": 2025,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2507.05257",
+        "category": "memory evaluation",
+        "contribution": "Introduces MemoryAgentBench to evaluate accurate retrieval, test-time learning, long-range understanding, and selective forgetting in incremental multi-turn interactions.",
+        "evidence": "verified via arXiv page",
+        "tags": [
+          "MemoryAgentBench",
+          "incremental interaction",
+          "accurate retrieval",
+          "selective forgetting"
+        ]
+      },
+      {
+        "citation_key": "shutova2026structmemeval",
+        "title": "Evaluating Memory Structure in LLM Agents",
+        "authors": [
+          "Alina Shutova",
+          "Alexandra Olenina",
+          "Ivan Vinogradov",
+          "Anton Sinitsin"
+        ],
+        "year": 2026,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2602.11243",
+        "category": "memory evaluation",
+        "contribution": "Proposes StructMemEval to test whether agents organize memory into task-appropriate structures.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "benchmark",
+          "structured memory",
+          "organization"
+        ]
+      },
+      {
+        "citation_key": "wu2026longmemevalv2",
+        "title": "LongMemEval-V2: Evaluating Long-Term Agent Memory Toward Experienced Colleagues",
+        "authors": [
+          "Di Wu",
+          "Zixiang Ji",
+          "Asmi Kawatkar",
+          "Bryan Kwan",
+          "Jia-Chen Gu",
+          "Nanyun Peng",
+          "Kai-Wei Chang"
+        ],
+        "year": 2026,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2605.12493",
+        "category": "memory evaluation",
+        "contribution": "Evaluates whether agents acquire environment-specific experience from long web-agent trajectories.",
+        "evidence": "verified via arXiv search result",
+        "tags": [
+          "benchmark",
+          "web agents",
+          "environment experience"
+        ]
+      }
+    ],
+    "multi-agent orchestration": [
+      {
+        "citation_key": "hong2023metagpt",
+        "title": "MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework",
+        "authors": [
+          "Sirui Hong",
+          "Mingchen Zhuge",
+          "Jiaqi Chen",
+          "Xiawu Zheng",
+          "Yuheng Cheng",
+          "Ceyao Zhang",
+          "Jinlin Wang",
+          "Zili Wang",
+          "Steven Ka Shing Yau",
+          "Zijuan Lin",
+          "Liyang Zhou",
+          "Chenyu Ran",
+          "Lingfeng Xiao",
+          "Chenglin Wu",
+          "J\u00fcrgen Schmidhuber"
+        ],
+        "year": 2023,
+        "venue": "arXiv preprint",
+        "url": "https://arxiv.org/abs/2308.00352",
+        "category": "multi-agent orchestration",
+        "contribution": "Shows how SOP-style workflows and role specialization can reduce cascading hallucinations in LLM-based multi-agent collaboration.",
+        "evidence": "verified via arXiv page",
+        "tags": [
+          "multi-agent",
+          "SOP",
+          "role specialization",
+          "cascading hallucinations"
+        ]
+      }
+    ]
+  }
+}

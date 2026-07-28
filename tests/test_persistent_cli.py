@@ -12,6 +12,7 @@ from src.literature_review.activity import (
     ActivityCoordinator,
     RunBusy,
     RunDeletionBusy,
+    WorkbenchAlreadyRunningError,
 )
 from src.literature_review import cli
 from src.literature_review.cli import main
@@ -64,8 +65,8 @@ class PersistentCLITests(unittest.TestCase):
 
     def test_cli_entry_points_report_package_version(self) -> None:
         for entry_point, expected in (
-            (main, "literature-review 0.7.2"),
-            (cli.workbench_main, "literature-review-workbench 0.7.2"),
+            (main, "literature-review 0.7.3"),
+            (cli.workbench_main, "literature-review-workbench 0.7.3"),
         ):
             with self.subTest(expected=expected):
                 stdout = io.StringIO()
@@ -557,6 +558,21 @@ class PersistentCLITests(unittest.TestCase):
             / "resources"
             / "papers.json",
         )
+
+    def test_ui_reports_existing_workbench_without_traceback(self) -> None:
+        error = WorkbenchAlreadyRunningError(self.db_path.resolve())
+        with patch(
+            "src.literature_review.cli.run_workbench",
+            side_effect=error,
+        ):
+            code, output, stderr = self._run("ui", "--no-browser")
+
+        self.assertEqual(code, 3)
+        self.assertIsNone(output)
+        payload = json.loads(stderr)
+        self.assertEqual(payload["error"], "workbench_already_running")
+        self.assertEqual(payload["database"], str(self.db_path.resolve()))
+        self.assertNotIn("traceback", stderr.lower())
 
     def test_run_workbench_opens_browser_and_closes_runtime_on_interrupt(self) -> None:
         from src.literature_review.cli import run_workbench

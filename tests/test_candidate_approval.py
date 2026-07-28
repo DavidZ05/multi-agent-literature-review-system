@@ -220,6 +220,86 @@ class ApprovalServiceTests(unittest.TestCase):
             added["evidence"],
             "metadata verified; full-text verification pending",
         )
+        decision, details = self.store.list_corpus_decisions(self.run.run_id)[0]
+        self.assertEqual(decision.status, CandidateStatus.APPROVED)
+        self.assertEqual(
+            details["candidate_fingerprint"],
+            candidate().approval_fingerprint(),
+        )
+        self.assertEqual(
+            details["candidate_snapshot"]["title"],
+            "Novel Reflective Memory Agents",
+        )
+
+    def test_material_change_after_approval_requires_reapproval(self) -> None:
+        self.service.approve(
+            self.run.run_id,
+            "cand_one",
+            reason="Core evidence",
+            category="memory mechanism",
+            contribution="Introduces reflective agent memory.",
+            tags=("memory", "reflection"),
+        )
+
+        changed = replace(candidate(), title="Corrected Reflective Memory Agents")
+        self.store.upsert_candidate(self.run.run_id, changed)
+
+        current = self.store.get_candidate(self.run.run_id, "cand_one")
+        self.assertEqual(current.status, CandidateStatus.PENDING)
+        seed_path = Path(__file__).resolve().parents[1] / "data" / "papers.json"
+        records = self.service.build_approved_corpus(self.run.run_id, seed_path)
+        self.assertNotIn(changed.title, [item["title"] for item in records])
+
+        self.service.approve(
+            self.run.run_id,
+            "cand_one",
+            reason="Reviewed corrected metadata",
+            category="memory mechanism",
+            contribution="Introduces reflective agent memory.",
+            tags=("memory", "reflection"),
+        )
+        records = self.service.build_approved_corpus(self.run.run_id, seed_path)
+        self.assertIn(changed.title, [item["title"] for item in records])
+
+    def test_nonmaterial_screening_change_preserves_approval(self) -> None:
+        self.service.approve(
+            self.run.run_id,
+            "cand_one",
+            reason="Core evidence",
+            category="memory mechanism",
+            contribution="Introduces reflective agent memory.",
+            tags=("memory",),
+        )
+
+        rescored = replace(
+            candidate(provenance=("semantic_scholar:s2-paper",)),
+            relevance_score=0.8,
+            recommendation=ScreeningRecommendation.REVIEW,
+        )
+        self.store.upsert_candidate(self.run.run_id, rescored)
+
+        current = self.store.get_candidate(self.run.run_id, "cand_one")
+        self.assertEqual(current.status, CandidateStatus.APPROVED)
+        self.assertEqual(current.relevance_score, 0.8)
+
+    def test_partial_provider_record_does_not_invalidate_approval(self) -> None:
+        richer = replace(candidate(), semantic_scholar_id="s2-paper")
+        self.store.upsert_candidate(self.run.run_id, richer)
+        self.service.approve(
+            self.run.run_id,
+            "cand_one",
+            reason="Core evidence",
+            category="memory mechanism",
+            contribution="Introduces reflective agent memory.",
+            tags=("memory",),
+        )
+
+        partial = replace(candidate(), semantic_scholar_id=None)
+        self.store.upsert_candidate(self.run.run_id, partial)
+
+        current = self.store.get_candidate(self.run.run_id, "cand_one")
+        self.assertEqual(current.status, CandidateStatus.APPROVED)
+        self.assertEqual(current.semantic_scholar_id, "s2-paper")
 
     def test_rejected_candidate_never_enters_corpus(self) -> None:
         self.service.reject(

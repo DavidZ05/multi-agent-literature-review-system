@@ -110,13 +110,18 @@ class EvaluationReflectionAgent(RuntimeAwareAgent):
                 "Polish must be followed by final verification because style editing can hide evidence drift.",
                 "Long-task source expansion should be handled at Search and human checkpoint stages, not by allowing Writer to invent references.",
                 "Final artifact review should check configuration-safety notes, especially API key handling and reproducible fallback behavior.",
-                "A future API-backed version should keep the same artifact contracts and citation gate.",
+                "API-backed execution must keep the same artifact contracts and "
+                "protected citation gates.",
             ],
             "next_run_improvements": [
-                "Add external search APIs for candidate discovery.",
-                "Add full-text PDF claim verification for high-risk claims.",
-                "Add an explicit coverage-insufficient status that asks for more papers before Writer proceeds.",
-                "Let human reviewers approve corpus additions before Writer uses them.",
+                "Use discovery retries and topic-specific queries when seed "
+                "coverage is weak.",
+                "Enable full-text verification and inspect unavailable or "
+                "low-quality PDFs for high-risk claims.",
+                "Add an explicit coverage-insufficient status that asks for more "
+                "papers before Writer proceeds.",
+                "Review candidates again whenever material metadata changes "
+                "invalidate an earlier approval.",
             ],
         }
 

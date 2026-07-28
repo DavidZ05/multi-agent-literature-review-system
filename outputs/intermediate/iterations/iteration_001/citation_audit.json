@@ -1,0 +1,80 @@
+{
+  "agent": "Citation Auditor Agent",
+  "backend": "deterministic",
+  "status": "revise",
+  "cited_keys": [
+    "chhikara2025mem0",
+    "du2026memory",
+    "hong2023metagpt",
+    "hu2025memoryagentbench",
+    "li2025memos",
+    "maharana2024locomo",
+    "packer2023memgpt",
+    "park2023generative",
+    "shinn2023reflexion",
+    "shutova2026structmemeval",
+    "wang2023voyager",
+    "wu2024longmemeval",
+    "wu2026longmemevalv2",
+    "xiong2025memory",
+    "xu2025amem",
+    "zhang2024survey",
+    "zhong2023memorybank"
+  ],
+  "unknown_citations": [],
+  "missing_citations": [
+    {
+      "sentence": "This survey reviews memory-augmented LLM agents through three linked questions: what memory mechanisms are used, how they are evaluated, and what reliability risks appear when memory is deployed in multi-agent systems.",
+      "section": "Abstract"
+    },
+    {
+      "sentence": "However, the same mechanisms that improve continuity can also preserve mistakes, replay stale experience, and spread incorrect facts across agents.",
+      "section": "Abstract"
+    },
+    {
+      "sentence": "The research question guiding this survey is: **How do memory mechanisms improve the reliability, continuity, and coordination of LLM-based multi-agent systems?**",
+      "section": "1. Introduction"
+    },
+    {
+      "sentence": "This makes the survey suitable for the course project: the system demonstrates automated research, drafting, review, and polish while keeping citation hallucination inspectable.",
+      "section": "2. Methodology"
+    },
+    {
+      "sentence": "These systems show that memory is not merely recall; it is also abstraction.",
+      "section": "4.2 Reflective and Episodic Memory"
+    },
+    {
+      "sentence": "Long-context models reduce pressure on external memory, but they do not remove the need to manage attention.",
+      "section": "4.3 Hierarchical Virtual Context"
+    },
+    {
+      "sentence": "The reliability literature shows why that is dangerous: old records may be similar enough to retrieve but wrong for the current task.",
+      "section": "4.5 Memory Management and Forgetting"
+    },
+    {
+      "sentence": "The second is temporal reasoning: can it distinguish older mechanisms from newer benchmarks and avoid calling a 2023 method a response to a 2026 paper?",
+      "section": "5. Evaluation"
+    },
+    {
+      "sentence": "Polishing improves fluency, but fluency can hide weak evidence.",
+      "section": "6. Reliability Risks"
+    },
+    {
+      "sentence": "The Polish Agent can improve language but cannot introduce new claims or references.",
+      "section": "7. Implications for Multi-Agent Literature Review Systems"
+    },
+    {
+      "sentence": "It also creates a natural feedback loop: if the Reviewer finds an unsupported claim, the Writer must either cite a verified source or remove the claim.",
+      "section": "7. Implications for Multi-Agent Literature Review Systems"
+    },
+    {
+      "sentence": "The fourth checkpoint is final acceptance, where a human evaluates whether the generated survey satisfies the course assignment rather than only passing automatic checks.",
+      "section": "7. Implications for Multi-Agent Literature Review Systems"
+    }
+  ],
+  "unsupported_claims": [],
+  "missing_sections": [],
+  "recommendations": [
+    "Add approved citations to high-risk factual claims or remove those claims."
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "agent": "Final Verification Reviewer",
-  "backend": "deterministic-fallback",
+  "backend": "deterministic",
   "status": "accepted",
   "citations_before_polish": [
     "chhikara2025mem0",
@@ -42,7 +42,13 @@
   ],
   "new_citations_after_polish": [],
   "removed_citations_after_polish": [],
+  "citation_sequence_changed": false,
+  "citation_context_drift": [],
+  "semantic_drift": [],
+  "headings_changed": false,
+  "references_changed": false,
   "unknown_citations": [],
+  "missing_citations": [],
   "unsupported_claims": [],
   "missing_sections": [],
   "recommendations": [

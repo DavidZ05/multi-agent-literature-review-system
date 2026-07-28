@@ -1,16 +1,14 @@
 # Memory-Augmented LLM Agents: Mechanisms, Evaluation, and Reliability in Multi-Agent Systems
 
 ## Abstract
-LLM agents become useful over long horizons only when they can preserve, organize, retrieve, and revise information beyond a single context window. This survey reviews memory-augmented LLM agents through three linked questions: what memory mechanisms are used, how they are evaluated, and what reliability risks appear when memory is deployed in multi-agent systems. The reviewed literature suggests that agent memory is best understood as a write-manage-read control loop rather than a passive database. Retrieval stores, reflection buffers, hierarchical virtual context, skill libraries, and learned or rule-based forgetting policies offer complementary benefits. However, the same mechanisms that improve continuity can also preserve mistakes, replay stale experience, and spread incorrect facts across agents. For multi-agent literature-review systems, the safest design is therefore not maximum memory, but verified memory: shared artifacts should carry citation keys, source URLs, confidence labels, and reviewer decisions.
+LLM agents become useful over long horizons only when they can preserve, organize, retrieve, and revise information beyond a single context window. The reviewed literature suggests that agent memory is best understood as a write-manage-read control loop rather than a passive database. Retrieval stores, reflection buffers, hierarchical virtual context, skill libraries, and learned or rule-based forgetting policies offer complementary benefits. For multi-agent literature-review systems, the safest design is therefore not maximum memory, but verified memory: shared artifacts should carry citation keys, source URLs, confidence labels, and reviewer decisions.
 
 ## 1. Introduction
 A stateless language model can answer a prompt, but an agent must act across time. It observes new information, chooses actions, receives feedback, and should avoid repeating old mistakes. Memory is the component that connects these episodes. Recent surveys frame memory as a core capability for autonomous LLM agents, not as a convenience feature (Du et al., 2026 [du2026memory]; Zhang et al., 2024 [zhang2024survey]). The problem is especially visible in multi-agent systems: one agent may retrieve papers, another writes, and another checks claims. Unless their intermediate artifacts are persistent and verifiable, later agents inherit untraceable claims.
 
-The research question guiding this survey is: **How do memory mechanisms improve the reliability, continuity, and coordination of LLM-based multi-agent systems?**
-
 ## 2. Methodology
 This survey uses a corpus-first narrative review method. The Search Agent starts from a verified set of papers stored in `data/papers.json`, where each record contains a citation key, bibliographic metadata, URL, topic category, and contribution note. The inclusion criteria are deliberately narrow: a paper must address memory mechanisms, memory evaluation, memory management, or memory-dependent behavior in LLM agents. General LLM papers are excluded unless they directly inform agent memory design. The Writer Agent then organizes the evidence by mechanism family rather than by chronology, because the goal is to compare design choices that a builder of a multi-agent system must make.
-The method is not a full systematic review. It does not claim exhaustive coverage of every paper on agent memory, and it does not perform meta-analysis. Instead, it prioritizes traceability and reproducibility. Every cited claim must be tied to a citation key in the corpus, and the final reference list is generated from that corpus. This makes the survey suitable for the course project: the system demonstrates automated research, drafting, review, and polish while keeping citation hallucination inspectable.
+The method is not a full systematic review. It does not claim exhaustive coverage of every paper on agent memory, and it does not perform meta-analysis. Instead, it prioritizes traceability and reproducibility. Every cited claim must be tied to a citation key in the corpus, and the final reference list is generated from that corpus.
 
 ## 3. Taxonomy of Agent Memory
 The literature converges on three useful axes. First, memory differs by temporal scope: short-term context, episodic traces, long-term user or task facts, and procedural skills. Second, memory differs by representation: raw conversation logs, summarized facts, vector embeddings, structured files, or executable code. Third, memory differs by control policy: always write, selectively write, consolidate, forget, or retrieve conditionally. Packer et al., 2023 [packer2023memgpt] models memory as a virtual context hierarchy, while Zhong et al., 2023 [zhong2023memorybank] emphasizes long-term personal memory and forgetting-inspired updates. Xu et al., 2025 [xu2025amem] adds a more dynamic view in which memories are indexed, linked, and evolved as an organized knowledge network.
@@ -39,6 +37,52 @@ Key reviewed sources and their roles in the taxonomy.
 | Shutova et al., 2026 [shutova2026structmemeval] | memory evaluation | Proposes StructMemEval to test whether agents organize memory into task-appropriate structures. |
 | Wu et al., 2026 [wu2026longmemevalv2] | memory evaluation | Evaluates whether agents acquire environment-specific experience from long web-agent trajectories. |
 
+## 3.1 Approved Evidence by Category
+
+### Memory Evaluation
+
+Maharana et al., 2024 [maharana2024locomo] contributes evidence to this category by Introduces LoCoMo, a benchmark for very long-term dialogue memory across many sessions.
+
+Wu et al., 2024 [wu2024longmemeval] contributes evidence to this category by Evaluates extraction, multi-session reasoning, temporal reasoning, knowledge updates, and abstention.
+
+Hu et al., 2025 [hu2025memoryagentbench] contributes evidence to this category by Introduces MemoryAgentBench to evaluate accurate retrieval, test-time learning, long-range understanding, and selective forgetting in incremental multi-turn interactions.
+
+Shutova et al., 2026 [shutova2026structmemeval] contributes evidence to this category by Proposes StructMemEval to test whether agents organize memory into task-appropriate structures.
+
+Wu et al., 2026 [wu2026longmemevalv2] contributes evidence to this category by Evaluates whether agents acquire environment-specific experience from long web-agent trajectories.
+
+### Memory Mechanism
+
+Packer et al., 2023 [packer2023memgpt] contributes evidence to this category by Introduces virtual context management with memory tiers inspired by operating systems.
+
+Zhong et al., 2023 [zhong2023memorybank] contributes evidence to this category by Implements long-term user memory with updating and forgetting mechanisms for sustained interaction.
+
+Shinn et al., 2023 [shinn2023reflexion] contributes evidence to this category by Uses verbal reflections stored in episodic memory to improve later agent trials without weight updates.
+
+Zhang et al., 2024 [zhang2024survey] contributes evidence to this category by Provides an early systematic review of memory design, evaluation, applications, and limitations in LLM agents.
+
+Xu et al., 2025 [xu2025amem] contributes evidence to this category by Proposes an agentic memory system that dynamically organizes memories using Zettelkasten-style indexing, linking, and memory evolution.
+
+Chhikara et al., 2025 [chhikara2025mem0] contributes evidence to this category by Presents a scalable memory-centric architecture that extracts, consolidates, and retrieves salient conversational information, including a graph-memory variant.
+
+Du et al., 2026 [du2026memory] contributes evidence to this category by Frames agent memory as a write-manage-read loop and surveys mechanism families through early 2026.
+
+### Memory Reliability
+
+Xiong et al., 2025 [xiong2025memory] contributes evidence to this category by Shows how addition and deletion policies affect long-term behavior, error propagation, and stale replay.
+
+Li et al., 2025 [li2025memos] contributes evidence to this category by Frames memory as a first-class operational resource with lifecycle governance across parametric, activation, and plaintext memory.
+
+### Multi-Agent And Embodied Memory
+
+Park et al., 2023 [park2023generative] contributes evidence to this category by Combines observation, memory retrieval, reflection, and planning for believable multi-agent social behavior.
+
+Wang et al., 2023 [wang2023voyager] contributes evidence to this category by Demonstrates procedural skill memory through an expanding library of executable behaviors.
+
+### Multi-Agent Orchestration
+
+Hong et al., 2023 [hong2023metagpt] contributes evidence to this category by Shows how SOP-style workflows and role specialization can reduce cascading hallucinations in LLM-based multi-agent collaboration.
+
 ### Mechanism Comparison
 
 | Mechanism family | Typical representation | Main strength | Main risk | Best fit in this project |
@@ -59,11 +103,11 @@ For literature review agents, retrieval memory should not store unstructured sni
 Chhikara et al., 2025 [chhikara2025mem0] is useful here because it treats long-term conversational memory as a production problem: the system must extract, consolidate, and retrieve salient information while controlling latency and token cost. For a literature-review agent, the same principle applies to paper notes: storing everything is less useful than preserving compact, retrievable, source-grounded facts.
 
 ### 4.2 Reflective and Episodic Memory
-Reflection-based agents convert feedback into verbal lessons. Shinn et al., 2023 [shinn2023reflexion] stores reflections in an episodic buffer so later trials can reuse lessons without weight updates. In social simulations, Park et al., 2023 [park2023generative] combines observation, reflection, and planning so agents can form higher-level memories that affect future behavior. These systems show that memory is not merely recall; it is also abstraction.
+Reflection-based agents convert feedback into verbal lessons. Shinn et al., 2023 [shinn2023reflexion] stores reflections in an episodic buffer so later trials can reuse lessons without weight updates. In social simulations, Park et al., 2023 [park2023generative] combines observation, reflection, and planning so agents can form higher-level memories that affect future behavior.
 The key design issue is when reflection should be trusted. A reflection is not automatically true; it is an interpretation of an episode. In this project, Reviewer feedback is treated as higher-trust reflective memory because it is grounded in explicit checks: unknown citation keys, missing sections, and unsupported claims. By contrast, a Writer Agent's self-summary would be lower trust unless the Reviewer accepts it.
 
 ### 4.3 Hierarchical Virtual Context
-Long-context models reduce pressure on external memory, but they do not remove the need to manage attention. Packer et al., 2023 [packer2023memgpt] draws an operating system analogy: limited context acts like fast memory, while archival storage acts like slower memory. The agent must decide what to page into the active context and what to keep outside it. This pattern is valuable for literature-review agents because full papers, notes, and citation audit trails cannot all fit in every prompt.
+ Packer et al., 2023 [packer2023memgpt] draws an operating system analogy: limited context acts like fast memory, while archival storage acts like slower memory. The agent must decide what to page into the active context and what to keep outside it. This pattern is valuable for literature-review agents because full papers, notes, and citation audit trails cannot all fit in every prompt.
 The operating-system analogy is especially useful for multi-agent systems. Agents should not all receive the same oversized context. The Search Agent needs bibliographic records; the Writer Agent needs screened contributions; the Reviewer Agent needs the draft plus source keys; the Polish Agent needs only the accepted draft and a rule forbidding new claims. Hierarchical memory therefore supports role-specific context rather than maximal context.
 
 ### 4.4 Procedural and Skill Memory
@@ -71,14 +115,14 @@ Some agents remember not only facts, but procedures. Wang et al., 2023 [wang2023
 Procedural memory matters because a literature review is a repeated workflow, not a single answer. The same system can be reused for another topic by replacing the corpus and keeping the orchestration logic. This is why the project separates `data/`, `prompts/`, `src/`, and `outputs/`: the memory of how to conduct the review is encoded in prompts and code, while the memory of what was reviewed is stored in the corpus and intermediate artifacts.
 
 ### 4.5 Memory Management and Forgetting
-A naive memory system grows forever. The reliability literature shows why that is dangerous: old records may be similar enough to retrieve but wrong for the current task. Xiong et al., 2025 [xiong2025memory] emphasizes that addition and deletion policies shape long-term agent behavior. For survey generation, this implies that memory management should include source aging, duplicate detection, correction logs, and explicit removal of failed citations. Forgetting is not the opposite of intelligence; it is part of maintaining a usable evidence base.
+A naive memory system grows forever. Xiong et al., 2025 [xiong2025memory] emphasizes that addition and deletion policies shape long-term agent behavior. For survey generation, this implies that memory management should include source aging, duplicate detection, correction logs, and explicit removal of failed citations. Forgetting is not the opposite of intelligence; it is part of maintaining a usable evidence base.
 
 ### 4.6 Dynamic Organization and Memory Governance
 Xu et al., 2025 [xu2025amem] pushes memory beyond flat storage by organizing notes through dynamic indexing, linking, and memory evolution. This is important for research agents because papers are not isolated facts: they relate through shared benchmarks, mechanisms, risks, and evaluation assumptions. Li et al., 2025 [li2025memos] complements this view by treating memory as an operational resource that needs lifecycle governance, traceable access, and controllable migration across memory types.
 
 ## 5. Evaluation
 Evaluation has moved from simple recall toward long-horizon interaction. Maharana et al., 2024 [maharana2024locomo] evaluates very long-term conversational memory across sessions. Wu et al., 2024 [wu2024longmemeval] tests information extraction, multi-session reasoning, temporal reasoning, knowledge updates, and abstention. Newer work such as Hu et al., 2025 [hu2025memoryagentbench], Shutova et al., 2026 [shutova2026structmemeval] and Wu et al., 2026 [wu2026longmemevalv2] shifts the focus toward structured memory and environment-specific experience. The trend is clear: a good memory system should retrieve compact evidence, track time, update stale facts, and know when memory is insufficient.
-Five evaluation abilities are especially relevant for multi-agent literature review. The first is factual recall: can the system recover the correct paper for a claim? The second is temporal reasoning: can it distinguish older mechanisms from newer benchmarks and avoid calling a 2023 method a response to a 2026 paper? The third is update handling: can it replace a weak or stale memory with a better one? The fourth is abstention: can it refuse to cite a source that is not in the verified corpus? The fifth is structural organization: can it store memory in a form that downstream agents can consume? Benchmarks such as LongMemEval and MemoryAgentBench are useful because they test memory as a working capability rather than as decorative context.
+Five evaluation abilities are especially relevant for multi-agent literature review. The first is factual recall: can the system recover the correct paper for a claim? The third is update handling: can it replace a weak or stale memory with a better one? The fourth is abstention: can it refuse to cite a source that is not in the verified corpus? The fifth is structural organization: can it store memory in a form that downstream agents can consume? Benchmarks such as LongMemEval and MemoryAgentBench are useful because they test memory as a working capability rather than as decorative context.
 
 | Evaluation dimension | What it checks | Project proxy |
 |---|---|---|
@@ -90,13 +134,13 @@ Five evaluation abilities are especially relevant for multi-agent literature rev
 
 ## 6. Reliability Risks
 Memory can make agents more reliable, but it can also make errors durable. Xiong et al., 2025 [xiong2025memory] reports an experience-following property: agents often produce outputs similar to retrieved experience records. This creates two risks for multi-agent systems. First, an incorrect memory can be reused by multiple downstream agents. Second, outdated experience can be replayed in a new context where it no longer applies. A literature-review system must therefore treat memory writes as evidence-bearing operations, not as casual notes.
-The most serious failure mode is not an isolated hallucination; it is a hallucination that becomes memory. Once a false reference enters a shared workspace, the Writer may cite it, the Polish Agent may make it sound more credible, and future runs may treat it as precedent. This is why the Reviewer Agent is positioned before polishing. Polishing improves fluency, but fluency can hide weak evidence. Verification must happen before stylistic improvement.
+The most serious failure mode is not an isolated hallucination; it is a hallucination that becomes memory. Once a false reference enters a shared workspace, the Writer may cite it, the Polish Agent may make it sound more credible, and future runs may treat it as precedent. This is why the Reviewer Agent is positioned before polishing. Verification must happen before stylistic improvement.
 Another risk is memory monoculture. If every agent reads the same memory without role-specific filtering, the system becomes efficient but brittle. A better design keeps separate views: Search sees broad candidate sources, Writer sees screened notes, Reviewer sees citations and claims, and Polish sees only accepted prose. The agents coordinate through shared artifacts, but they do not all share the same prompt context.
 Hong et al., 2023 [hong2023metagpt] is relevant even though it is not a memory paper, because it identifies cascading hallucinations as a multi-agent collaboration problem and argues for SOP-style workflows. This supports the design choice in this project: shared memory should be coupled with role specialization, explicit handoffs, and review gates.
 
 ## 7. Implications for Multi-Agent Literature Review Systems
-The reviewed evidence supports a design in which each agent has a narrow role and all communication occurs through structured artifacts. The Search Agent writes a verified corpus with citation keys and URLs. The Writer Agent may cite only those keys. The Reviewer Agent parses the draft, checks that every citation key exists, and rejects unknown references. The Polish Agent can improve language but cannot introduce new claims or references. This division turns memory into a shared blackboard with provenance. It also creates a natural feedback loop: if the Reviewer finds an unsupported claim, the Writer must either cite a verified source or remove the claim.
-Human-in-the-loop checkpoints should be placed where judgment matters most. The first checkpoint is topic scoping: a human chooses the research direction and decides that agent memory is narrower and more feasible than agentic RL. The second checkpoint is seed-corpus approval: a human confirms that the core papers are on-topic. The third checkpoint occurs when Reviewer flags a citation risk; a human can decide whether to remove a claim, add a source, or rewrite the argument. The fourth checkpoint is final acceptance, where a human evaluates whether the generated survey satisfies the course assignment rather than only passing automatic checks.
+The reviewed evidence supports a design in which each agent has a narrow role and all communication occurs through structured artifacts. The Search Agent writes a verified corpus with citation keys and URLs. The Writer Agent may cite only those keys. The Reviewer Agent parses the draft, checks that every citation key exists, and rejects unknown references. This division turns memory into a shared blackboard with provenance.
+Human-in-the-loop checkpoints should be placed where judgment matters most. The first checkpoint is topic scoping: a human chooses the research direction and decides that agent memory is narrower and more feasible than agentic RL. The second checkpoint is seed-corpus approval: a human confirms that the core papers are on-topic. The third checkpoint occurs when Reviewer flags a citation risk; a human can decide whether to remove a claim, add a source, or rewrite the argument.
 This design makes the system automated by default but not irresponsible. The agents perform repetitive operations: grouping papers, drafting, checking keys, and cleaning prose. Humans intervene at high-impact decisions: scope, source trust, unresolved evidence conflicts, and final submission. In practice, this division is more credible than claiming full autonomy, because literature review requires both mechanical traceability and scholarly judgment.
 
 ## 8. Open Problems

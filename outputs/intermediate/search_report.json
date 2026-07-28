@@ -1,8 +1,8 @@
 {
   "agent": "Search Agent",
-  "backend": "deterministic-fallback",
+  "backend": "deterministic",
   "query": "Memory-Augmented LLM Agents: Mechanisms, Evaluation, and Reliability in Multi-Agent Systems",
-  "date": "2026-06-26",
+  "date": "2026-07-28",
   "records_identified": 17,
   "records_included": 17,
   "inclusion_criteria": [

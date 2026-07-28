@@ -440,6 +440,11 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
             polished_markdown,
             self.citation_pattern,
         )
+        semantic_drift = _semantic_context_drift(
+            accepted_draft,
+            polished_markdown,
+            self.citation_pattern,
+        )
         headings_changed = _headings(accepted_draft) != _headings(polished_markdown)
         references_changed = _reference_entries(accepted_draft) != _reference_entries(
             polished_markdown
@@ -449,6 +454,7 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
         if (
             citation_sequence_changed
             or citation_context_drift
+            or semantic_drift
             or headings_changed
             or references_changed
             or citation_audit["status"] != "accepted"
@@ -464,6 +470,7 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
             "removed_citations_after_polish": removed_citations,
             "citation_sequence_changed": citation_sequence_changed,
             "citation_context_drift": citation_context_drift,
+            "semantic_drift": semantic_drift,
             "headings_changed": headings_changed,
             "references_changed": references_changed,
             "unknown_citations": citation_audit["unknown_citations"],
@@ -475,6 +482,7 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
                 removed_citations,
                 citation_sequence_changed,
                 citation_context_drift,
+                semantic_drift,
                 headings_changed,
                 references_changed,
                 citation_audit,
@@ -487,6 +495,7 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
         removed_citations: list[str],
         citation_sequence_changed: bool,
         citation_context_drift: list[dict[str, Any]],
+        semantic_drift: list[dict[str, Any]],
         headings_changed: bool,
         references_changed: bool,
         citation_audit: dict[str, Any],
@@ -505,6 +514,10 @@ class FinalVerificationReviewer(RuntimeAwareAgent):
         if citation_context_drift:
             recommendations.append(
                 "Reject polish output; one or more citations moved away from their accepted claim context."
+            )
+        if semantic_drift:
+            recommendations.append(
+                "Reject polish output; a protected factual anchor changed meaning."
             )
         if headings_changed:
             recommendations.append("Reject polish output; the accepted heading structure changed.")
@@ -579,6 +592,115 @@ def _context_tokens(text: str, pattern: re.Pattern[str]) -> set[str]:
         token
         for token in re.findall(r"[a-z][a-z0-9-]*", without_citations)
         if len(token) >= 3
+    }
+
+
+_NEGATION = re.compile(
+    r"\b(?:no|not|never|neither|nor|without|fail(?:s|ed|ing)?|"
+    r"cannot|can't|doesn't|don't|didn't|isn't|aren't|wasn't|weren't)\b",
+    re.IGNORECASE,
+)
+_NUMBER = re.compile(
+    r"(?<![A-Za-z])[-+]?\d+(?:\.\d+)?(?:%|\s*(?:ms|s|mb|gb|kb))?",
+    re.IGNORECASE,
+)
+_DIRECTION_GROUPS = {
+    "increase": re.compile(
+        r"\b(?:increase[sd]?|improve[sd]?|higher|rise[sn]?|grow(?:s|th)?|"
+        r"outperform(?:s|ed)?)\b",
+        re.IGNORECASE,
+    ),
+    "decrease": re.compile(
+        r"\b(?:decrease[sd]?|reduce[sd]?|lower|decline[sd]?|drop[sp]?|"
+        r"degrade[sd]?|underperform(?:s|ed)?)\b",
+        re.IGNORECASE,
+    ),
+}
+_MODAL_GROUPS = {
+    "possible": re.compile(
+        r"\b(?:may|might|could|can|possibly|potentially)\b",
+        re.IGNORECASE,
+    ),
+    "probable": re.compile(
+        r"\b(?:likely|probably|generally|typically)\b",
+        re.IGNORECASE,
+    ),
+    "certain": re.compile(
+        r"\b(?:must|will|always|never|proves?|demonstrates?)\b",
+        re.IGNORECASE,
+    ),
+}
+_COMPARISON = re.compile(
+    r"\b(?:more|less|fewer|better|worse|equal|at least|at most|"
+    r"greater than|less than)\b|[<>]=?",
+    re.IGNORECASE,
+)
+_NAMED_ANCHOR = re.compile(
+    r"\b(?:[A-Z]{2,}[A-Z0-9-]*|[A-Za-z]+-\d+(?:\.\d+)*|"
+    r"[A-Z][a-z0-9]+(?:\s+[A-Z][a-z0-9]+)+)\b"
+)
+
+
+def _semantic_context_drift(
+    before_markdown: str,
+    after_markdown: str,
+    pattern: re.Pattern[str],
+) -> list[dict[str, Any]]:
+    before = _citation_contexts(before_markdown, pattern)
+    after = _citation_contexts(after_markdown, pattern)
+    if [item[0] for item in before] != [item[0] for item in after]:
+        return []
+    drift: list[dict[str, Any]] = []
+    for index, ((key, old_context), (_, new_context)) in enumerate(
+        zip(before, after)
+    ):
+        old_signature = _semantic_signature(old_context, pattern)
+        new_signature = _semantic_signature(new_context, pattern)
+        changed = [
+            field
+            for field in old_signature
+            if old_signature[field] != new_signature[field]
+        ]
+        if changed:
+            drift.append(
+                {
+                    "occurrence": index + 1,
+                    "citation_key": key,
+                    "changed_anchors": changed,
+                    "before": {field: old_signature[field] for field in changed},
+                    "after": {field: new_signature[field] for field in changed},
+                }
+            )
+    return drift
+
+
+def _semantic_signature(
+    text: str,
+    pattern: re.Pattern[str],
+) -> dict[str, list[str]]:
+    content = pattern.sub("", text)
+    return {
+        "negation": sorted(
+            match.group(0).lower() for match in _NEGATION.finditer(content)
+        ),
+        "numbers": sorted(
+            " ".join(match.group(0).lower().split())
+            for match in _NUMBER.finditer(content)
+        ),
+        "direction": sorted(
+            name
+            for name, expression in _DIRECTION_GROUPS.items()
+            if expression.search(content)
+        ),
+        "modality": sorted(
+            name
+            for name, expression in _MODAL_GROUPS.items()
+            if expression.search(content)
+        ),
+        "comparison": sorted(
+            match.group(0).lower() for match in _COMPARISON.finditer(content)
+        ),
+        "named_entities": sorted(set(_NAMED_ANCHOR.findall(content))),
     }
 
 

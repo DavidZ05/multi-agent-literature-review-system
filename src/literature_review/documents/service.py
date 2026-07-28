@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 from src.literature_review.activity import ActivityCoordinator
-from src.literature_review.documents.acquisition import DocumentAcquirer
+from src.literature_review.documents.acquisition import (
+    DocumentAcquirer,
+    document_relative_path,
+)
 from src.literature_review.documents.index import EvidenceIndexer
 from src.literature_review.documents.models import DocumentRecord
 from src.literature_review.documents.parser import PDFParser
@@ -58,23 +63,38 @@ class DocumentImportService:
         existing = self.store.get_document(run_id, citation_key)
         if existing is None:
             raise ValueError("citation_key is not present in this run's document manifest")
-        self._archive_existing_document(run_id, existing)
         with source_path.open("rb") as source:
             content = source.read(self.acquirer.max_pdf_bytes + 1)
-        acquired = self.acquirer.import_pdf(
-            run_id,
-            citation_key,
-            content,
-            self.artifact_store,
-            source_label=existing.source_url,
-        )
-        parsed = self.parser.parse(
-            acquired,
-            self.artifact_store.path_for(run_id, acquired.relative_path or ""),
-        )
-        chunks = self.indexer.build(parsed)
-        self.store.put_document(parsed.document)
-        self.store.replace_evidence_chunks(run_id, parsed.document.document_id, chunks)
+        staging_path = f"documents/.staging/{uuid4().hex}.pdf"
+        final_path = document_relative_path(citation_key)
+        old_content = self._current_pdf_content(run_id, existing)
+        try:
+            acquired = self.acquirer.import_pdf(
+                run_id,
+                citation_key,
+                content,
+                self.artifact_store,
+                source_label=existing.source_url,
+                relative_path=staging_path,
+            )
+            staged = self.parser.parse(
+                acquired,
+                self.artifact_store.path_for(run_id, staging_path),
+            )
+            parsed = replace(
+                staged,
+                document=replace(staged.document, relative_path=final_path),
+            )
+            chunks = self.indexer.build(parsed)
+            self._archive_existing_document(run_id, existing)
+            self.artifact_store.write_bytes(run_id, final_path, content)
+            try:
+                self.store.replace_document_with_chunks(parsed.document, chunks)
+            except BaseException:
+                self._restore_current_pdf(run_id, final_path, old_content)
+                raise
+        finally:
+            self.artifact_store.path_for(run_id, staging_path).unlink(missing_ok=True)
         self.artifact_store.write_json(
             run_id,
             f"evidence/parsed/{citation_key}.json",
@@ -127,6 +147,29 @@ class DocumentImportService:
             run.current_stage,
         )
         return parsed.document
+
+    def _current_pdf_content(
+        self,
+        run_id: str,
+        document: DocumentRecord,
+    ) -> bytes | None:
+        if document.relative_path and self.artifact_store.exists(
+            run_id,
+            document.relative_path,
+        ):
+            return self.artifact_store.read_bytes(run_id, document.relative_path)
+        return None
+
+    def _restore_current_pdf(
+        self,
+        run_id: str,
+        relative_path: str,
+        old_content: bytes | None,
+    ) -> None:
+        if old_content is None:
+            self.artifact_store.path_for(run_id, relative_path).unlink(missing_ok=True)
+            return
+        self.artifact_store.write_bytes(run_id, relative_path, old_content)
 
     def _archive_existing_document(
         self,

@@ -1,6 +1,6 @@
 {
   "agent": "Evaluation / Reflection Agent",
-  "backend": "deterministic-fallback",
+  "backend": "deterministic",
   "scores": {
     "citation_integrity": 5.0,
     "claim_source_alignment": 5.0,
@@ -8,21 +8,24 @@
     "literature_coverage": 5.0,
     "overall": 5.0
   },
-  "revision_iterations": 1,
+  "revision_iterations": 2,
+  "writer_iteration_count": 2,
+  "writer_revision_count": 1,
   "records_included": 17,
   "final_status": "accepted",
+  "evidence_status": null,
   "reflections": [
     "Structured source memory reduced fabricated-reference risk.",
     "Expert review is useful only when synthesized feedback is passed back to Writer.",
     "Polish must be followed by final verification because style editing can hide evidence drift.",
     "Long-task source expansion should be handled at Search and human checkpoint stages, not by allowing Writer to invent references.",
     "Final artifact review should check configuration-safety notes, especially API key handling and reproducible fallback behavior.",
-    "A future API-backed version should keep the same artifact contracts and citation gate."
+    "API-backed execution must keep the same artifact contracts and protected citation gates."
   ],
   "next_run_improvements": [
-    "Add external search APIs for candidate discovery.",
-    "Add full-text PDF claim verification for high-risk claims.",
+    "Use discovery retries and topic-specific queries when seed coverage is weak.",
+    "Enable full-text verification and inspect unavailable or low-quality PDFs for high-risk claims.",
     "Add an explicit coverage-insufficient status that asks for more papers before Writer proceeds.",
-    "Let human reviewers approve corpus additions before Writer uses them."
+    "Review candidates again whenever material metadata changes invalidate an earlier approval."
   ]
 }

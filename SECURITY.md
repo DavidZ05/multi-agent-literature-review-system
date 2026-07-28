@@ -12,8 +12,8 @@ Security fixes are accepted for the latest public version.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.7.2   | Yes       |
-| <= 0.7.1 | No       |
+| 0.7.3   | Yes       |
+| <= 0.7.2 | No       |
 
 ## Intended Deployment
 
@@ -22,6 +22,12 @@ It only accepts `127.0.0.1` or `localhost` as its listening host. Do not expose 
 through a reverse proxy, SSH tunnel shared with untrusted users, public port
 forwarding, or a container configuration that publishes it beyond the local
 machine.
+
+One Workbench backend may own a SQLite database at a time. An exclusive POSIX
+lock is acquired before durable Job recovery, preventing a second local backend
+from marking the first instance's live Jobs as interrupted. The lock file may
+remain on disk after shutdown; ownership is the operating-system lock, not file
+existence.
 
 Workbench mutations require a per-process token injected into the served page.
 Every request must also carry a loopback `Host` header matching the active

@@ -39,6 +39,52 @@ Key reviewed sources and their roles in the taxonomy.
 | Shutova et al., 2026 [shutova2026structmemeval] | memory evaluation | Proposes StructMemEval to test whether agents organize memory into task-appropriate structures. |
 | Wu et al., 2026 [wu2026longmemevalv2] | memory evaluation | Evaluates whether agents acquire environment-specific experience from long web-agent trajectories. |
 
+## 3.1 Approved Evidence by Category
+
+### Memory Evaluation
+
+Maharana et al., 2024 [maharana2024locomo] contributes evidence to this category by Introduces LoCoMo, a benchmark for very long-term dialogue memory across many sessions.
+
+Wu et al., 2024 [wu2024longmemeval] contributes evidence to this category by Evaluates extraction, multi-session reasoning, temporal reasoning, knowledge updates, and abstention.
+
+Hu et al., 2025 [hu2025memoryagentbench] contributes evidence to this category by Introduces MemoryAgentBench to evaluate accurate retrieval, test-time learning, long-range understanding, and selective forgetting in incremental multi-turn interactions.
+
+Shutova et al., 2026 [shutova2026structmemeval] contributes evidence to this category by Proposes StructMemEval to test whether agents organize memory into task-appropriate structures.
+
+Wu et al., 2026 [wu2026longmemevalv2] contributes evidence to this category by Evaluates whether agents acquire environment-specific experience from long web-agent trajectories.
+
+### Memory Mechanism
+
+Packer et al., 2023 [packer2023memgpt] contributes evidence to this category by Introduces virtual context management with memory tiers inspired by operating systems.
+
+Zhong et al., 2023 [zhong2023memorybank] contributes evidence to this category by Implements long-term user memory with updating and forgetting mechanisms for sustained interaction.
+
+Shinn et al., 2023 [shinn2023reflexion] contributes evidence to this category by Uses verbal reflections stored in episodic memory to improve later agent trials without weight updates.
+
+Zhang et al., 2024 [zhang2024survey] contributes evidence to this category by Provides an early systematic review of memory design, evaluation, applications, and limitations in LLM agents.
+
+Xu et al., 2025 [xu2025amem] contributes evidence to this category by Proposes an agentic memory system that dynamically organizes memories using Zettelkasten-style indexing, linking, and memory evolution.
+
+Chhikara et al., 2025 [chhikara2025mem0] contributes evidence to this category by Presents a scalable memory-centric architecture that extracts, consolidates, and retrieves salient conversational information, including a graph-memory variant.
+
+Du et al., 2026 [du2026memory] contributes evidence to this category by Frames agent memory as a write-manage-read loop and surveys mechanism families through early 2026.
+
+### Memory Reliability
+
+Xiong et al., 2025 [xiong2025memory] contributes evidence to this category by Shows how addition and deletion policies affect long-term behavior, error propagation, and stale replay.
+
+Li et al., 2025 [li2025memos] contributes evidence to this category by Frames memory as a first-class operational resource with lifecycle governance across parametric, activation, and plaintext memory.
+
+### Multi-Agent And Embodied Memory
+
+Park et al., 2023 [park2023generative] contributes evidence to this category by Combines observation, memory retrieval, reflection, and planning for believable multi-agent social behavior.
+
+Wang et al., 2023 [wang2023voyager] contributes evidence to this category by Demonstrates procedural skill memory through an expanding library of executable behaviors.
+
+### Multi-Agent Orchestration
+
+Hong et al., 2023 [hong2023metagpt] contributes evidence to this category by Shows how SOP-style workflows and role specialization can reduce cascading hallucinations in LLM-based multi-agent collaboration.
+
 ### Mechanism Comparison
 
 | Mechanism family | Typical representation | Main strength | Main risk | Best fit in this project |

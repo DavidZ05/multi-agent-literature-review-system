@@ -56,6 +56,11 @@ class FakePDF:
         return None
 
 
+class FailingParser:
+    def parse(self, document, path):
+        raise ValueError("fixture parse failure")
+
+
 class DocumentPipelineTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = TemporaryDirectory()
@@ -382,6 +387,98 @@ class DocumentImportServiceTests(unittest.TestCase):
         self.assertEqual(
             manifest["document_history"][0]["document"]["document_id"],
             old_document.document_id,
+        )
+
+    def test_parse_failure_preserves_existing_pdf_and_database_record(self) -> None:
+        old_content = b"%PDF-1.7\nold-valid"
+        old_artifact = self.artifacts.write_bytes(
+            self.run.run_id,
+            "documents/memorypaper.pdf",
+            old_content,
+        )
+        old_document = DocumentRecord.acquired(
+            self.run.run_id,
+            "memorypaper",
+            "https://example.test/old.pdf",
+            relative_path=old_artifact.relative_path,
+            sha256=old_artifact.sha256,
+            byte_size=old_artifact.size_bytes,
+            access_method="downloaded",
+        )
+        self.store.put_document(old_document)
+        source = Path(self.temporary.name) / "broken.pdf"
+        source.write_bytes(b"%PDF-1.7\nnew-but-unparseable")
+
+        with self.assertRaisesRegex(ValueError, "parse failure"):
+            DocumentImportService(
+                self.store,
+                self.artifacts,
+                parser=FailingParser(),
+            ).import_pdf(self.run.run_id, "memorypaper", source)
+
+        self.assertEqual(
+            self.store.get_document(self.run.run_id, "memorypaper"),
+            old_document,
+        )
+        self.assertEqual(
+            self.artifacts.read_bytes(
+                self.run.run_id,
+                "documents/memorypaper.pdf",
+            ),
+            old_content,
+        )
+        staging = self.artifacts.path_for(
+            self.run.run_id,
+            "documents/.staging",
+        )
+        self.assertEqual(list(staging.glob("*.pdf")) if staging.exists() else [], [])
+
+    def test_database_failure_restores_existing_pdf(self) -> None:
+        old_content = b"%PDF-1.7\nold-valid"
+        old_artifact = self.artifacts.write_bytes(
+            self.run.run_id,
+            "documents/memorypaper.pdf",
+            old_content,
+        )
+        old_document = DocumentRecord.acquired(
+            self.run.run_id,
+            "memorypaper",
+            "https://example.test/old.pdf",
+            relative_path=old_artifact.relative_path,
+            sha256=old_artifact.sha256,
+            byte_size=old_artifact.size_bytes,
+            access_method="downloaded",
+        )
+        self.store.put_document(old_document)
+        source = Path(self.temporary.name) / "replacement.pdf"
+        source.write_bytes(b"%PDF-1.7\nreplacement")
+        passage = "Results\n" + "Supporting evidence. " * 50
+        fake_pdfplumber = SimpleNamespace(open=lambda path: FakePDF([passage]))
+
+        with (
+            patch.dict("sys.modules", {"pdfplumber": fake_pdfplumber}),
+            patch.object(
+                self.store,
+                "replace_document_with_chunks",
+                side_effect=RuntimeError("database failure"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "database failure"),
+        ):
+            DocumentImportService(
+                self.store,
+                self.artifacts,
+            ).import_pdf(self.run.run_id, "memorypaper", source)
+
+        self.assertEqual(
+            self.store.get_document(self.run.run_id, "memorypaper"),
+            old_document,
+        )
+        self.assertEqual(
+            self.artifacts.read_bytes(
+                self.run.run_id,
+                "documents/memorypaper.pdf",
+            ),
+            old_content,
         )
 
 

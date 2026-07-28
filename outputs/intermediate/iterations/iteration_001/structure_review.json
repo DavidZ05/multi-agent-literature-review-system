@@ -1,0 +1,10 @@
+{
+  "agent": "Structure Mentor Agent",
+  "backend": "deterministic",
+  "status": "accepted",
+  "word_count": 4144,
+  "missing_headings": [],
+  "recommendations": [
+    "Structure is suitable for submission."
+  ]
+}
