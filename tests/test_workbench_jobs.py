@@ -555,6 +555,215 @@ class WorkflowJobManagerTests(unittest.TestCase):
         self.assertEqual(event.payload["reason"], "backend_restarted")
         manager.shutdown(wait=False)
 
+    def test_manager_automatically_replays_durable_resume_job(self) -> None:
+        run = replace(
+            ResearchRun.create("Recoverable drafting"),
+            status=RunStatus.ACTIVE,
+            current_stage=WorkflowStage.DRAFTING,
+            updated_at=utc_now_iso(),
+        )
+        self.store.create_run(run)
+        job = WorkflowJob(
+            job_id="job_resume_recoverable",
+            kind="resume",
+            status="running",
+            run_id=run.run_id,
+            equivalent_command="literature-review resume RUN_ID",
+            request={"run_id": run.run_id},
+        )
+        self.store.put_job(job)
+        executor = ManualExecutor()
+        engine = FakeEngine(run)
+
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            engine_builder=lambda *args, **kwargs: engine,
+            resume_settings_loader=lambda *args: (False, ("arxiv",), 10),
+            executor=executor,
+        )
+
+        queued = manager.get_job(job.job_id)
+        self.assertEqual(queued["status"], "queued")
+        self.assertEqual(queued["recovery_count"], 1)
+        self.assertEqual(self.store.get_run(run.run_id).status, RunStatus.PAUSED)
+        executor.run_next()
+        self.assertEqual(manager.get_job(job.job_id)["status"], "succeeded")
+        self.assertEqual(engine.calls, [("resume", run.run_id)])
+        manager.shutdown(wait=False)
+
+    def test_manager_automatically_replays_start_before_run_creation(self) -> None:
+        prepared_run_id = "run_0123456789abcdef0123456789abcdef"
+        job = WorkflowJob(
+            job_id="job_start_recoverable",
+            kind="start",
+            status="running",
+            equivalent_command="literature-review start --topic=Memory",
+            result={"reserved_run_id": prepared_run_id},
+            request={
+                "topic": "Memory agents",
+                "corpus_path": str(self.corpus_path),
+                "discovery_enabled": False,
+                "full_text_enabled": False,
+                "providers": ["arxiv"],
+                "max_results": 10,
+                "query_texts": [],
+                "prepared_run_id": prepared_run_id,
+            },
+        )
+        self.store.put_job(job)
+        executor = ManualExecutor()
+        store = self.store
+
+        class PreparedEngine:
+            def start(
+                self,
+                topic: str,
+                corpus_path: Path,
+                *,
+                run: ResearchRun,
+            ) -> ResearchRun:
+                store.create_run(run)
+                return run
+
+            def resume(self, run_id: str) -> ResearchRun:
+                raise AssertionError("start recovery must not call resume")
+
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            engine_builder=lambda *args, **kwargs: PreparedEngine(),
+            executor=executor,
+        )
+
+        self.assertEqual(manager.get_job(job.job_id)["status"], "queued")
+        executor.run_next()
+        recovered = self.store.get_run(prepared_run_id)
+        self.assertEqual(recovered.topic, "Memory agents")
+        self.assertEqual(manager.get_job(job.job_id)["status"], "succeeded")
+        manager.shutdown(wait=False)
+
+    def test_manager_stops_automatic_recovery_after_three_attempts(self) -> None:
+        run = replace(
+            ResearchRun.create("Recovery limit"),
+            status=RunStatus.ACTIVE,
+            current_stage=WorkflowStage.DRAFTING,
+            updated_at=utc_now_iso(),
+        )
+        self.store.create_run(run)
+        job = WorkflowJob(
+            job_id="job_recovery_limit",
+            kind="resume",
+            status="running",
+            run_id=run.run_id,
+            equivalent_command="literature-review resume RUN_ID",
+            request={"run_id": run.run_id},
+            recovery_count=3,
+        )
+        self.store.put_job(job)
+        executor = ManualExecutor()
+
+        manager = WorkflowJobManager(
+            self.store,
+            self.artifact_root,
+            executor=executor,
+        )
+
+        recovered = manager.get_job(job.job_id)
+        self.assertEqual(recovered["status"], "interrupted")
+        self.assertEqual(recovered["recovery_count"], 3)
+        self.assertEqual(executor.tasks, [])
+        manager.shutdown(wait=False)
+
+    def test_recovery_scheduling_failure_preserves_durable_job(self) -> None:
+        run = replace(
+            ResearchRun.create("Recovery scheduling failure"),
+            status=RunStatus.ACTIVE,
+            current_stage=WorkflowStage.DRAFTING,
+            updated_at=utc_now_iso(),
+        )
+        self.store.create_run(run)
+        job = WorkflowJob(
+            job_id="job_recovery_schedule_failure",
+            kind="resume",
+            status="running",
+            run_id=run.run_id,
+            equivalent_command="literature-review resume RUN_ID",
+            request={"run_id": run.run_id},
+        )
+        self.store.put_job(job)
+
+        with self.assertLogs("src.literature_review.workbench.jobs", level="ERROR"):
+            manager = WorkflowJobManager(
+                self.store,
+                self.artifact_root,
+                executor=RejectingExecutor(),
+            )
+
+        preserved = manager.get_job(job.job_id)
+        self.assertEqual(preserved["status"], "interrupted")
+        self.assertEqual(preserved["recovery_count"], 1)
+        self.assertEqual(
+            preserved["error"]["type"],
+            "recovery_schedule_failed",
+        )
+        self.assertIsNotNone(self.store.get_job(job.job_id))
+        manager.shutdown(wait=False)
+
+    def test_manager_automatically_replays_durable_discovery_retry(self) -> None:
+        run = replace(
+            ResearchRun.create("Recoverable discovery retry"),
+            status=RunStatus.ACTIVE,
+            current_stage=WorkflowStage.DISCOVERING,
+            updated_at=utc_now_iso(),
+        )
+        self.store.create_run(run)
+        self.store.append_event(
+            run.run_id,
+            "discovery_retry_started",
+            {
+                "return_status": RunStatus.WAITING.value,
+                "return_stage": WorkflowStage.AWAITING_CORPUS_APPROVAL.value,
+            },
+            WorkflowStage.DISCOVERING,
+        )
+        job = WorkflowJob(
+            job_id="job_retry_recoverable",
+            kind="discovery_retry",
+            status="running",
+            run_id=run.run_id,
+            equivalent_command="literature-review retry-discovery RUN_ID",
+            request={
+                "run_id": run.run_id,
+                "providers": ["arxiv"],
+                "max_results": 7,
+                "query_texts": ["agent memory"],
+            },
+        )
+        self.store.put_job(job)
+        executor = ManualExecutor()
+
+        with patch(
+            "src.literature_review.workbench.jobs.retry_discovery",
+            side_effect=lambda *args, **kwargs: self.store.get_run(run.run_id),
+        ) as recovered_retry:
+            manager = WorkflowJobManager(
+                self.store,
+                self.artifact_root,
+                executor=executor,
+            )
+            self.assertEqual(manager.get_job(job.job_id)["status"], "queued")
+            executor.run_next()
+
+        self.assertEqual(manager.get_job(job.job_id)["status"], "succeeded")
+        self.assertEqual(recovered_retry.call_args.kwargs["providers"], ("arxiv",))
+        self.assertEqual(recovered_retry.call_args.kwargs["max_results"], 7)
+        self.assertEqual(
+            recovered_retry.call_args.kwargs["query_texts"],
+            ("agent memory",),
+        )
+        manager.shutdown(wait=False)
+
     def test_manager_tolerates_interrupted_start_before_run_creation(self) -> None:
         job = WorkflowJob(
             job_id="job_start_before_run",

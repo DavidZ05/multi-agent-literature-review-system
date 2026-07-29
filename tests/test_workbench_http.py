@@ -168,6 +168,22 @@ class WorkbenchHTTPTests(unittest.TestCase):
     def mutation_headers(self, **extra: str) -> dict[str, str]:
         return {"X-Workbench-Token": self.token, **extra}
 
+    def read_stream_prefix(self, path: str) -> tuple[str, str]:
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{self.port}\r\n"
+            "Accept: text/event-stream\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii")
+        with socket.create_connection(("127.0.0.1", self.port), timeout=3) as client:
+            client.sendall(request)
+            chunks: list[bytes] = []
+            while b"event: change" not in b"".join(chunks):
+                chunks.append(client.recv(65536))
+            response = b"".join(chunks).decode("ascii")
+        headers, body = response.split("\r\n\r\n", 1)
+        return headers, body
+
     def prepare_approval_gate(self) -> None:
         self.run = replace(
             self.run,
@@ -284,6 +300,30 @@ class WorkbenchHTTPTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(payload, expected)
                 self.assert_json_headers(headers)
+
+    def test_event_stream_replays_durable_changes_with_sse_ids(self) -> None:
+        headers, body = self.read_stream_prefix("/api/stream?after=0")
+
+        self.assertIn("HTTP/1.0 200 OK", headers)
+        self.assertIn("Content-Type: text/event-stream; charset=utf-8", headers)
+        self.assertIn(": connected", body)
+        self.assertIn("event: change", body)
+        self.assertIn("id: ", body)
+        self.assertIn('"event_type":"run.event"', body)
+        self.assertIn(self.run.run_id, body)
+
+    def test_event_stream_rejects_ambiguous_or_invalid_cursors(self) -> None:
+        status, _, payload = self.request("GET", "/api/stream?after=-1")
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], "invalid_request")
+
+        status, _, payload = self.request(
+            "GET",
+            "/api/stream?after=0",
+            headers={"Last-Event-ID": "1"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], "invalid_request")
 
     def test_survey_and_audit_downloads_use_fixed_run_artifacts(self) -> None:
         artifacts = LocalArtifactStore(self.manager.artifact_root)
@@ -1197,6 +1237,9 @@ class WorkbenchStaticContractTests(unittest.TestCase):
             '"/api/jobs/"',
             '"/api/jobs?status=active"',
             '"/api/jobs"',
+            'new EventSource("/api/stream")',
+            'stream.addEventListener("change"',
+            'state.streamConnected ? 10000 : 1200',
             '"/events"',
             '"/candidates"',
             '"/approve"',

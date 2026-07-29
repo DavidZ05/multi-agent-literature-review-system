@@ -4,6 +4,27 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## 0.8.0 - 2026-07-28
+
+### Added
+
+- Persisted replay-safe Job requests and recovery counters in SQLite schema
+  version 7 for Workbench `start`, `resume`, and discovery-retry operations.
+- Automatic same-Job recovery after backend restart, bounded to three attempts
+  and backed by existing workflow checkpoints and artifact hash validation.
+- A bounded durable Workbench event feed and same-origin Server-Sent Events
+  endpoint with event IDs, reconnect replay, heartbeats, and polling fallback.
+- Playwright Chromium tests for local run completion, streamed UI updates,
+  selected-run restoration, and bilingual preference persistence.
+- A dedicated GitHub Actions browser job with failure traces and screenshots.
+
+### Changed
+
+- Old Jobs without a persisted replay request, malformed requests, and Jobs at
+  the recovery limit remain fail-closed as `interrupted` for human inspection.
+- The Workbench shows live-update connection state and reduces background
+  polling while its event stream is healthy.
+
 ## 0.7.3 - 2026-07-28
 
 ### Fixed

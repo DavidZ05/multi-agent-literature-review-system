@@ -18,6 +18,8 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("python-version: ['3.11', '3.12']", text)
         self.assertIn("python -m pip install -e .", text)
         self.assertIn("python -m unittest discover -s tests -v", text)
+        self.assertIn("npm run test:browser", text)
+        self.assertIn("npx playwright install --with-deps chromium", text)
         self.assertIn("literature-review --help", text)
         self.assertIn("python -m compileall -q src tests", text)
         self.assertIn("python -m pip wheel . --no-deps --wheel-dir dist", text)
@@ -28,7 +30,7 @@ class PackagingTests(unittest.TestCase):
     def test_public_project_files_are_ready_for_distribution(self) -> None:
         required_files = {
             "LICENSE": "MIT License",
-            "CHANGELOG.md": "0.7.3",
+            "CHANGELOG.md": "0.8.0",
             "CONTRIBUTING.md": "Contributing",
             "SECURITY.md": "Security",
         }
@@ -41,8 +43,8 @@ class PackagingTests(unittest.TestCase):
                 self.assertNotIn("TBD", text)
 
         security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn("| 0.7.3   | Yes", security)
-        self.assertIn("| <= 0.7.2 | No", security)
+        self.assertIn("| 0.8.0   | Yes", security)
+        self.assertIn("| <= 0.7.3 | No", security)
 
     def test_pyproject_declares_supported_install_and_console_command(self) -> None:
         metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())

@@ -60,8 +60,11 @@ with a clear error instead of changing the live instance's durable Job state.
 
 The UI creates and resumes runs, reviews candidates and claim evidence, imports
 local PDFs, exports results, and manages terminal runs. Selection survives page
-reloads; active Job state is recovered without switching away from the run being
-viewed. Every mutation displays its equivalent CLI command.
+reloads. Job requests and recovery counts are durable, so a backend restart
+automatically replays safe `start`, `resume`, and discovery-retry work from the
+workflow checkpoint. SQLite-backed Server-Sent Events update the page without
+switching away from the run being viewed; low-frequency polling remains a
+disconnect fallback. Every mutation displays its equivalent CLI command.
 
 Custom paths precede the subcommand:
 
@@ -267,7 +270,7 @@ src/literature_review/        canonical package
   verification/               claims, retrieval, evidence decisions
   workbench/                  local HTTP UI and application services
   workflow/                   persistent state machine and handlers
-tests/                        regression and integration tests
+tests/                        unit, integration, and browser tests
 ```
 
 `src/memory_review_pipeline.py` and `WorkbenchService` are compatibility facades;
@@ -294,8 +297,17 @@ python3 -m compileall -q src tests
 python3 -m pip wheel . --no-deps --wheel-dir dist
 ```
 
+Run the real Chromium Workbench tests with Node.js 20 or newer:
+
+```bash
+npm ci
+npx playwright install chromium
+npm run test:browser
+```
+
 GitHub Actions runs the suite and wheel smoke tests on macOS and Linux with
-Python 3.11 and 3.12. Live provider checks are opt-in:
+Python 3.11 and 3.12, plus the Workbench end-to-end suite in Chromium. Live
+provider checks are opt-in:
 
 ```bash
 RUN_LIVE_PROVIDER_TESTS=1 python3 -m unittest tests.test_live_providers -v

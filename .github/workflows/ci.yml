@@ -45,3 +45,38 @@ jobs:
           literature-review plugins
           literature-review-workbench --help
           literature-review --db .ci/workflow.db --artifacts .ci/artifacts doctor
+
+  browser-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install application and browser test dependencies
+        run: |
+          python -m pip install -e .
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run Chromium end-to-end tests
+        run: npm run test:browser
+
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: output/playwright/
+          if-no-files-found: ignore

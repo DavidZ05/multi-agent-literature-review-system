@@ -6,6 +6,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import secrets
+import sqlite3
+import time
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -146,6 +148,9 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         if not self._require_allowed_host():
             return
         request_path = urlsplit(self.path).path
+        if request_path == "/api/stream":
+            self._serve_event_stream()
+            return
         if request_path in _STATIC_ASSETS:
             self._serve_static(request_path)
             return
@@ -679,6 +684,73 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if include_body:
             self.wfile.write(body)
+
+    def _serve_event_stream(self) -> None:
+        try:
+            cursor = self._event_stream_cursor()
+        except _APIError as exc:
+            self._send_json(exc.status, exc.payload())
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        heartbeat_at = time.monotonic() + 5.0
+        try:
+            self.wfile.write(b": connected\nretry: 2000\n\n")
+            self.wfile.flush()
+            while True:
+                events = self.server.workbench_service.store.list_workbench_events(
+                    after_id=cursor,
+                    limit=100,
+                )
+                if events:
+                    for event in events:
+                        cursor = int(event["event_id"])
+                        body = json.dumps(
+                            event,
+                            ensure_ascii=True,
+                            separators=(",", ":"),
+                        )
+                        self.wfile.write(
+                            (
+                                f"id: {cursor}\n"
+                                "event: change\n"
+                                f"data: {body}\n\n"
+                            ).encode("ascii")
+                        )
+                    self.wfile.flush()
+                    heartbeat_at = time.monotonic() + 5.0
+                    continue
+                if time.monotonic() >= heartbeat_at:
+                    self.wfile.write(b": heartbeat\n\n")
+                    self.wfile.flush()
+                    heartbeat_at = time.monotonic() + 5.0
+                time.sleep(0.2)
+        except (OSError, sqlite3.Error, ValueError):
+            return
+
+    def _event_stream_cursor(self) -> int:
+        segments, query = self._request_target()
+        if segments != ["api", "stream"]:
+            raise _APIError(404, "not_found", "The requested resource was not found.")
+        if query and set(query) != {"after"}:
+            raise _APIError(400, "invalid_request", "Request validation failed.")
+        values: list[str] = []
+        if "after" in query:
+            values.extend(query["after"])
+        header_values = self.headers.get_all("Last-Event-ID", [])
+        if len(header_values) > 1 or (values and header_values):
+            raise _APIError(400, "invalid_request", "Request validation failed.")
+        values.extend(header_values)
+        if not values:
+            return self.server.workbench_service.store.latest_workbench_event_id()
+        if len(values) != 1 or not values[0].isascii() or not values[0].isdigit():
+            raise _APIError(400, "invalid_request", "Request validation failed.")
+        return int(values[0])
 
     def _serve_static(self, request_path: str) -> None:
         filename, content_type = _STATIC_ASSETS[request_path]

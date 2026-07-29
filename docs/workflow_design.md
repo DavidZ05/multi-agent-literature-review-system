@@ -36,6 +36,19 @@ path. Only one Workbench backend can recover and mutate durable Jobs for a
 database at a time. A second process fails before startup recovery, while CLI
 operations continue to use the existing per-run activity locks.
 
+Workbench Jobs persist their sanitized replay request and recovery count. On
+startup, stale active Jobs are reconciled with their Run and workflow checkpoint,
+then safe `start`, `resume`, and discovery-retry Jobs are requeued under the same
+Job ID. Recovery is bounded to three attempts. Jobs created by an older schema,
+malformed replay requests, and exhausted Jobs remain `interrupted` instead of
+being guessed or duplicated.
+
+Job transitions and workflow events append compact records to the bounded
+durable `workbench_events` feed. `/api/stream` exposes that feed as same-origin
+Server-Sent Events with monotonic IDs and reconnect replay. Payloads are change
+notifications rather than source content; the browser reloads canonical state
+through the existing JSON endpoints. Polling remains a slower fallback.
+
 ## Discovery Gate
 
 Automatic discovery is intentionally not fully autonomous. arXiv and Semantic
@@ -107,13 +120,12 @@ fingerprint reviewed. If retry changes material candidate metadata, its prior
 decision remains audit history but the candidate returns to pending. Screening
 score, recommendation, and provider provenance changes are nonmaterial. A paper
 already present in the run is not counted as a new candidate. If the backend
-exits during retry, startup recovery marks the attempt
-and Job interrupted, restores the previous gate, and appends an audit event.
-Start Jobs persist their generated Run ID before execution. For any other
-interrupted Workbench Job, startup recovery changes its linked leftover `active`
-Run to `paused` at the same stage and records `run_interrupted`. Unrelated active
-Runs are not mutated. The user can then resume from the last valid checkpoint
-instead of seeing an active Run with no worker behind it.
+exits during retry, startup recovery marks the active attempt interrupted,
+restores the previous gate, and appends an audit event before a replayable retry
+Job is requeued. Start Jobs persist their generated Run ID before execution. A
+replayable Job resumes the linked Run from its last valid checkpoint; an old or
+invalid Job changes a leftover `active` Run to `paused` at the same stage and
+records `run_interrupted`. Unrelated active Runs are not mutated.
 
 The default query planner is domain-neutral and produces topic, survey,
 evaluation, and reliability variants. Users may replace these with up to eight
@@ -236,7 +248,7 @@ Corresponding `agent_stage_completed` events make the Drafting sequence visible 
 SQLite and audit exports. Failed and interrupted attempts remain available for
 diagnosis instead of disappearing with a temporary directory.
 
-The durable workflow checkpoint remains the complete Drafting stage in v0.7.3.
+The durable workflow checkpoint remains the complete Drafting stage in v0.8.0.
 The journal is audit history, not a set of independently reusable Agent
 checkpoints: resuming an interrupted attempt reruns Drafting from the last valid
 workflow checkpoint. Independent Agent-level resume requires versioned input

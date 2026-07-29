@@ -76,7 +76,7 @@ class CandidateDecisionNotAllowedError(WorkflowStoreError):
 
 
 class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
-    SCHEMA_VERSION = 6
+    SCHEMA_VERSION = 7
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -170,11 +170,22 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
                         run_id TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
                         result_json TEXT,
                         error_json TEXT,
+                        request_json TEXT,
+                        recovery_count INTEGER NOT NULL DEFAULT 0,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
                     );
                     CREATE INDEX workflow_jobs_status_created_idx
                         ON workflow_jobs(status, created_at);
+                    CREATE TABLE workbench_events (
+                        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event_type TEXT NOT NULL,
+                        resource_id TEXT NOT NULL,
+                        payload_json TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    );
+                    CREATE INDEX workbench_events_created_idx
+                        ON workbench_events(created_at, event_id);
                     CREATE TABLE discovery_attempts (
                         attempt_id TEXT PRIMARY KEY,
                         run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -238,7 +249,7 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
                     );
                     CREATE INDEX evidence_decisions_run_claim_idx
                         ON evidence_review_decisions(run_id, claim_id, created_at);
-                    PRAGMA user_version = 6;
+                    PRAGMA user_version = 7;
                     """
                     )
                 return
@@ -387,6 +398,58 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
                         PRAGMA user_version = 6;
                         """
                     )
+                version = 6
+            if version == 6:
+                with connection:
+                    job_columns = {
+                        row[1]
+                        for row in connection.execute(
+                            "PRAGMA table_info(workflow_jobs)"
+                        ).fetchall()
+                    }
+                    if not job_columns:
+                        connection.executescript(
+                            """
+                            CREATE TABLE workflow_jobs (
+                                job_id TEXT PRIMARY KEY,
+                                kind TEXT NOT NULL,
+                                status TEXT NOT NULL,
+                                equivalent_command TEXT NOT NULL,
+                                run_id TEXT REFERENCES runs(run_id)
+                                    ON DELETE SET NULL,
+                                result_json TEXT,
+                                error_json TEXT,
+                                request_json TEXT,
+                                recovery_count INTEGER NOT NULL DEFAULT 0,
+                                created_at TEXT NOT NULL,
+                                updated_at TEXT NOT NULL
+                            );
+                            CREATE INDEX workflow_jobs_status_created_idx
+                                ON workflow_jobs(status, created_at);
+                            """
+                        )
+                    else:
+                        connection.execute(
+                            "ALTER TABLE workflow_jobs ADD COLUMN request_json TEXT"
+                        )
+                        connection.execute(
+                            """ALTER TABLE workflow_jobs
+                            ADD COLUMN recovery_count INTEGER NOT NULL DEFAULT 0"""
+                        )
+                    connection.executescript(
+                        """
+                        CREATE TABLE IF NOT EXISTS workbench_events (
+                            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            event_type TEXT NOT NULL,
+                            resource_id TEXT NOT NULL,
+                            payload_json TEXT NOT NULL,
+                            created_at TEXT NOT NULL
+                        );
+                        CREATE INDEX IF NOT EXISTS workbench_events_created_idx
+                            ON workbench_events(created_at, event_id);
+                        PRAGMA user_version = 7;
+                        """
+                    )
 
     def create_run(self, run: ResearchRun) -> None:
         values = run.to_dict()
@@ -519,6 +582,25 @@ class SQLiteWorkflowStore(SQLiteJobRepositoryMixin):
                 ),
             )
             event_id = cursor.lastrowid
+            connection.execute(
+                """INSERT INTO workbench_events
+                (event_type,resource_id,payload_json,created_at)
+                VALUES ('run.event',?,?,?)""",
+                (
+                    run_id,
+                    json.dumps(
+                        {
+                            "run_id": run_id,
+                            "workflow_event_id": event_id,
+                            "workflow_event_type": event_type,
+                            "stage": None if stage is None else stage.value,
+                        },
+                        ensure_ascii=True,
+                        sort_keys=True,
+                    ),
+                    created_at,
+                ),
+            )
         return WorkflowEvent(event_id, run_id, event_type, stage, payload, created_at)
 
     def list_events(self, run_id: str) -> list[WorkflowEvent]:

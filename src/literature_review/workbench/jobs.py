@@ -15,6 +15,8 @@ from uuid import uuid4
 from src.literature_review.activity import (
     ActivityCoordinator,
     ActivityReservation,
+    RunBusy,
+    RunDeletionBusy,
     WorkbenchInstanceGuard,
 )
 from src.literature_review.job_state import ACTIVE_JOB_STATUSES, WorkflowJob
@@ -44,6 +46,7 @@ from src.literature_review.workbench.service import PendingCandidatesError
 _COMMAND_PREFIX = ("python3", "-m", "src.memory_review_pipeline")
 _LOGGER = logging.getLogger(__name__)
 _PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_MAX_AUTOMATIC_RECOVERIES = 3
 
 
 class WorkflowEngine(Protocol):
@@ -191,6 +194,8 @@ class _JobRecord:
     run_id: str | None = None
     result: dict[str, Any] | None = None
     error: dict[str, str] | None = None
+    request: dict[str, Any] | None = None
+    recovery_count: int = 0
     reservation: ActivityReservation | None = None
     created_at: str = ""
     updated_at: str = ""
@@ -198,7 +203,7 @@ class _JobRecord:
     def to_dict(self) -> dict[str, object]:
         result_run_id = (self.result or {}).get("run_id")
         reserved_run_id = (self.result or {}).get("reserved_run_id")
-        return {
+        payload: dict[str, object] = {
             "job_id": self.job_id,
             "kind": self.kind,
             "status": self.status,
@@ -207,6 +212,9 @@ class _JobRecord:
             "result": None if self.result is None else dict(self.result),
             "error": None if self.error is None else dict(self.error),
         }
+        if self.recovery_count:
+            payload["recovery_count"] = self.recovery_count
+        return payload
 
     def to_stored_job(self) -> WorkflowJob:
         return WorkflowJob(
@@ -217,6 +225,8 @@ class _JobRecord:
             run_id=self.run_id,
             result=None if self.result is None else dict(self.result),
             error=None if self.error is None else dict(self.error),
+            request=None if self.request is None else dict(self.request),
+            recovery_count=self.recovery_count,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -231,6 +241,8 @@ class _JobRecord:
             run_id=job.run_id,
             result=None if job.result is None else dict(job.result),
             error=None if job.error is None else dict(job.error),
+            request=None if job.request is None else dict(job.request),
+            recovery_count=job.recovery_count,
             created_at=job.created_at,
             updated_at=job.updated_at,
         )
@@ -284,6 +296,7 @@ class WorkflowJobManager:
         self.store.interrupt_active_jobs()
         self.store.interrupt_active_discovery_attempts()
         stored_jobs = self.store.list_jobs()
+        self.store.prune_workbench_events()
         self._recover_interrupted_discovery_retries(stored_jobs)
         self._pause_interrupted_runs(stored_jobs)
         self._jobs: dict[str, _JobRecord] = {
@@ -294,6 +307,7 @@ class WorkflowJobManager:
         self._max_retained_jobs = max_retained_jobs
         with self._lock:
             self._prune_terminal_jobs_locked()
+        self._recover_durable_jobs()
 
     def _recover_interrupted_discovery_retries(
         self,
@@ -410,6 +424,16 @@ class WorkflowJobManager:
                 "start",
                 command,
                 result={"reserved_run_id": prepared_run.run_id},
+                request={
+                    "topic": request.topic,
+                    "corpus_path": str(request.corpus_path),
+                    "discovery_enabled": request.discovery_enabled,
+                    "full_text_enabled": request.full_text_enabled,
+                    "providers": list(request.providers),
+                    "max_results": request.max_results,
+                    "query_texts": list(request.query_texts),
+                    "prepared_run_id": prepared_run.run_id,
+                },
                 reservation=reservation,
             )
             self._schedule(
@@ -460,6 +484,12 @@ class WorkflowJobManager:
                 "discovery_retry",
                 command,
                 run_id=request.run_id,
+                request={
+                    "run_id": request.run_id,
+                    "providers": list(request.providers),
+                    "max_results": request.max_results,
+                    "query_texts": list(request.query_texts),
+                },
                 reservation=reservation,
             )
             self._schedule(
@@ -501,6 +531,7 @@ class WorkflowJobManager:
                 "resume",
                 command,
                 run_id=run_id,
+                request={"run_id": run_id},
                 reservation=reservation,
             )
             self._schedule(job, lambda: self._resume(run_id))
@@ -556,6 +587,7 @@ class WorkflowJobManager:
         *,
         run_id: str | None = None,
         result: dict[str, Any] | None = None,
+        request: dict[str, Any] | None = None,
         reservation: ActivityReservation | None = None,
     ) -> _JobRecord:
         with self._lock:
@@ -570,6 +602,7 @@ class WorkflowJobManager:
                 equivalent_command=equivalent_command,
                 run_id=run_id,
                 result=None if result is None else dict(result),
+                request=None if request is None else dict(request),
                 reservation=reservation,
             )
             stored = job.to_stored_job()
@@ -585,13 +618,23 @@ class WorkflowJobManager:
         self,
         job: _JobRecord,
         operation: Callable[[], ResearchRun],
+        *,
+        preserve_on_failure: bool = False,
     ) -> None:
         try:
             future = self._executor.submit(self._run_job, job.job_id, operation)
         except BaseException:
             with self._lock:
-                self._jobs.pop(job.job_id, None)
-                self.store.delete_job(job.job_id)
+                if preserve_on_failure:
+                    job.status = "interrupted"
+                    job.error = {
+                        "type": "recovery_schedule_failed",
+                        "message": "Automatic recovery could not be scheduled.",
+                    }
+                    self._persist_job_locked(job)
+                else:
+                    self._jobs.pop(job.job_id, None)
+                    self.store.delete_job(job.job_id)
                 if job.run_id is not None:
                     self._active_resume_jobs.pop(job.run_id, None)
                 if job.reservation is not None:
@@ -687,6 +730,136 @@ class WorkflowJobManager:
         job.created_at = stored.created_at
         job.updated_at = stored.updated_at
         self.store.put_job(stored)
+
+    def _recover_durable_jobs(self) -> None:
+        recoverable = [
+            job
+            for job in self._jobs.values()
+            if job.status == "interrupted"
+            and job.request is not None
+            and job.recovery_count < _MAX_AUTOMATIC_RECOVERIES
+        ]
+        for job in recoverable:
+            try:
+                operation, reservation = self._recovery_operation(job)
+            except (
+                KeyError,
+                TypeError,
+                ValueError,
+                RunNotFoundError,
+                RunBusy,
+                RunDeletionBusy,
+            ) as exc:
+                _LOGGER.warning(
+                    "Workflow job %s could not be recovered: %s",
+                    job.job_id,
+                    exc,
+                )
+                continue
+            with self._lock:
+                job.status = "queued"
+                job.error = None
+                job.recovery_count += 1
+                job.reservation = reservation
+                if job.run_id is not None:
+                    self._active_resume_jobs[job.run_id] = job.job_id
+                self._persist_job_locked(job)
+            try:
+                self._schedule(job, operation, preserve_on_failure=True)
+            except BaseException as exc:
+                _LOGGER.error(
+                    "Workflow job %s recovery could not be scheduled",
+                    job.job_id,
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
+
+    def _recovery_operation(
+        self,
+        job: _JobRecord,
+    ) -> tuple[Callable[[], ResearchRun], ActivityReservation]:
+        request = dict(job.request or {})
+        if job.kind == "start":
+            start_request = StartRunRequest(
+                topic=request["topic"],
+                corpus_path=Path(request["corpus_path"]),
+                discovery_enabled=request["discovery_enabled"],
+                full_text_enabled=request.get("full_text_enabled", False),
+                providers=request["providers"],
+                max_results=request["max_results"],
+                query_texts=request.get("query_texts", ()),
+            )
+            prepared_run_id = str(request["prepared_run_id"])
+            try:
+                existing = self.store.get_run(prepared_run_id)
+            except RunNotFoundError:
+                reservation = self._activity.reserve_start()
+                prepared = ResearchRun.create(start_request.topic)
+                prepared = replace(prepared, run_id=prepared_run_id)
+                operation = lambda: _start_prepared_run(
+                    self._engine_builder(
+                        self.store,
+                        self.artifact_root,
+                        discovery_enabled=start_request.discovery_enabled,
+                        full_text_enabled=start_request.full_text_enabled,
+                        providers=start_request.providers,
+                        max_results=start_request.max_results,
+                        query_texts=start_request.query_texts,
+                    ),
+                    start_request,
+                    prepared,
+                )
+            else:
+                reservation = self._activity.reserve_resume(prepared_run_id)
+                job.run_id = prepared_run_id
+                operation = (
+                    (lambda: self.store.get_run(prepared_run_id))
+                    if existing.status in {
+                        RunStatus.WAITING,
+                        RunStatus.COMPLETED,
+                        RunStatus.CANCELLED,
+                        RunStatus.FAILED,
+                    }
+                    else (lambda: self._resume(prepared_run_id))
+                )
+            return operation, reservation
+
+        run_id = str(request["run_id"])
+        if job.run_id != run_id:
+            raise ValueError("persisted Job run_id does not match its request")
+        reservation = self._activity.reserve_resume(run_id)
+        if job.kind == "resume":
+            run = self.store.get_run(run_id)
+            operation = (
+                (lambda: self.store.get_run(run_id))
+                if run.status in {
+                    RunStatus.WAITING,
+                    RunStatus.COMPLETED,
+                    RunStatus.CANCELLED,
+                    RunStatus.FAILED,
+                }
+                else (lambda: self._resume(run_id))
+            )
+            return operation, reservation
+        if job.kind == "discovery_retry":
+            retry_request = RetryDiscoveryRequest(
+                run_id=run_id,
+                providers=request["providers"],
+                max_results=request["max_results"],
+                query_texts=request.get("query_texts", ()),
+            )
+            return (
+                lambda: retry_discovery(
+                    self.store,
+                    self.artifact_root,
+                    run_id,
+                    providers=retry_request.providers,
+                    max_results=retry_request.max_results,
+                    query_texts=retry_request.query_texts,
+                ),
+                reservation,
+            )
+        reservation.release()
+        raise ValueError(f"unsupported recoverable Job kind: {job.kind}")
 
     @staticmethod
     def _public_error(exc: BaseException) -> dict[str, str]:

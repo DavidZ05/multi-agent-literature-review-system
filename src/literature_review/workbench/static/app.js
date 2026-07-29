@@ -9,6 +9,7 @@
       cancelRun: "Cancel run", deleteRun: "Delete run", newRun: "New discovery run",
       researchRuns: "Research runs",
       localStorage: "Local storage", database: "Database", artifacts: "Artifacts",
+      liveUpdates: "Live updates", streamConnected: "Connected", streamReconnecting: "Reconnecting",
       runtimeBackend: "Backend", runtimeModel: "Model",
       runtimeExecutor: "Current executor", runtimeError: "Last safe error",
       backend_deterministic: "Deterministic", backend_api: "API",
@@ -141,6 +142,7 @@
       cancelRun: "取消运行", deleteRun: "删除运行", newRun: "新建文献检索",
       researchRuns: "研究任务",
       localStorage: "本地存储", database: "数据库", artifacts: "产物目录",
+      liveUpdates: "实时更新", streamConnected: "已连接", streamReconnecting: "正在重连",
       runtimeBackend: "后端", runtimeModel: "模型",
       runtimeExecutor: "当前执行者", runtimeError: "最近安全错误",
       backend_deterministic: "确定性", backend_api: "API",
@@ -318,7 +320,10 @@
     stableFeedback: null,
     runReloadPromise: null,
     queuedRunReload: null,
-    runReloadGeneration: 0
+    runReloadGeneration: 0,
+    eventStream: null,
+    streamConnected: false,
+    streamRefreshTimer: null
   };
 
   const terminalRunStatuses = new Set(runStatuses.slice(4));
@@ -464,7 +469,55 @@
     });
     const toggle = byId("language-toggle");
     toggle.setAttribute("aria-label", state.language === "zh-CN" ? "Switch interface to English" : "切换界面为中文");
+    renderStreamState();
     renderAll();
+  }
+
+  function renderStreamState() {
+    const element = byId("stream-state");
+    if (!element) return;
+    element.textContent = t(state.streamConnected ? "streamConnected" : "streamReconnecting");
+    element.dataset.connected = String(state.streamConnected);
+  }
+
+  function scheduleStreamRefresh(event) {
+    if (!event || state.stopped) return;
+    if (event.event_type === "job.updated") {
+      const payload = event.payload || {};
+      if (payload.job_id && ["queued", "running"].includes(payload.status)) {
+        state.jobIds.add(payload.job_id);
+      }
+      if (payload.job_id && state.jobIds.has(payload.job_id)) scheduleJobPoll(0);
+    }
+    clearTimeout(state.streamRefreshTimer);
+    state.streamRefreshTimer = setTimeout(async () => {
+      await loadRuns({ preserveSelection: true, force: true });
+    }, 120);
+  }
+
+  function connectEventStream() {
+    if (state.stopped || typeof window.EventSource !== "function") {
+      renderStreamState();
+      return;
+    }
+    const stream = new EventSource("/api/stream");
+    state.eventStream = stream;
+    stream.addEventListener("open", () => {
+      if (state.eventStream !== stream) return;
+      state.streamConnected = true;
+      renderStreamState();
+    });
+    stream.addEventListener("change", (message) => {
+      if (state.eventStream !== stream) return;
+      try {
+        scheduleStreamRefresh(JSON.parse(message.data));
+      } catch (_) {}
+    });
+    stream.addEventListener("error", () => {
+      if (state.eventStream !== stream) return;
+      state.streamConnected = false;
+      renderStreamState();
+    });
   }
 
   class APIError extends Error {
@@ -1789,7 +1842,7 @@
       showFeedback(errorMessage(error), true, { background: true });
     } finally {
       state.pollingJobs = false;
-      scheduleJobPoll(1200);
+      scheduleJobPoll(state.streamConnected ? 10000 : 1200);
     }
   }
 
@@ -1802,7 +1855,7 @@
         await loadRunDetail(run.run_id, state.runGeneration, { quiet: true });
       }
       else scheduleRunPoll();
-    }, 2500);
+    }, state.streamConnected ? 15000 : 2500);
   }
 
   async function openEvents() {
@@ -1911,6 +1964,8 @@
       state.stopped = true;
       clearTimeout(state.jobTimer);
       clearTimeout(state.runTimer);
+      clearTimeout(state.streamRefreshTimer);
+      if (state.eventStream) state.eventStream.close();
     });
   }
 
@@ -1923,6 +1978,7 @@
     applyLanguage(state.language);
     await loadRuns({ preserveSelection: true, fallbackToFirst: true });
     await recoverActiveJobs();
+    connectEventStream();
   }
 
   initialize();

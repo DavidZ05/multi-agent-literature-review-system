@@ -12,8 +12,8 @@ Security fixes are accepted for the latest public version.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.7.3   | Yes       |
-| <= 0.7.2 | No       |
+| 0.8.0   | Yes       |
+| <= 0.7.3 | No       |
 
 ## Intended Deployment
 
@@ -36,6 +36,12 @@ applies a restrictive Content Security Policy, denies framing, disables response
 caching, and limits JSON request-body size. These controls reduce DNS-rebinding
 and local browser attacks; they do not provide user accounts, authorization
 between users, or protection for a public deployment.
+
+The read-only Server-Sent Events endpoint carries sanitized Job and workflow
+change metadata. Its cursor is a local monotonically increasing event ID; it
+does not stream prompts, API keys, paper text, or generated survey content.
+EventSource reconnects replay missed change notifications from SQLite, while
+all mutations continue to require the token and origin checks above.
 
 ## Reporting a Vulnerability
 

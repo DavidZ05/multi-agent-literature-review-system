@@ -8,4 +8,6 @@ dist/
 .DS_Store
 .worktrees/
 .review-workflow/
+node_modules/
+output/playwright/
 先修班-Final Project - 飞书云文档.pdf

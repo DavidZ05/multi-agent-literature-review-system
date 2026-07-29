@@ -20,12 +20,20 @@ class WorkflowJob:
     run_id: str | None = None
     result: dict[str, Any] | None = None
     error: dict[str, str] | None = None
+    request: dict[str, Any] | None = None
+    recovery_count: int = 0
     created_at: str = ""
     updated_at: str = ""
 
     def __post_init__(self) -> None:
         if self.status not in JOB_STATUSES:
             raise ValueError(f"unsupported job status: {self.status}")
+        if (
+            isinstance(self.recovery_count, bool)
+            or not isinstance(self.recovery_count, int)
+            or self.recovery_count < 0
+        ):
+            raise ValueError("recovery_count must be a nonnegative integer")
         if not self.created_at or not self.updated_at:
             now = utc_now_iso()
             object.__setattr__(self, "created_at", self.created_at or now)
@@ -43,6 +51,8 @@ class WorkflowJob:
             "equivalent_command": self.equivalent_command,
             "result": None if self.result is None else dict(self.result),
             "error": None if self.error is None else dict(self.error),
+            "request": None if self.request is None else dict(self.request),
+            "recovery_count": self.recovery_count,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -51,6 +61,7 @@ class WorkflowJob:
     def from_dict(cls, value: Mapping[str, Any]) -> WorkflowJob:
         result = value.get("result")
         error = value.get("error")
+        request = value.get("request")
         return cls(
             job_id=str(value["job_id"]),
             kind=str(value["kind"]),
@@ -59,6 +70,8 @@ class WorkflowJob:
             equivalent_command=str(value["equivalent_command"]),
             result=None if result is None else dict(result),
             error=None if error is None else dict(error),
+            request=None if request is None else dict(request),
+            recovery_count=int(value.get("recovery_count", 0)),
             created_at=str(value["created_at"]),
             updated_at=str(value["updated_at"]),
         )

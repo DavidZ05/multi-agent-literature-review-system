@@ -43,7 +43,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         self.store.initialize()
         with sqlite3.connect(self.path) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-        self.assertEqual(version, 6)
+        self.assertEqual(version, 7)
 
     def test_version_one_database_migrates_without_losing_data(self) -> None:
         legacy_path = Path(self.tmp.name) / "legacy.db"
@@ -99,7 +99,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             checkpoint,
         )
         with sqlite3.connect(legacy_path) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 6)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 7)
 
     def test_version_three_database_adds_durable_jobs(self) -> None:
         legacy_path = Path(self.tmp.name) / "version-three.db"
@@ -114,7 +114,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             table = connection.execute(
                 "SELECT name FROM sqlite_master WHERE name='workflow_jobs'"
             ).fetchone()
-        self.assertEqual(version, 6)
+        self.assertEqual(version, 7)
         self.assertEqual(table, ("workflow_jobs",))
 
     def test_version_four_database_adds_discovery_attempts(self) -> None:
@@ -130,7 +130,7 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             table = connection.execute(
                 "SELECT name FROM sqlite_master WHERE name='discovery_attempts'"
             ).fetchone()
-        self.assertEqual(version, 6)
+        self.assertEqual(version, 7)
         self.assertEqual(table, ("discovery_attempts",))
 
     def test_version_five_database_adds_evidence_audit_tables(self) -> None:
@@ -156,8 +156,49 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 )
             }
-        self.assertEqual(version, 6)
+        self.assertEqual(version, 7)
         self.assertTrue(expected <= tables)
+
+    def test_version_six_database_adds_replayable_jobs_and_event_feed(self) -> None:
+        legacy_path = Path(self.tmp.name) / "version-six.db"
+        legacy = SQLiteWorkflowStore(legacy_path)
+        legacy.initialize()
+        with sqlite3.connect(legacy_path) as connection:
+            connection.execute("PRAGMA user_version = 6")
+            connection.execute("DROP TABLE workbench_events")
+            connection.execute("ALTER TABLE workflow_jobs RENAME TO workflow_jobs_v7")
+            connection.executescript(
+                """
+                CREATE TABLE workflow_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    equivalent_command TEXT NOT NULL,
+                    run_id TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
+                    result_json TEXT,
+                    error_json TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                DROP TABLE workflow_jobs_v7;
+                """
+            )
+
+        legacy.initialize()
+
+        with sqlite3.connect(legacy_path) as connection:
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(workflow_jobs)")
+            }
+            event_table = connection.execute(
+                "SELECT name FROM sqlite_master WHERE name='workbench_events'"
+            ).fetchone()
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        self.assertEqual(version, 7)
+        self.assertIn("request_json", columns)
+        self.assertIn("recovery_count", columns)
+        self.assertEqual(event_table, ("workbench_events",))
 
     def test_discovery_attempts_round_trip_in_creation_order(self) -> None:
         self.store.create_run(self.run)
@@ -204,6 +245,8 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
             kind="start",
             status="queued",
             equivalent_command="literature-review start",
+            request={"topic": "Memory agents"},
+            recovery_count=1,
         )
         completed = WorkflowJob(
             job_id="job_completed",
@@ -216,6 +259,9 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         self.store.put_job(completed)
 
         self.assertEqual(self.store.get_job(queued.job_id), queued)
+        events = self.store.list_workbench_events(after_id=0)
+        self.assertEqual(events[0]["event_type"], "job.updated")
+        self.assertEqual(events[0]["payload"]["status"], "queued")
         self.assertEqual(self.store.interrupt_active_jobs(), 1)
 
         interrupted = self.store.get_job(queued.job_id)
@@ -223,6 +269,11 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
         self.assertEqual(interrupted.status, "interrupted")
         self.assertEqual(interrupted.error["type"], "backend_restarted")
         self.assertEqual(self.store.get_job(completed.job_id), completed)
+
+        self.assertEqual(self.store.prune_workbench_events(keep=1), 2)
+        retained = self.store.list_workbench_events(after_id=0)
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0]["payload"]["status"], "interrupted")
 
         self.store.delete_job(queued.job_id)
         self.assertIsNone(self.store.get_job(queued.job_id))
@@ -599,11 +650,11 @@ class SQLiteWorkflowStoreTests(unittest.TestCase):
     def test_future_schema_is_rejected_without_change(self) -> None:
         future = Path(self.tmp.name) / "future.db"
         with sqlite3.connect(future) as connection:
-            connection.execute("PRAGMA user_version = 7")
+            connection.execute("PRAGMA user_version = 8")
         with self.assertRaises(UnsupportedSchemaVersionError):
             SQLiteWorkflowStore(future).initialize()
         with sqlite3.connect(future) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 7)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 8)
 
 
 class LocalArtifactStoreTests(unittest.TestCase):

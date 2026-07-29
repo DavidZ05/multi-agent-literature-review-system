@@ -1,0 +1,11 @@
+{
+  "name": "multi-agent-literature-review-system-browser-tests",
+  "private": true,
+  "version": "0.8.0",
+  "scripts": {
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.1"
+  }
+}
