@@ -1,9 +1,11 @@
 {
   "name": "multi-agent-literature-review-system-browser-tests",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.8.1",
   "scripts": {
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:docs:browser": "playwright test --config playwright.docs.config.js",
+    "capture:site": "node tests/browser/capture_site_screenshot.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.1"

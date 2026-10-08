@@ -1,6 +1,6 @@
 # Multi-Agent Literature Review System
 
-[![CI](https://github.com/DavidZ05/multi-agent-literature-review-system/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidZ05/multi-agent-literature-review-system/actions/workflows/ci.yml)
+[![CI](https://github.com/DavidZ05/multi-agent-literature-review-system/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidZ05/multi-agent-literature-review-system/actions/workflows/ci.yml) [![Documentation](https://github.com/DavidZ05/multi-agent-literature-review-system/actions/workflows/docs.yml/badge.svg)](https://davidz05.github.io/multi-agent-literature-review-system/)
 
 A local-first, inspectable workflow for literature discovery, human corpus
 approval, multi-agent drafting and review, citation verification, optional PDF
@@ -240,6 +240,8 @@ examples.
 
 ## Documentation
 
+- [Public Documentation Website](https://davidz05.github.io/multi-agent-literature-review-system/)
+- [中文快速开始](https://davidz05.github.io/multi-agent-literature-review-system/zh/quick-start/)
 - [Documentation Map](docs/README.md)
 - [Runtime Configuration](docs/configuration.md)
 - [Literature Discovery and Approval](docs/discovery.md)
@@ -251,15 +253,12 @@ examples.
 - [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 
-Runtime API-agent prompts live in `src/literature_review/prompts/`. The root
-`prompts/` directory is the archived course-facing role specification and does
-not affect runtime behavior.
-
 ## Project Structure
 
 ```text
 data/                         verified seed corpus
 docs/                         maintained guides and course archive
+site/                         GitHub Pages documentation source
 outputs/                      default one-shot artifacts
 prompts/                      archived course role specifications
 src/literature_review/        canonical package

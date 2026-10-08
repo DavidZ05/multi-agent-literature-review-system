@@ -339,6 +339,25 @@ class APIExpertAgentTests(unittest.TestCase):
         self.assertEqual(report["must_fix"], [])
         self.assertIn("Tighten the prose.", report["should_fix"])
 
+    def test_synthesizer_rejects_revision_without_a_concrete_fix(self) -> None:
+        client = FakeClient(
+            [
+                {
+                    "status": "revise",
+                    "blocking_agents": [],
+                    "must_fix": [],
+                    "should_fix": [],
+                    "iteration_stop_rule": "Stop when no review is blocking.",
+                }
+            ]
+        )
+        agent = ReviewSynthesizerAgent(api_runtime(), api_client=client)
+
+        with self.assertRaises(APIResponseError) as raised:
+            agent.synthesize([])
+
+        self.assertEqual(raised.exception.code, "invalid_agent_output")
+
 
 class APIReflectionAgentTests(unittest.TestCase):
     def test_reflection_api_preserves_advisory_report_contract(self) -> None:

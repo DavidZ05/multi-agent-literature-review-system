@@ -7,6 +7,7 @@ const browserUse = process.env.PLAYWRIGHT_CHANNEL
 
 module.exports = defineConfig({
   testDir: "./tests/browser",
+  testMatch: "workbench.spec.js",
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,

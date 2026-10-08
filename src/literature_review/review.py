@@ -358,7 +358,12 @@ class ReviewSynthesizerAgent(RuntimeAwareAgent):
             model_blocking_agents = _string_list(response, "blocking_agents")
             model_status = _status(response)
             if model_status == "revise" and not (blocking_reviews or model_must_fix):
-                raise _invalid_output("must_fix")
+                raise APIResponseError(
+                    "Model-backed review agent returned revise without a concrete "
+                    "must_fix item.",
+                    code="invalid_agent_output",
+                    retryable=False,
+                )
             revision_required = bool(blocking_reviews) or model_status == "revise"
             blocking_agents = _dedupe(
                 [review["agent"] for review in blocking_reviews]
@@ -393,8 +398,8 @@ class ReviewSynthesizerAgent(RuntimeAwareAgent):
             for review in reviews
             if review.get("status") in self.blocking_statuses
         ]
-        must_fix = []
-        should_fix = []
+        must_fix: list[str] = []
+        should_fix: list[str] = []
         for review in reviews:
             target = must_fix if review.get("status") in self.blocking_statuses else should_fix
             for recommendation in review.get("recommendations", []):

@@ -795,19 +795,21 @@ class WorkflowJobManager:
                 reservation = self._activity.reserve_start()
                 prepared = ResearchRun.create(start_request.topic)
                 prepared = replace(prepared, run_id=prepared_run_id)
-                operation = lambda: _start_prepared_run(
-                    self._engine_builder(
-                        self.store,
-                        self.artifact_root,
-                        discovery_enabled=start_request.discovery_enabled,
-                        full_text_enabled=start_request.full_text_enabled,
-                        providers=start_request.providers,
-                        max_results=start_request.max_results,
-                        query_texts=start_request.query_texts,
-                    ),
-                    start_request,
-                    prepared,
-                )
+
+                def operation() -> ResearchRun:
+                    return _start_prepared_run(
+                        self._engine_builder(
+                            self.store,
+                            self.artifact_root,
+                            discovery_enabled=start_request.discovery_enabled,
+                            full_text_enabled=start_request.full_text_enabled,
+                            providers=start_request.providers,
+                            max_results=start_request.max_results,
+                            query_texts=start_request.query_texts,
+                        ),
+                        start_request,
+                        prepared,
+                    )
             else:
                 reservation = self._activity.reserve_resume(prepared_run_id)
                 job.run_id = prepared_run_id

@@ -1,6 +1,6 @@
 # Development Status and Roadmap
 
-This document describes the maintained product as of v0.8.0. The original
+This document describes the maintained product as of v0.8.1. The original
 course submission is archived under `docs/course-project/`.
 
 ## Implemented
@@ -33,6 +33,8 @@ course submission is archived under `docs/course-project/`.
   SQLite event feed consumed through Server-Sent Events.
 - macOS/Linux packaging and CI across Python 3.11 and 3.12, plus real Chromium
   Workbench tests for completion, refresh recovery, selection, and localization.
+- Public GitHub Pages documentation with strict builds, an English core guide,
+  a Chinese quick start, and an explicit static-site security boundary.
 
 ## Next Priorities
 

@@ -12,7 +12,7 @@ from src.literature_review.documents import (
     ParsedDocument,
     ParsedPage,
 )
-from src.literature_review.models import ResearchRun, WorkflowStage, utc_now_iso
+from src.literature_review.models import WorkflowStage, utc_now_iso
 from src.literature_review.storage import LocalArtifactStore, SQLiteWorkflowStore
 from src.literature_review.verification import (
     ClaimVerification,

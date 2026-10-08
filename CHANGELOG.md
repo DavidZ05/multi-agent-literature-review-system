@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## 0.8.1 - 2026-10-08
+
+### Added
+
+- A public MkDocs Material documentation site with an English product and
+  operations guide plus a Chinese quick-start page.
+- A strict GitHub Pages build and deployment workflow using the official Pages
+  actions.
+- Public-site contract tests for navigation, release consistency, deployment
+  permissions, and local-path or credential hygiene.
+- A privacy-safe Workbench overview captured from deterministic test data.
+
+### Changed
+
+- Link the README and GitHub About surface to the public documentation site.
+- Document the static website boundary separately from the loopback-only local
+  Workbench.
+
+### Fixed
+
+- Return a structured, non-retryable API response error when a model-backed
+  Review Synthesizer requests revision without supplying a concrete
+  `must_fix` item, instead of raising an internal `NameError`.
+
 ## 0.8.0 - 2026-07-28
 
 ### Added

@@ -10,4 +10,5 @@ dist/
 .review-workflow/
 node_modules/
 output/playwright/
+output/site/
 先修班-Final Project - 飞书云文档.pdf

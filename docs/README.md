@@ -2,6 +2,11 @@
 
 ## Current Documentation
 
+- [`../site/index.md`](../site/index.md): source for the public documentation
+  website, with focused guides for setup, workflow, reliability, configuration,
+  plugins, security, and releases.
+- [`website_design.md`](website_design.md): information architecture, visual
+  direction, deployment model, and acceptance criteria for the public site.
 - [`../README.md`](../README.md): installation, CLI, Workbench, API, discovery,
   evidence verification, plugins, and troubleshooting.
 - [`configuration.md`](configuration.md): deterministic/API modes, per-agent

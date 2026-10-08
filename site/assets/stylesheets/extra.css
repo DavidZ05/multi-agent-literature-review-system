@@ -1,0 +1,199 @@
+/* Hallmark · page: documentation site · genre: modern-minimal · theme: Cobalt
+ * audience: open-source researchers and developers
+ * use: understand, install, and evaluate a local research workflow
+ * contrast: reviewed for text, controls, focus, and muted content
+ * pre-emit critique: P5 H4 E4 S5 R5 V4
+ */
+:root {
+  --lr-accent: #176b54;
+  --lr-accent-strong: #0f5f49;
+  --lr-accent-soft: #e7f3ef;
+  --lr-ink: #172033;
+  --lr-muted: #687386;
+  --lr-border: #dfe3ea;
+  --lr-paper: #ffffff;
+  --lr-canvas: #f4f6f8;
+  --lr-side: #202838;
+  --lr-focus: #176b54;
+  --lr-font-body: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --lr-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --md-primary-fg-color: var(--lr-side);
+  --md-primary-fg-color--light: #313c50;
+  --md-primary-fg-color--dark: #161c28;
+  --md-accent-fg-color: var(--lr-accent);
+  --md-typeset-a-color: var(--lr-accent-strong);
+}
+
+html,
+body {
+  overflow-x: clip;
+}
+
+body,
+input {
+  font-family: var(--lr-font-body);
+}
+
+.md-header,
+.md-tabs {
+  background: var(--lr-side);
+}
+
+.md-header__title,
+.md-tabs__link,
+.md-nav__link,
+.md-button,
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-style: normal;
+  letter-spacing: 0;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  color: var(--lr-ink);
+  font-weight: 720;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.md-typeset code,
+.md-typeset pre {
+  font-family: var(--lr-font-mono);
+}
+
+.md-typeset .md-button {
+  border-radius: 6px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.md-typeset .md-button--primary {
+  border-color: var(--lr-accent);
+  background: var(--lr-accent);
+}
+
+.md-typeset .md-button--primary:hover,
+.md-typeset .md-button--primary:focus-visible {
+  border-color: var(--lr-accent-strong);
+  background: var(--lr-accent-strong);
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--lr-focus);
+  outline-offset: 3px;
+}
+
+.lr-hero {
+  padding: clamp(2.25rem, 7vw, 5.5rem) 0 2rem;
+  border-bottom: 1px solid var(--lr-border);
+}
+
+.lr-hero h1 {
+  max-width: 18ch;
+  margin: 0 0 1rem;
+  color: var(--lr-ink);
+  font-size: clamp(2.2rem, 6vw, 4.5rem);
+  line-height: 1.02;
+}
+
+.lr-hero > p:not(.lr-kicker):not(.lr-release) {
+  max-width: 46rem;
+  margin: 0;
+  color: var(--lr-muted);
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  line-height: 1.65;
+}
+
+.lr-kicker {
+  margin: 0 0 1rem;
+  color: var(--lr-accent-strong);
+  font-size: .72rem;
+  font-weight: 800;
+}
+
+.lr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .65rem;
+  margin: 1.5rem 0 0;
+}
+
+.lr-release {
+  margin: 1.5rem 0 0;
+  color: var(--lr-muted);
+  font-size: .8rem;
+}
+
+.lr-workbench-shot {
+  margin: 2.5rem 0 3.5rem;
+}
+
+.lr-workbench-shot img {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--lr-border);
+  border-radius: 8px;
+  background: var(--lr-canvas);
+  box-shadow: 0 18px 48px rgb(23 32 51 / 12%);
+}
+
+.lr-workbench-shot figcaption {
+  margin-top: .65rem;
+  color: var(--lr-muted);
+  font-size: .78rem;
+}
+
+.lr-principles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 1.75rem 0 3rem;
+  border: 1px solid var(--lr-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--lr-border);
+}
+
+.lr-principles > div {
+  min-width: 0;
+  padding: 1.2rem;
+  background: var(--lr-paper);
+}
+
+.lr-principles h3 {
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.lr-principles p {
+  margin-bottom: 0;
+  color: var(--lr-muted);
+  font-size: .88rem;
+}
+
+@media screen and (max-width: 768px) {
+  .lr-principles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lr-hero {
+    padding-top: 2.25rem;
+  }
+}
+
+@media screen and (max-width: 414px) {
+  .lr-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lr-actions .md-button {
+    width: 100%;
+    text-align: center;
+  }
+}

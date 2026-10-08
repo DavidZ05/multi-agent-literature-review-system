@@ -65,8 +65,8 @@ class PersistentCLITests(unittest.TestCase):
 
     def test_cli_entry_points_report_package_version(self) -> None:
         for entry_point, expected in (
-            (main, "literature-review 0.8.0"),
-            (cli.workbench_main, "literature-review-workbench 0.8.0"),
+            (main, "literature-review 0.8.1"),
+            (cli.workbench_main, "literature-review-workbench 0.8.1"),
         ):
             with self.subTest(expected=expected):
                 stdout = io.StringIO()

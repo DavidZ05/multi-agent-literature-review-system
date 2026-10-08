@@ -1,0 +1,70 @@
+site_name: Multi-Agent Literature Review System
+site_description: A local-first, auditable workflow for evidence-grounded literature reviews.
+site_url: https://davidz05.github.io/multi-agent-literature-review-system/
+repo_url: https://github.com/DavidZ05/multi-agent-literature-review-system
+repo_name: DavidZ05/multi-agent-literature-review-system
+docs_dir: site
+site_dir: output/site
+
+theme:
+  name: material
+  language: en
+  favicon: assets/images/favicon.svg
+  icon:
+    logo: material/book-open-page-variant-outline
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: custom
+      accent: custom
+
+nav:
+  - Overview: index.md
+  - Get started:
+      - Quick start: getting-started.md
+      - 中文快速开始: zh/quick-start.md
+      - Configuration: configuration.md
+  - Understand:
+      - Workflow: workflow.md
+      - Reliability and audit: reliability.md
+      - Security model: security.md
+  - Extend:
+      - Plugins: plugins.md
+      - Roadmap: roadmap.md
+  - Release notes:
+      - v0.8.1: releases/v0.8.1.md
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - toc:
+      permalink: true
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/DavidZ05/multi-agent-literature-review-system
+
+copyright: Copyright &copy; 2026 DavidZ05. Documentation for the local-first literature review workflow.
